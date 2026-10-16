@@ -1,0 +1,531 @@
+import asyncio
+from aiogram import Router, F
+from aiogram.types import Message, ChatMemberUpdated, ChatPermissions
+from aiogram.filters import ChatMemberUpdatedFilter, JOIN_TRANSITION, LEAVE_TRANSITION
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, and_
+from bot.database.models import (
+    Group, GroupMember, GroupSettings, WelcomeSettings, GoodbyeSettings,
+    SecuritySettings, CaptchaChallenge, GroupStats, User, GroupFilter, GroupBlocklist
+)
+from bot.services.security_service import (
+    check_message_violations, is_raid_detected, create_captcha_challenge
+)
+from bot.services.moderation_service import mute_user, ban_user, kick_user, warn_user, log_action
+from bot.services.user_service import add_xp
+from bot.middlewares.i18n import get_text
+from bot.utils.helpers import safe_username, mention_user
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from datetime import datetime, timezone
+import structlog
+
+logger = structlog.get_logger()
+router = Router()
+_recent_welcome_keys = {}
+
+
+@router.my_chat_member()
+async def on_bot_membership_changed(event: ChatMemberUpdated, db_session: AsyncSession = None, **kwargs):
+    """Track whether ALEXA is still in each group and request required permissions."""
+    chat = event.chat
+    if chat.type == "private":
+        # Telegram reports a blocked/removed bot as kicked in the user's private chat.
+        if db_session:
+            user = await db_session.get(User, chat.id)
+            new_status_private = str(getattr(event.new_chat_member.status, "value", event.new_chat_member.status))
+            if user and new_status_private in ("kicked", "left"):
+                user.dm_started = False
+        return
+    if chat.type not in ("group", "supergroup"):
+        return
+
+    old_status = str(getattr(event.old_chat_member.status, "value", event.old_chat_member.status))
+    new_member = event.new_chat_member
+    new_status = str(getattr(new_member.status, "value", new_member.status))
+    was_added = old_status in ("left", "kicked") and new_status in ("member", "administrator")
+    was_promoted = old_status != "administrator" and new_status == "administrator"
+    if db_session:
+        try:
+            group = await db_session.get(Group, chat.id)
+            if new_status in ("left", "kicked"):
+                if group:
+                    group.is_active = False
+                    await db_session.commit()
+                return
+            if new_status in ("member", "administrator"):
+                if not group:
+                    group = Group(id=chat.id, title=chat.title or "Unknown", username=chat.username, type=chat.type, is_active=True)
+                    db_session.add(group)
+                else:
+                    group.title = chat.title or group.title
+                    group.username = chat.username
+                    group.is_active = True
+                if new_status in ("member", "administrator"):
+                    actor = await db_session.get(User, event.from_user.id)
+                    if actor:
+                        actor.has_added_bot_to_group = True
+                await db_session.commit()
+        except Exception as exc:
+            logger.warning("Could not update group membership status", group_id=chat.id, error=str(exc))
+            try:
+                await db_session.rollback()
+            except Exception:
+                pass
+    if not (was_added or was_promoted):
+        return
+
+    if new_status != "administrator":
+        await event.bot.send_message(
+            chat.id,
+            "👋 Thanks for adding ALEXA to this group!\n\n"
+            "To enable moderation and protection, please promote ALEXA to an administrator and grant these permissions:\n"
+            "• Delete messages — required for content locks and cleanup\n"
+            "• Restrict members — required to mute members\n"
+            "• Ban users — required for ban/kick moderation\n"
+            "• Invite users — needed for invite-link features\n"
+            "• Pin messages — needed only if you want ALEXA to pin messages\n\n"
+            "A group owner or administrator can change these rights in the group's Administrators settings."
+        )
+        return
+
+    missing = []
+    if not getattr(new_member, "can_delete_messages", False):
+        missing.append("Delete messages")
+    if not getattr(new_member, "can_restrict_members", False):
+        missing.append("Restrict members (mute/ban)")
+    if not getattr(new_member, "can_invite_users", False):
+        missing.append("Invite users (invite-link features)")
+    if missing:
+        await event.bot.send_message(
+            chat.id,
+            "⚠️ ALEXA is now an administrator, but some permissions are missing:\n"
+            + "\n".join(f"• {item}" for item in missing)
+            + "\n\nPlease update ALEXA's admin rights in Group Settings → Administrators."
+            + "\nPin messages is optional and only needed for pinning features."
+        )
+    else:
+        optional = "\nPin messages is optional and only needed for pinning features."
+        if not getattr(new_member, "can_pin_messages", False):
+            await event.bot.send_message(
+                chat.id,
+                "✅ Thanks! ALEXA has the core admin permissions needed for moderation and protection."
+                + optional,
+            )
+        else:
+            await event.bot.send_message(
+                chat.id,
+                "✅ Thanks! ALEXA has the core admin permissions needed for moderation and protection."
+            )
+
+
+async def _send_welcome_message(bot, db_session, chat, user):
+    """Send the configured welcome, or a default welcome when none is set."""
+    now = asyncio.get_running_loop().time()
+    key = (chat.id, user.id)
+    last = _recent_welcome_keys.get(key, 0)
+    if now - last < 20:
+        return
+    _recent_welcome_keys[key] = now
+    # Bound the cache so long-running bots do not accumulate every join forever.
+    if len(_recent_welcome_keys) > 2000:
+        for old_key, stamp in list(_recent_welcome_keys.items()):
+            if now - stamp > 60:
+                _recent_welcome_keys.pop(old_key, None)
+    ws = await db_session.scalar(select(WelcomeSettings).where(WelcomeSettings.group_id == chat.id))
+    if ws and not ws.enabled:
+        return
+    welcome_text = (ws.message if ws and ws.message else None) or "👋 Welcome {name} to {group}!"
+    replacements = {
+        "{name}": user.first_name or "User",
+        "{username}": f"@{user.username}" if user.username else (user.first_name or "User"),
+        "{id}": str(user.id),
+        "{group}": chat.title or "Group",
+    }
+    for key, val in replacements.items():
+        welcome_text = welcome_text.replace(key, val)
+    try:
+        await bot.send_message(chat.id, welcome_text, parse_mode="HTML")
+    except Exception as exc:
+        logger.warning("Welcome message failed", chat_id=chat.id, user_id=user.id, error=str(exc))
+
+
+@router.chat_member(ChatMemberUpdatedFilter(JOIN_TRANSITION))
+async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kwargs):
+    user = event.new_chat_member.user
+    chat = event.chat
+    from bot.config import settings
+    if user.id == settings.effective_owner_id:
+        return
+    group = await db_session.get(Group, chat.id)
+
+    lang = (group.language if group else None) or "en"
+    _ = lambda key, **kw: get_text(lang, key, **kw)
+    security = await db_session.scalar(select(SecuritySettings).where(SecuritySettings.group_id == chat.id))
+
+    if user.is_bot:
+        if security and security.anti_bot:
+            try:
+                await event.bot.ban_chat_member(chat.id, user.id)
+                await event.bot.unban_chat_member(chat.id, user.id)
+                logger.info("Bot account rejected by anti-bot", chat_id=chat.id, user_id=user.id)
+            except Exception as exc:
+                logger.warning("Anti-bot could not remove joining bot", chat_id=chat.id, user_id=user.id, error=str(exc))
+        return
+
+    if security and (security.anti_raid or security.anti_mass_join):
+        redis = kwargs.get("redis_client") or getattr(event.bot, "_redis_client", None)
+        from bot.services.security_service import is_raid_detected
+        raid = await is_raid_detected(
+            redis,
+            chat.id,
+            threshold=security.anti_raid_threshold or 10,
+            window=security.anti_raid_window or 60,
+        )
+        if raid:
+            logger.warning("Raid/mass join detected, rejecting join", chat_id=chat.id, user_id=user.id)
+            try:
+                await event.bot.ban_chat_member(chat.id, user.id)
+                await event.bot.unban_chat_member(chat.id, user.id)
+            except Exception as exc:
+                logger.warning("Raid member removal failed", chat_id=chat.id, user_id=user.id, error=str(exc))
+            return
+
+    await _send_welcome_message(event.bot, db_session, chat, user)
+
+    if security and security.captcha_enabled:
+        await _handle_captcha(event, db_session, security, user, chat, _)
+        return
+
+    gs = await db_session.scalar(select(GroupStats).where(GroupStats.group_id == chat.id))
+    if gs:
+        gs.total_joins = (gs.total_joins or 0) + 1
+
+    gs_settings = await db_session.scalar(select(GroupSettings).where(GroupSettings.group_id == chat.id))
+    if gs_settings and gs_settings.log_join and gs_settings.log_channel_id:
+        try:
+            name = mention_user(user.id, safe_username(user))
+            await event.bot.send_message(
+                gs_settings.log_channel_id,
+                f"📥 {name} joined {chat.title}",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+
+
+async def _handle_captcha(event, db_session, security, user, chat, _):
+    # Only expose captcha types with an implemented verification path. Older
+    # saved "text" values are normalized to the button challenge.
+    captcha_type = security.captcha_type if security.captcha_type in {"math", "button"} else "button"
+    challenge = await create_captcha_challenge(
+        db_session, chat.id, user.id, captcha_type, security.captcha_timeout or 60
+    )
+    try:
+        await mute_user(event.bot, db_session, chat.id, user.id, event.bot.id, 300, "Pending captcha verification")
+    except Exception:
+        pass
+
+    if captcha_type == "math":
+        from bot.services.security_service import generate_math_question
+        import random
+        question, math_answer = generate_math_question()
+        challenge.answer = math_answer
+        text = _("captcha_question").format(question=question)
+        builder = InlineKeyboardBuilder()
+        correct_val = int(math_answer)
+        options = [correct_val]
+        while len(options) < 4:
+            offset = random.randint(-5, 5)
+            candidate = correct_val + offset
+            if candidate != correct_val and candidate not in options and candidate > 0:
+                options.append(candidate)
+        random.shuffle(options)
+        for opt in options:
+            builder.button(text=str(opt), callback_data=f"captcha_verify:{chat.id}:{user.id}:{opt}")
+        builder.adjust(2)
+        try:
+            msg = await event.bot.send_message(chat.id, text, parse_mode="HTML", reply_markup=builder.as_markup())
+            challenge.message_id = msg.message_id
+        except Exception as e:
+            logger.error("Captcha message failed", error=str(e))
+    else:
+        builder = InlineKeyboardBuilder()
+        builder.button(text=_("btn_verify"), callback_data=f"captcha_verify:{chat.id}:{user.id}:button")
+        try:
+            name = mention_user(user.id, safe_username(user))
+            text = f"{name}, {_('verification_required')}"
+            msg = await event.bot.send_message(chat.id, text, parse_mode="HTML", reply_markup=builder.as_markup())
+            challenge.message_id = msg.message_id
+        except Exception as e:
+            logger.error("Captcha message failed", error=str(e))
+
+
+@router.callback_query(F.data.startswith("captcha_verify:"))
+async def captcha_verify(callback, db_session: AsyncSession, **kwargs):
+    parts = callback.data.split(":")
+    if len(parts) < 4:
+        return
+    group_id = int(parts[1])
+    user_id = int(parts[2])
+    answer = parts[3]
+
+    if callback.from_user.id != user_id:
+        await callback.answer("This captcha is not for you!", show_alert=True)
+        return
+
+    from bot.services.security_service import verify_captcha
+    success = await verify_captcha(db_session, group_id, user_id, answer)
+
+    group = await db_session.get(Group, group_id)
+    lang = group.language if group else "en"
+    _ = lambda key, **kw: get_text(lang, key, **kw)
+
+    if success:
+        try:
+            from bot.services.moderation_service import FULL_PERMISSIONS
+            await callback.bot.restrict_chat_member(
+                chat_id=group_id,
+                user_id=user_id,
+                permissions=FULL_PERMISSIONS,
+            )
+        except Exception:
+            pass
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.answer(_("verification_success"), show_alert=True)
+    else:
+        try:
+            await callback.bot.ban_chat_member(chat_id=group_id, user_id=user_id)
+            await callback.bot.unban_chat_member(chat_id=group_id, user_id=user_id)
+        except Exception:
+            pass
+        await callback.answer(_("verification_failed"), show_alert=True)
+
+
+@router.chat_member(ChatMemberUpdatedFilter(LEAVE_TRANSITION))
+async def on_member_left(event: ChatMemberUpdated, db_session: AsyncSession, **kwargs):
+    user = event.old_chat_member.user
+    chat = event.chat
+    if user.is_bot:
+        return
+
+    gs = await db_session.scalar(select(GroupStats).where(GroupStats.group_id == chat.id))
+    if gs:
+        gs.total_leaves = (gs.total_leaves or 0) + 1
+
+    goodbye = await db_session.scalar(select(GoodbyeSettings).where(GoodbyeSettings.group_id == chat.id))
+    if goodbye and goodbye.enabled and goodbye.message:
+        goodbye_text = goodbye.message
+        replacements = {
+            "{name}": user.first_name or "User",
+            "{username}": f"@{user.username}" if user.username else (user.first_name or "User"),
+            "{id}": str(user.id),
+            "{group}": chat.title or "Group",
+        }
+        for key, value in replacements.items():
+            goodbye_text = goodbye_text.replace(key, value)
+        try:
+            await event.bot.send_message(chat.id, goodbye_text, parse_mode="HTML")
+        except Exception as exc:
+            logger.warning("Goodbye message failed", error=str(exc))
+
+    group = await db_session.get(Group, chat.id)
+    if not group:
+        return
+    security = await db_session.scalar(select(SecuritySettings).where(SecuritySettings.group_id == chat.id))
+    if security and security.anti_mass_leave:
+        from bot.services.security_service import record_member_leave
+        if record_member_leave(chat.id, security.anti_raid_threshold or 10, security.anti_raid_window or 60):
+            security.emergency_mode = True
+            logger.warning("Mass leave detected; emergency lockdown enabled", chat_id=chat.id)
+    gs_settings = await db_session.scalar(select(GroupSettings).where(GroupSettings.group_id == chat.id))
+    if gs_settings and gs_settings.log_leave and gs_settings.log_channel_id:
+        try:
+            name = safe_username(user)
+            await event.bot.send_message(
+                gs_settings.log_channel_id,
+                f"📤 {name} left {chat.title}",
+            )
+        except Exception:
+            pass
+
+
+@router.message(F.chat.type.in_({"group", "supergroup"}), F.new_chat_members)
+async def group_service_message_welcome(message: Message, db_session: AsyncSession, **kwargs):
+    """Fallback for Telegram service messages when chat_member updates are absent."""
+    for joined_user in message.new_chat_members or []:
+        if joined_user.is_bot:
+            continue
+        await _send_welcome_message(message.bot, db_session, message.chat, joined_user)
+
+
+@router.message(F.chat.type.in_({"group", "supergroup"}))
+async def group_message_handler(message: Message, db_session: AsyncSession, db_user=None, db_group=None, group_security=None, _=None, **kwargs):
+    if not db_group or not group_security:
+        return
+    # Bot accounts are not persisted as regular users by DatabaseMiddleware.
+    # Still enforce the explicit bot-message lock before returning.
+    if message.from_user and message.from_user.is_bot:
+        if group_security.lock_bots:
+            try:
+                await message.delete()
+            except Exception as exc:
+                logger.debug("Could not delete bot message under bot lock", error=str(exc))
+        return
+    # Do not return early when a regular user record is missing: content locks
+    # must still be enforced for every incoming group message.
+
+    # Persistent keyword blocklist and auto-reply filters configured by group admins.
+    text_content = (message.text or message.caption or "").lower()
+    if text_content:
+        blocked_rows = (await db_session.execute(select(GroupBlocklist).where(GroupBlocklist.group_id == db_group.id))).scalars().all()
+        if any(row.value and row.value.lower() in text_content for row in blocked_rows):
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            return
+        filter_rows = (await db_session.execute(select(GroupFilter).where(GroupFilter.group_id == db_group.id))).scalars().all()
+        for filter_row in filter_rows:
+            target_id = getattr(filter_row, "target_user_id", None)
+            target_username = (getattr(filter_row, "target_username", None) or "").lstrip("@").lower()
+            target_matches = (
+                (target_id is None and not target_username)
+                or (message.from_user and target_id is not None and target_id == message.from_user.id)
+                or (message.from_user and target_username and (message.from_user.username or "").lower() == target_username)
+            )
+            if filter_row.keyword and filter_row.keyword.lower() in text_content and target_matches:
+                try:
+                    if getattr(filter_row, "response_type", "text") == "sticker":
+                        await message.answer_sticker(filter_row.response)
+                    else:
+                        await message.answer(filter_row.response, parse_mode=None)
+                except Exception as exc:
+                    logger.warning("Group filter response failed", error=str(exc), group_id=db_group.id)
+                break
+
+    approved_sticker_user = False
+    if db_user:
+        member_row = await db_session.scalar(select(GroupMember).where(
+            GroupMember.group_id == db_group.id, GroupMember.user_id == db_user.id
+        ))
+        approved_sticker_user = bool(member_row and member_row.approved_sticker)
+    violations = await check_message_violations(message, group_security, approved_sticker_user=approved_sticker_user)
+    if violations:
+        # A content lock means the content type is prohibited; delete it rather
+        # than applying a configurable spam punishment such as mute/ban.
+        if any(reason.startswith("locked_") for reason in violations):
+            action = "delete"
+        elif not db_user:
+            # Without a persisted user record, safely delete the violating message
+            # rather than attempting warn/mute/ban actions that require a DB user.
+            action = "delete"
+        else:
+            action = (group_security.flood_action if "flood" in violations else group_security.spam_action) or "delete"
+        if action == "delete":
+            try:
+                await message.delete()
+            except Exception:
+                pass
+        elif action == "warn":
+            gs = await db_session.scalar(select(GroupSettings).where(GroupSettings.group_id == db_group.id))
+            max_warns = gs.max_warns if gs else 3
+            count, reached = await warn_user(db_session, db_group.id, db_user.id, message.bot.id, violations[0], max_warns)
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            if reached:
+                strike_action = (gs.warn_action if gs else "mute") or "mute"
+                if strike_action == "mute":
+                    await mute_user(message.bot, db_session, db_group.id, db_user.id, message.bot.id, 3600, "Warning limit reached")
+                elif strike_action == "ban":
+                    await ban_user(message.bot, db_session, db_group.id, db_user.id, message.bot.id, "Warning limit reached")
+                elif strike_action == "kick":
+                    await kick_user(message.bot, db_session, db_group.id, db_user.id, message.bot.id, "Warning limit reached")
+        elif action in ("mute", "ban", "kick"):
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            if action == "mute":
+                await mute_user(message.bot, db_session, db_group.id, db_user.id, message.bot.id, 3600, violations[0])
+            elif action == "ban":
+                await ban_user(message.bot, db_session, db_group.id, db_user.id, message.bot.id, violations[0])
+            elif action == "kick":
+                await kick_user(message.bot, db_session, db_group.id, db_user.id, message.bot.id, violations[0])
+        return
+
+    # User-dependent activity/XP tracking below needs a persisted user row.
+    if not db_user:
+        return
+
+    flood_detected = kwargs.get("flood_detected", False)
+    if flood_detected:
+        action = group_security.flood_action or "mute"
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        if action == "mute":
+            await mute_user(message.bot, db_session, db_group.id, db_user.id, message.bot.id, 300, "Flood")
+        elif action == "ban":
+            await ban_user(message.bot, db_session, db_group.id, db_user.id, message.bot.id, "Flood")
+        elif action == "kick":
+            await kick_user(message.bot, db_session, db_group.id, db_user.id, message.bot.id, "Flood")
+        elif action == "warn":
+            gs = await db_session.scalar(select(GroupSettings).where(GroupSettings.group_id == db_group.id))
+            max_warns = gs.max_warns if gs else 3
+            count, reached = await warn_user(db_session, db_group.id, db_user.id, message.bot.id, "Flood", max_warns)
+            if reached:
+                strike_action = (gs.warn_action if gs else "mute") or "mute"
+                if strike_action == "mute": await mute_user(message.bot, db_session, db_group.id, db_user.id, message.bot.id, 3600, "Warning limit reached")
+                elif strike_action == "ban": await ban_user(message.bot, db_session, db_group.id, db_user.id, message.bot.id, "Warning limit reached")
+                elif strike_action == "kick": await kick_user(message.bot, db_session, db_group.id, db_user.id, message.bot.id, "Warning limit reached")
+        return
+
+    ws_autodel = await db_session.scalar(select(WelcomeSettings).where(WelcomeSettings.group_id == db_group.id))
+    if ws_autodel and (ws_autodel.delete_after or 0) > 0:
+        async def _delete_later(bot, chat_id, message_id, delay):
+            await asyncio.sleep(delay)
+            try:
+                await bot.delete_message(chat_id, message_id)
+            except Exception:
+                pass
+        asyncio.create_task(_delete_later(message.bot, message.chat.id, message.message_id, ws_autodel.delete_after))
+
+    from sqlalchemy import and_
+    member = await db_session.scalar(
+        select(GroupMember).where(
+            and_(GroupMember.group_id == db_group.id, GroupMember.user_id == db_user.id)
+        )
+    )
+    if member:
+        member.message_count = (member.message_count or 0) + 1
+        from datetime import datetime, timezone
+        member.last_activity = datetime.now(timezone.utc)
+
+    gs_settings = await db_session.scalar(select(GroupSettings).where(GroupSettings.group_id == db_group.id))
+    if gs_settings and gs_settings.xp_enabled:
+        from bot.config import settings
+        _, _, leveled_up = await add_xp(db_session, db_user.id, settings.ACTIVITY_XP_PER_MSG)
+        if leveled_up:
+            from bot.services.user_service import get_or_create_economy
+            eco = await get_or_create_economy(db_session, db_user.id)
+            try:
+                name = mention_user(db_user.id, safe_username(db_user))
+                await message.answer(
+                    _("level_up").format(name=name, level=eco.level),
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
+    gs_stats = await db_session.scalar(select(GroupStats).where(GroupStats.group_id == db_group.id))
+    if not gs_stats:
+        gs_stats = GroupStats(group_id=db_group.id, total_messages=1)
+        db_session.add(gs_stats)
+    else:
+        gs_stats.total_messages = (gs_stats.total_messages or 0) + 1

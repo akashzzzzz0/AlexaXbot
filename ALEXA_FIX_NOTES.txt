@@ -1,0 +1,44 @@
+ALEXA / Guardian X - build notes
+
+Included:
+- Complete project source, handlers, keyboards, middleware, models, migrations, locales, and tests.
+- Content locks for text, links, photos, videos, GIFs, audio, voice, documents, polls, games, bots, forwards, contacts, locations, stickers, inline buttons, mentions, and hashtags.
+- /lock all and /unlock all update every supported lock field.
+- Lock settings are committed before the bot reports success; database save failures return an error.
+- Existing owner panel, group management, moderation, games, and database fallback code are retained. AI commands and integrations have been removed. English-only messages and group admin-permission prompts are enabled.
+
+Group lock commands:
+  /locks
+  /lock all
+  /unlock all
+  /lock links
+  /unlock links
+  /lock photos
+  /unlock photos
+
+Deployment:
+1. Extract this ZIP into a clean folder.
+2. Copy .env.example to .env and fill BOT_TOKEN and OWNER_ID (or BOT_OWNER_ID).
+3. Install dependencies with: python3 -m pip install --user -r requirements.txt
+4. Start with: python3 -m bot.main
+
+Important verification note:
+- Python syntax compilation and the offline structural smoke check passed for this build.
+- Five lock/schema regression tests passed using offline dependency shims because this build environment could not download missing packages.
+- A live Telegram/hosting test has not been run from this environment. Telegram permissions, PythonAnywhere proxy access, and deployment secrets must be checked on the target host.
+- Never include or upload your real .env file when sharing the project.
+
+Latest action fixes (2026-10-16):
+- Moderation menu buttons now open a tracked-member picker for Ban, Unban, Mute, Unmute, Kick, Warn, Remove Warn, Temp Ban, and Temp Mute. Mute/ban actions then show duration choices; unmute reports success/failure and restores explicit send permissions.
+- Muting now creates a group-member tracking record when needed, so the Unmute picker can find users muted through the command.
+- Notes, History, Roles, and Strikes buttons now respond with their correct usage guidance instead of silently doing nothing.
+- Content-lock panel toggles now verify the clicker is a group admin, commit the setting, and report save failures. Added Lock ALL / Unlock ALL buttons.
+- On startup, ALEXA sends a restart notice in each tracked active group and mentions the group's human admins. Groups are marked inactive when ALEXA is removed and reactivated when re-added.
+- Verification in this build environment: `python3 -m compileall -q bot` and `python3 scripts/smoke_check.py` passed. Full pytest collection could not run because the environment lacks installed `aiogram` (and initially `structlog`); live Telegram tests have not been run. Check permissions and restart-notice behavior on the hosting account.
+
+
+Final promotion and auto-delete update (2026-10-16):
+- Bot owner panel includes Group Promotion. Owner can send one message to all active registered groups and receive sent/failed counts.
+- Group admins can use /grouppromo <announcement text> to post an announcement in their current group.
+- /autodelete N stores the group delay; a root message middleware now schedules command-message deletion using that saved per-group delay.
+- Auto-delete requires the bot to have Delete Messages permission in each group.

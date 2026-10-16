@@ -1,0 +1,482 @@
+from aiogram import Router, F
+from aiogram.types import CallbackQuery, Message
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from bot.database.models import GroupSettings, WelcomeSettings, GoodbyeSettings
+from bot.keyboards.main_menu import nav_kb
+from bot.keyboards.settings import settings_menu_kb
+def _status_icon(enabled: bool) -> str:
+    return "🟢" if enabled else "🔴"
+
+import structlog
+from bot.middlewares.admin_actions import AdminActionMiddleware
+
+logger = structlog.get_logger()
+router = Router()
+router.callback_query.outer_middleware(AdminActionMiddleware(prefixes=("settings:", "welcome:", "goodbye:", "logs:", "log:", "gs:", "slowmode:", "autodel:")))
+router.message.outer_middleware(AdminActionMiddleware(commands={"setwelcome"}))
+
+
+#  /settings 
+@router.message(Command('settings'))
+async def cmd_settings(message: Message, _: callable, **kwargs):
+    if message.chat.type == 'private':
+        await message.answer(_('error_admin_only'))
+        return
+    try:
+        member = await message.bot.get_chat_member(message.chat.id, message.from_user.id)
+        if member.status not in ('administrator', 'creator'):
+            await message.answer(_('error_admin_only'))
+            return
+    except Exception:
+        return
+    await message.answer(_('settings_menu_title'), reply_markup=settings_menu_kb(_), parse_mode='HTML')
+
+
+@router.callback_query(F.data == "menu:settings")
+async def settings_menu_cb(callback: CallbackQuery, _: callable, **kwargs):
+    await callback.message.edit_text(_('settings_menu_title'), reply_markup=settings_menu_kb(_), parse_mode='HTML')
+    await callback.answer()
+
+
+@router.callback_query(F.data == "settings:menu")
+async def settings_menu_back(callback: CallbackQuery, _: callable, **kwargs):
+    await callback.message.edit_text(_('settings_menu_title'), reply_markup=settings_menu_kb(_), parse_mode='HTML')
+    await callback.answer()
+
+
+class WelcomeStates(StatesGroup):
+    waiting_message = State()
+    waiting_goodbye_message = State()
+    waiting_log_channel = State()
+
+
+def welcome_kb(_, enabled=True):
+    builder = InlineKeyboardBuilder()
+    icon = _status_icon(enabled)
+    label = _("btn_enabled") if enabled else _("btn_disabled")
+    builder.button(text=f"{icon} ◈ {label}", callback_data="welcome:toggle")
+    builder.button(text=_("btn_welcome_set"),   callback_data="welcome:set")
+    builder.button(text=_("btn_welcome_vars"), callback_data="welcome:vars")
+    builder.button(text=_("btn_preview"),      callback_data="welcome:preview")
+    builder.button(text=_("btn_back"),         callback_data="settings:menu")
+    builder.button(text=_("btn_home"),         callback_data="menu:main")
+    builder.adjust(1, 2, 1, 2)
+    return builder.as_markup()
+
+
+def general_settings_kb(_, gs):
+    builder = InlineKeyboardBuilder()
+    s = lambda v: _status_icon(v)
+    builder.button(text=f"{s(gs.economy_enabled)} ◈ {_('btn_economy_toggle')}", callback_data="gs:eco")
+    builder.button(text=f"{s(gs.games_enabled)} ◈ {_('btn_games_toggle')}",     callback_data="gs:games")
+    builder.button(text=f"{s(gs.xp_enabled)} ◈ {_('btn_xp_toggle')}",           callback_data="gs:xp")
+    builder.button(text=f"{s(gs.reputation_enabled)} ◈ {_('btn_rep_toggle')}",  callback_data="gs:rep")
+    builder.button(text=f"{s(gs.silent_actions)} ◈ {_('btn_silent')}",           callback_data="gs:silent")
+    builder.button(text="⚠️ ◈ " + _("btn_max_warns") + f" ({gs.max_warns})",             callback_data="gs:maxwarns")
+    builder.button(text="🔨 ◈ " + _("btn_warn_action") + f" ({gs.warn_action})",         callback_data="gs:warnaction")
+    builder.button(text=_("btn_back"),  callback_data="settings:menu")
+    builder.button(text=_("btn_home"),  callback_data="menu:main")
+    builder.adjust(2, 2, 1, 2, 2)
+    return builder.as_markup()
+
+
+def slowmode_kb(_):
+    builder = InlineKeyboardBuilder()
+    builder.button(text=_("btn_off"), callback_data="slowmode:0")
+    for label, secs in [("10s", 10), ("30s", 30), ("1m", 60), ("5m", 300), ("15m", 900), ("1h", 3600)]:
+        builder.button(text=f"⏱ ◈ {label}", callback_data=f"slowmode:{secs}")
+    builder.button(text=_("btn_back"), callback_data="settings:menu")
+    builder.button(text=_("btn_home"), callback_data="menu:main")
+    builder.adjust(4, 3, 2)
+    return builder.as_markup()
+
+
+@router.callback_query(F.data == "settings:welcome")
+async def welcome_menu(callback: CallbackQuery, _: callable, db_session: AsyncSession, db_group=None, **kwargs):
+    if not db_group:
+        await callback.answer(_("error_group_only"), show_alert=True)
+        return
+    ws = await db_session.scalar(select(WelcomeSettings).where(WelcomeSettings.group_id == db_group.id))
+    is_enabled = bool(ws and ws.enabled)
+    text = _("welcome_menu")
+    if ws and ws.message:
+        text += "\n\n" + _("current_message") + ":\n" + ws.message[:300]
+    await callback.message.edit_text(text, reply_markup=welcome_kb(_, enabled=is_enabled), parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "welcome:set")
+async def set_welcome_start(callback: CallbackQuery, _: callable, state: FSMContext, **kwargs):
+    await callback.message.answer(_("welcome_set_prompt"))
+    await state.set_state(WelcomeStates.waiting_message)
+    await callback.answer()
+
+
+@router.message(Command("setwelcome"))
+async def set_welcome_command(message: Message, db_session: AsyncSession, db_group=None, state: FSMContext = None, **kwargs):
+    if message.chat.type not in ("group", "supergroup") or not db_group:
+        await message.reply("Use /setwelcome inside a group.")
+        return
+    raw = (message.text or "").split(None, 1)
+    if len(raw) < 2 or not raw[1].strip():
+        await message.reply("Send your welcome text in the next message. Placeholders: {name}, {username}, {id}, {group}.")
+        if state:
+            await state.set_state(WelcomeStates.waiting_message)
+        return
+    welcome_text = raw[1].strip()
+    ws = await db_session.scalar(select(WelcomeSettings).where(WelcomeSettings.group_id == db_group.id))
+    if not ws:
+        ws = WelcomeSettings(group_id=db_group.id, enabled=True, message=welcome_text)
+        db_session.add(ws)
+    else:
+        ws.enabled = True
+        ws.message = welcome_text
+    await db_session.flush()
+    if state:
+        await state.clear()
+    await message.reply("✅ Custom welcome saved and enabled. Placeholders: {name}, {username}, {id}, {group}.")
+
+
+@router.message(WelcomeStates.waiting_message)
+async def save_welcome_message(message: Message, _: callable, db_session: AsyncSession, db_group=None, state: FSMContext = None, **kwargs):
+    if not db_group:
+        if state:
+            await state.clear()
+        return
+    ws = await db_session.scalar(select(WelcomeSettings).where(WelcomeSettings.group_id == db_group.id))
+    if not ws:
+        ws = WelcomeSettings(group_id=db_group.id, message=message.text)
+        db_session.add(ws)
+    else:
+        ws.message = message.text
+        ws.enabled = True
+    await db_session.flush()
+    await message.reply("✅ Custom welcome saved and enabled.")
+    if state:
+        await state.clear()
+
+
+@router.callback_query(F.data == "welcome:vars")
+async def welcome_variables(callback: CallbackQuery, _: callable, **kwargs):
+    await callback.answer(_("welcome_variables"), show_alert=True)
+
+
+@router.callback_query(F.data == "welcome:preview")
+async def welcome_preview(callback: CallbackQuery, _: callable, db_session: AsyncSession, db_group=None, **kwargs):
+    if not db_group:
+        await callback.answer(_("error_group_only"), show_alert=True)
+        return
+    ws = await db_session.scalar(select(WelcomeSettings).where(WelcomeSettings.group_id == db_group.id))
+    if not ws or not ws.message:
+        await callback.answer(_("no_welcome_set"), show_alert=True)
+        return
+    preview = ws.message.replace("{name}", callback.from_user.first_name or "User")
+    preview = preview.replace("{group}", callback.message.chat.title or "Group")
+    await callback.answer(preview[:200], show_alert=True)
+
+
+@router.callback_query(F.data == "welcome:toggle")
+async def toggle_welcome(callback: CallbackQuery, _: callable, db_session: AsyncSession, db_group=None, **kwargs):
+    if not db_group:
+        await callback.answer(_("error_group_only"), show_alert=True)
+        return
+    ws = await db_session.scalar(select(WelcomeSettings).where(WelcomeSettings.group_id == db_group.id))
+    if not ws:
+        ws = WelcomeSettings(group_id=db_group.id, enabled=True)
+        db_session.add(ws)
+    else:
+        ws.enabled = not ws.enabled
+    await db_session.flush()
+    status = _("btn_enabled") if ws.enabled else _("btn_disabled")
+    await callback.answer(f"{_('btn_welcome')}: {status}")
+    text = _("welcome_menu")
+    if ws.message:
+        text += "\n\n" + _("current_message") + ":\n" + ws.message[:300]
+    await callback.message.edit_text(text, reply_markup=welcome_kb(_, enabled=ws.enabled), parse_mode="HTML")
+
+
+@router.callback_query(F.data == "settings:goodbye")
+async def goodbye_menu(callback: CallbackQuery, _: callable, db_session: AsyncSession, db_group=None, **kwargs):
+    if not db_group:
+        await callback.answer(_("error_group_only"), show_alert=True)
+        return
+    gs = await db_session.scalar(select(GoodbyeSettings).where(GoodbyeSettings.group_id == db_group.id))
+    builder = InlineKeyboardBuilder()
+    builder.button(text=("🟢 Enabled" if gs and gs.enabled else "🔴 Disabled"), callback_data="goodbye:toggle")
+    builder.button(text="✏️ Set goodbye message", callback_data="goodbye:set")
+    builder.button(text=_("btn_back"), callback_data="settings:menu")
+    builder.button(text=_("btn_home"), callback_data="menu:main")
+    builder.adjust(2, 2)
+    text = "👋 <b>Goodbye Settings</b>\n\n"
+    text += (gs.message[:500] if gs and gs.message else "No goodbye message set.")
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "goodbye:set")
+async def set_goodbye_start(callback: CallbackQuery, _: callable, state: FSMContext, **kwargs):
+    await callback.message.answer("Send the goodbye text. Supported placeholders: {name}, {username}, {id}, {group}.")
+    await state.set_state(WelcomeStates.waiting_goodbye_message)
+    await state.update_data(message_mode="goodbye")
+    await callback.answer()
+
+
+@router.message(WelcomeStates.waiting_goodbye_message)
+async def save_goodbye_message(message: Message, _: callable, db_session: AsyncSession, db_group=None, state: FSMContext = None, **kwargs):
+    if not db_group:
+        if state: await state.clear()
+        return
+    gs = await db_session.scalar(select(GoodbyeSettings).where(GoodbyeSettings.group_id == db_group.id))
+    if not gs:
+        gs = GoodbyeSettings(group_id=db_group.id, enabled=True, message=message.text or "")
+        db_session.add(gs)
+    else:
+        gs.message = message.text or ""
+    await db_session.flush()
+    await message.reply("✅ Goodbye message saved.")
+    if state: await state.clear()
+
+
+@router.callback_query(F.data == "goodbye:toggle")
+async def goodbye_toggle(callback: CallbackQuery, _: callable, db_session: AsyncSession, db_group=None, **kwargs):
+    if not db_group:
+        await callback.answer(_("error_group_only"), show_alert=True)
+        return
+    gs = await db_session.scalar(select(GoodbyeSettings).where(GoodbyeSettings.group_id == db_group.id))
+    if not gs:
+        gs = GoodbyeSettings(group_id=db_group.id, enabled=True)
+        db_session.add(gs)
+    else:
+        gs.enabled = not gs.enabled
+    await db_session.flush()
+    await goodbye_menu(callback, _, db_session=db_session, db_group=db_group)
+
+
+@router.callback_query(F.data == "settings:logs")
+async def log_channel_menu(callback: CallbackQuery, _: callable, db_session: AsyncSession, db_group=None, **kwargs):
+    if not db_group:
+        await callback.answer(_("error_group_only"), show_alert=True)
+        return
+    gs = await db_session.scalar(select(GroupSettings).where(GroupSettings.group_id == db_group.id))
+    log_id = gs.log_channel_id if gs else None
+    status = str(log_id) if log_id else _("not_set")
+    text = _("log_channel_menu").format(channel_id=status)
+    builder = InlineKeyboardBuilder()
+    builder.button(text=_("btn_set_log_channel"), callback_data="logs:set")
+    if log_id:
+        builder.button(text=_("btn_remove_log_channel"), callback_data="logs:remove")
+    builder.button(text=_("btn_log_events_list"), callback_data="logs:events")
+    builder.button(text=_("btn_back"),       callback_data="settings:menu")
+    builder.button(text=_("btn_home"),       callback_data="menu:main")
+    builder.adjust(2, 1, 2)
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "logs:remove")
+async def remove_log_channel(callback: CallbackQuery, _: callable, db_session: AsyncSession, db_group=None, **kwargs):
+    if not db_group:
+        await callback.answer(_("error_group_only"), show_alert=True)
+        return
+    gs = await db_session.scalar(select(GroupSettings).where(GroupSettings.group_id == db_group.id))
+    if gs:
+        gs.log_channel_id = None
+    await callback.answer(_("log_channel_removed"))
+
+
+@router.callback_query(F.data == "logs:set")
+async def set_log_channel(callback: CallbackQuery, _: callable, state: FSMContext, **kwargs):
+    await callback.message.answer("Send the log channel username (for example @mylogs) or numeric chat ID. The bot must be able to post there.")
+    await state.set_state(WelcomeStates.waiting_log_channel)
+    await callback.answer()
+
+
+@router.message(WelcomeStates.waiting_log_channel)
+async def save_log_channel(message: Message, _: callable, db_session: AsyncSession, db_group=None, state: FSMContext = None, **kwargs):
+    if not db_group or message.chat.type not in ("group", "supergroup"):
+        if state: await state.clear()
+        await message.reply("Set the log channel from the group settings panel.")
+        return
+    try:
+        raw = (message.text or "").strip()
+        target = int(raw) if raw.lstrip("-").isdigit() else raw
+        chat = await message.bot.get_chat(target)
+        # Verify the bot can access the target before saving it.
+        me = await message.bot.get_me()
+        bot_member = await message.bot.get_chat_member(chat.id, me.id)
+        if bot_member.status not in ("administrator", "creator"):
+            raise PermissionError("Bot is not an administrator in the log channel")
+    except Exception:
+        await message.reply("Could not access that channel. Add ALEXA to it and send a valid @username or chat ID.")
+        return
+    gs = await db_session.scalar(select(GroupSettings).where(GroupSettings.group_id == db_group.id))
+    if not gs:
+        gs = GroupSettings(group_id=db_group.id)
+        db_session.add(gs)
+    gs.log_channel_id = chat.id
+    await db_session.flush()
+    await message.reply(f"✅ Log channel saved: <code>{chat.id}</code>", parse_mode="HTML")
+    if state: await state.clear()
+
+
+@router.callback_query(F.data == "logs:events")
+async def log_events_menu(callback: CallbackQuery, _: callable, db_session: AsyncSession, db_group=None, **kwargs):
+    if not db_group:
+        await callback.answer(_("error_group_only"), show_alert=True)
+        return
+    gs = await db_session.scalar(select(GroupSettings).where(GroupSettings.group_id == db_group.id))
+    if not gs:
+        gs = GroupSettings(group_id=db_group.id)
+        db_session.add(gs)
+        await db_session.flush()
+    s = lambda v: _status_icon(v)
+    builder = InlineKeyboardBuilder()
+    for txt, cb, field in [
+        (f"{s(gs.log_join)} ◈ {_('log_join')}",     "log:join",   "log_join"),
+        (f"{s(gs.log_leave)} ◈ {_('log_leave')}",   "log:leave",  "log_leave"),
+        (f"{s(gs.log_delete)} ◈ {_('log_delete')}", "log:delete", "log_delete"),
+        (f"{s(gs.log_edit)} ◈ {_('log_edit')}",     "log:edit",   "log_edit"),
+        (f"{s(gs.log_ban)} ◈ {_('log_ban')}",       "log:ban",    "log_ban"),
+        (f"{s(gs.log_mute)} ◈ {_('log_mute')}",     "log:mute",   "log_mute"),
+        (f"{s(gs.log_warn)} ◈ {_('log_warn')}",     "log:warn",   "log_warn"),
+    ]:
+        builder.button(text=txt, callback_data=cb)
+    builder.button(text=_("btn_back"), callback_data="settings:logs")
+    builder.button(text=_("btn_home"), callback_data="menu:main")
+    builder.adjust(2, 2, 2, 1, 2)
+    await callback.message.edit_text(_("log_events_menu"), reply_markup=builder.as_markup(), parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("log:"))
+async def toggle_log_event(callback: CallbackQuery, _: callable, db_session: AsyncSession, db_group=None, **kwargs):
+    if not db_group:
+        await callback.answer(_("error_group_only"), show_alert=True)
+        return
+    event = callback.data.split("log:")[1]
+    gs = await db_session.scalar(select(GroupSettings).where(GroupSettings.group_id == db_group.id))
+    if not gs:
+        gs = GroupSettings(group_id=db_group.id)
+        db_session.add(gs)
+        await db_session.flush()
+    field_map = {"join": "log_join", "leave": "log_leave", "delete": "log_delete",
+                 "edit": "log_edit", "ban": "log_ban", "mute": "log_mute", "warn": "log_warn"}
+    field = field_map.get(event)
+    if field:
+        setattr(gs, field, not getattr(gs, field))
+        status = _("btn_enabled") if getattr(gs, field) else _("btn_disabled")
+        await callback.answer(f"{event}: {status}")
+        builder = InlineKeyboardBuilder()
+        for txt, cb, attr in [
+            (f"{_status_icon(gs.log_join)} ◈ {_('log_join')}", "log:join", "log_join"),
+            (f"{_status_icon(gs.log_leave)} ◈ {_('log_leave')}", "log:leave", "log_leave"),
+            (f"{_status_icon(gs.log_delete)} ◈ {_('log_delete')}", "log:delete", "log_delete"),
+            (f"{_status_icon(gs.log_edit)} ◈ {_('log_edit')}", "log:edit", "log_edit"),
+            (f"{_status_icon(gs.log_ban)} ◈ {_('log_ban')}", "log:ban", "log_ban"),
+            (f"{_status_icon(gs.log_mute)} ◈ {_('log_mute')}", "log:mute", "log_mute"),
+            (f"{_status_icon(gs.log_warn)} ◈ {_('log_warn')}", "log:warn", "log_warn"),
+        ]:
+            builder.button(text=txt, callback_data=cb)
+        builder.button(text=_("btn_back"), callback_data="settings:logs")
+        builder.button(text=_("btn_home"), callback_data="menu:main")
+        builder.adjust(2, 2, 2, 1, 2)
+        await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+
+
+@router.callback_query(F.data == "settings:general")
+async def general_settings(callback: CallbackQuery, _: callable, db_session: AsyncSession, db_group=None, **kwargs):
+    if not db_group:
+        await callback.answer(_("error_group_only"), show_alert=True)
+        return
+    gs = await db_session.scalar(select(GroupSettings).where(GroupSettings.group_id == db_group.id))
+    if not gs:
+        gs = GroupSettings(group_id=db_group.id)
+        db_session.add(gs)
+        await db_session.flush()
+    await callback.message.edit_text(_("general_settings_menu"), reply_markup=general_settings_kb(_, gs), parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("gs:"))
+async def toggle_general_setting(callback: CallbackQuery, _: callable, db_session: AsyncSession, db_group=None, **kwargs):
+    if not db_group:
+        await callback.answer(_("error_group_only"), show_alert=True)
+        return
+    key = callback.data.split("gs:")[1]
+    gs = await db_session.scalar(select(GroupSettings).where(GroupSettings.group_id == db_group.id))
+    if not gs:
+        gs = GroupSettings(group_id=db_group.id)
+        db_session.add(gs)
+        await db_session.flush()
+    toggle_map = {"eco": "economy_enabled", "games": "games_enabled", "xp": "xp_enabled",
+                  "rep": "reputation_enabled", "silent": "silent_actions"}
+    if key in toggle_map:
+        field = toggle_map[key]
+        setattr(gs, field, not getattr(gs, field))
+        status = _("btn_enabled") if getattr(gs, field) else _("btn_disabled")
+        await callback.answer(status)
+        await callback.message.edit_reply_markup(reply_markup=general_settings_kb(_, gs))
+    elif key == "maxwarns":
+        cycle = [1, 2, 3, 5, 10]
+        cur = gs.max_warns or 3
+        nxt = cycle[(cycle.index(cur) + 1) % len(cycle)] if cur in cycle else 3
+        gs.max_warns = nxt
+        await callback.answer(f"{_('btn_max_warns')}: {nxt}")
+        await callback.message.edit_reply_markup(reply_markup=general_settings_kb(_, gs))
+    elif key == "warnaction":
+        actions = ["mute", "kick", "ban"]
+        cur = gs.warn_action or "mute"
+        nxt = actions[(actions.index(cur) + 1) % len(actions)] if cur in actions else "mute"
+        gs.warn_action = nxt
+        await callback.answer(f"{_('btn_warn_action')}: {nxt}")
+        await callback.message.edit_reply_markup(reply_markup=general_settings_kb(_, gs))
+
+
+@router.callback_query(F.data == "settings:slowmode")
+async def slowmode_menu(callback: CallbackQuery, _: callable, **kwargs):
+    await callback.message.edit_text(_("slowmode_menu"), reply_markup=slowmode_kb(_), parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("slowmode:"))
+async def set_slowmode(callback: CallbackQuery, _: callable, **kwargs):
+    seconds = int(callback.data.split("slowmode:")[1])
+    try:
+        await callback.bot.set_chat_slow_mode_delay(callback.message.chat.id, seconds)
+        label = f"{seconds}s" if seconds else _("btn_off")
+        await callback.answer(_("slowmode_set").format(value=label))
+    except Exception:
+        await callback.answer(_("error_generic"), show_alert=True)
+
+
+@router.callback_query(F.data == "settings:autodel")
+async def autodel_menu(callback: CallbackQuery, _: callable, **kwargs):
+    builder = InlineKeyboardBuilder()
+    builder.button(text=_("btn_off"), callback_data="autodel:0")
+    for label, secs in [("30s", 30), ("1m", 60), ("5m", 300), ("10m", 600), ("30m", 1800)]:
+        builder.button(text=f"⏱ ◈ {label}", callback_data=f"autodel:{secs}")
+    builder.button(text=_("btn_back"), callback_data="settings:menu")
+    builder.button(text=_("btn_home"), callback_data="menu:main")
+    builder.adjust(3, 3, 2)
+    await callback.message.edit_text(_("autodel_menu"), reply_markup=builder.as_markup(), parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("autodel:"))
+async def set_autodel(callback: CallbackQuery, _: callable, db_session: AsyncSession, db_group=None, **kwargs):
+    if not db_group:
+        await callback.answer(_("error_group_only"), show_alert=True)
+        return
+    seconds = int(callback.data.split("autodel:")[1])
+    ws = await db_session.scalar(select(WelcomeSettings).where(WelcomeSettings.group_id == db_group.id))
+    if not ws:
+        ws = WelcomeSettings(group_id=db_group.id)
+        db_session.add(ws)
+    ws.delete_after = seconds
+    label = f"{seconds}s" if seconds else _("btn_off")
+    await callback.answer(_("autodel_set").format(value=label))
