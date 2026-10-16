@@ -9,7 +9,7 @@ from bot.database.models import (
     SecuritySettings, CaptchaChallenge, GroupStats, User, GroupFilter, GroupBlocklist
 )
 from bot.services.security_service import (
-    check_message_violations, is_raid_detected, create_captcha_challenge
+    check_message_violations, is_raid_detected, create_captcha_challenge, contains_link
 )
 from bot.services.moderation_service import mute_user, ban_user, kick_user, warn_user, log_action
 from bot.services.user_service import add_xp
@@ -171,6 +171,39 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
             except Exception as exc:
                 logger.warning("Anti-bot could not remove joining bot", chat_id=chat.id, user_id=user.id, error=str(exc))
         return
+
+    # Best-effort bio-link protection. Telegram only returns a user's bio in an
+    # accessible private chat, so this check may be unavailable for many members.
+    # Reuse the existing anti-link toggle to avoid changing the database schema.
+    if security and security.anti_link:
+        try:
+            profile = await event.bot.get_chat(user.id)
+            bio = getattr(profile, "bio", None) or ""
+            if bio and contains_link(bio):
+                await event.bot.ban_chat_member(chat.id, user.id)
+                await event.bot.unban_chat_member(chat.id, user.id)
+                try:
+                    await event.bot.send_message(
+                        chat.id,
+                        f"🚫 A member was removed because their profile bio contains a link. "
+                        f"Bio-link protection uses the existing anti-link setting.",
+                    )
+                except Exception:
+                    pass
+                logger.info(
+                    "Member removed for profile bio link",
+                    chat_id=chat.id,
+                    user_id=user.id,
+                )
+                return
+        except Exception as exc:
+            # Do not block normal joins when Telegram does not expose the bio.
+            logger.debug(
+                "Bio-link check unavailable for joining member",
+                chat_id=chat.id,
+                user_id=user.id,
+                error=str(exc),
+            )
 
     if security and (security.anti_raid or security.anti_mass_join):
         redis = kwargs.get("redis_client") or getattr(event.bot, "_redis_client", None)
