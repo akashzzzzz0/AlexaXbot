@@ -23,7 +23,12 @@ def bio_link_protection_kb(enabled=False):
 
 def bio_link_action_kb(action="mute", mute_duration=3600):
     b = InlineKeyboardBuilder()
-    for label, value in [("⚠️ Warn", "warn"), ("🔇 Mute", "mute"), ("🚫 Ban", "ban")]:
+    for label, value in [
+        ("⚠️ 3 warnings → Mute", "warn_mute"),
+        ("⚠️ 3 warnings → Ban", "warn_ban"),
+        ("🔇 Immediate Mute", "mute"),
+        ("🚫 Immediate Ban", "ban"),
+    ]:
         prefix = "✅ " if action == value else ""
         b.button(text=f"{prefix}{label}", callback_data=f"mod:bio_action:{value}")
     for label, seconds in [("15 min", 900), ("30 min", 1800), ("1 hour", 3600), ("6 hours", 21600), ("12 hours", 43200), ("24 hours", 86400)]:
