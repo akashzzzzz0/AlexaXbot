@@ -77,14 +77,16 @@ async def on_bot_membership_changed(event: ChatMemberUpdated, db_session: AsyncS
     if new_status != "administrator":
         await event.bot.send_message(
             chat.id,
-            "👋 Thanks for adding ALEXA to this group!\n\n"
-            "To enable moderation and protection, please promote ALEXA to an administrator and grant these permissions:\n"
-            "• Delete messages — required for content locks and cleanup\n"
-            "• Restrict members — required to mute members\n"
-            "• Ban users — required for ban/kick moderation\n"
-            "• Invite users — needed for invite-link features\n"
-            "• Pin messages — needed only if you want ALEXA to pin messages\n\n"
-            "A group owner or administrator can change these rights in the group's Administrators settings."
+            "✨ <b>ALEXA IS HERE!</b> ✨\n\n"
+            "🛡️ Your group’s new moderation & protection assistant is ready to set up.\n\n"
+            "👑 <b>One quick step:</b> promote ALEXA to <b>Administrator</b> and enable:\n"
+            "▫️ Delete messages — locks & cleanup\n"
+            "▫️ Restrict members — mute controls\n"
+            "▫️ Ban users — ban/kick tools\n"
+            "▫️ Invite users — invite-link tools\n"
+            "📌 Pin Messages is optional.\n\n"
+            "⚙️ Open <b>Group Settings → Administrators</b> to manage permissions.\n"
+            "💫 Let’s keep this group safer, cleaner, and under control!"
         )
         return
 
@@ -98,23 +100,30 @@ async def on_bot_membership_changed(event: ChatMemberUpdated, db_session: AsyncS
     if missing:
         await event.bot.send_message(
             chat.id,
-            "⚠️ ALEXA is now an administrator, but some permissions are missing:\n"
-            + "\n".join(f"• {item}" for item in missing)
-            + "\n\nPlease update ALEXA's admin rights in Group Settings → Administrators."
-            + "\nPin messages is optional and only needed for pinning features."
+            "⚠️ <b>ALEXA SETUP IS ALMOST DONE</b>\n\n"
+            "A few permissions are still missing:\n"
+            + "\n".join(f"▫️ {item}" for item in missing)
+            + "\n\n⚙️ Please open <b>Group Settings → Administrators</b> and update ALEXA’s rights."
+            + "\n📌 Pin Messages is optional. Once permissions are set, protection tools can work properly."
         )
     else:
         optional = "\nPin messages is optional and only needed for pinning features."
         if not getattr(new_member, "can_pin_messages", False):
             await event.bot.send_message(
                 chat.id,
-                "✅ Thanks! ALEXA has the core admin permissions needed for moderation and protection."
+                "🎉 <b>ALEXA IS READY!</b> 🎉\n\n"
+                "🛡️ Core admin permissions are enabled. Moderation and protection tools are ready to configure.\n\n"
+                "⚙️ Open <b>Moderation</b> or <b>Security</b> to set up this group.\n"
+                "💜 Thanks for trusting ALEXA to help keep your community safe!"
                 + optional,
             )
         else:
             await event.bot.send_message(
                 chat.id,
-                "✅ Thanks! ALEXA has the core admin permissions needed for moderation and protection."
+                "🎉 <b>ALEXA IS READY!</b> 🎉\n\n"
+                "🛡️ Core admin permissions are enabled. Moderation and protection tools are ready to configure.\n\n"
+                "⚙️ Open <b>Moderation</b> or <b>Security</b> to set up this group.\n"
+                "💜 Thanks for trusting ALEXA to help keep your community safe!"
             )
 
 
