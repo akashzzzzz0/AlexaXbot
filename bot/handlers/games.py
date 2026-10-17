@@ -178,7 +178,9 @@ async def process_rps(callback: CallbackQuery, _: callable, db_session=None, db_
     wager = 20
     result = await play_rps(db_session, db_user.id, player_choice, wager=wager)
     if result.get('error') == 'insufficient_funds':
-        _, balance = await __import__('bot.services.economy_service', fromlist=['get_balance']).get_balance(db_session, db_user.id)
+        from bot.services.user_service import get_or_create_wallet
+        wallet = await get_or_create_wallet(db_session, db_user.id)
+        balance = wallet.balance or 0
         await callback.answer(f"RPS costs {wager} coins. Your pocket balance is {format_number(balance)}.", show_alert=True)
         return
     emojis = {'rock': _('btn_rock'), 'paper': _('btn_paper'), 'scissors': _('btn_scissors')}
