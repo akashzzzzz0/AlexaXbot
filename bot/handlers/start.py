@@ -45,13 +45,33 @@ def _detect_lang(tg_lang):
 
 async def _send_add_group_prompt(message: Message):
     me = await message.bot.get_me()
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="➕ Add ALEXA to Group", url=f"https://t.me/{me.username}?startgroup=true")
-    ]])
-    await message.answer(
-        "👋 Welcome to ALEXA!\n\nFirst, add ALEXA to your group. After you add me, open /start again to see the command menu.",
-        reply_markup=kb,
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Add ALEXA to Group", url=f"https://t.me/{me.username}?startgroup=true")],
+        [
+            InlineKeyboardButton(text="🔔 Updates", url="https://t.me/alexa_bot_updats"),
+            InlineKeyboardButton(text="💬 Discussion", url="https://t.me/alexa_Bot_discussion"),
+        ],
+        [InlineKeyboardButton(text="❓ Help", callback_data="menu:help")],
+    ])
+    caption = (
+        "✨ <b>WELCOME TO ALEXA!</b> ✨\n\n"
+        "🛡️ Your group’s moderation and protection assistant.\n"
+        "🎮 Games • 💰 Economy • ⚙️ Group tools\n\n"
+        "🚀 <b>QUICK START</b>\n"
+        "• Add ALEXA to your group\n"
+        "• Promote ALEXA to administrator and grant required permissions\n"
+        "• Return here and use /start to explore the menu\n\n"
+        "💫 Let’s make your group safer and more fun!"
     )
+    try:
+        photos = await message.bot.get_user_profile_photos(me.id, limit=1)
+        if photos.total_count and photos.photos and photos.photos[0]:
+            photo = photos.photos[0][-1]
+            await message.answer_photo(photo.file_id, caption=caption, reply_markup=kb, parse_mode="HTML")
+            return
+    except Exception as exc:
+        logger.warning("Could not load ALEXA profile photo for /start", error=str(exc))
+    await message.answer(caption, reply_markup=kb, parse_mode="HTML")
 
 
 @router.message(CommandStart())
