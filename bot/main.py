@@ -70,58 +70,69 @@ async def setup_database_with_retry(retries=5, delay=3):
 
 
 async def configure_command_visibility(bot) -> None:
-    """Publish supported commands globally and keep /owner in the owner's private scope only."""
+    """Show public commands to members and full group commands to chat administrators."""
     from bot.config import settings
     from aiogram.types import (
-        BotCommandScopeDefault, BotCommandScopeChat,
+        BotCommand, BotCommandScopeDefault, BotCommandScopeChat,
         BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats,
-        BotCommand,
+        BotCommandScopeAllChatAdministrators,
     )
+
     public_commands = [
-        ("start", "Start ALEXA"), ("menu", "Open main menu"), ("help", "Show help"),
+        ("start", "Start ALEXA"), ("menu", "Open main menu"), ("help", "Show commands"),
         ("language", "Choose language"), ("wallet", "View wallet"), ("bal", "View balance"),
         ("daily", "Claim daily coins"), ("weekly", "Claim weekly coins"), ("monthly", "Claim monthly coins"),
-        ("deposit", "Deposit coins"), ("withdraw", "Withdraw coins"), ("transfer", "Transfer coins"),
-        ("referral", "Get referral link"), ("games", "Open games"), ("dice", "Play dice"),
-        ("rps", "Rock paper scissors"), ("quiz", "Play quiz"), ("wheel", "Spin the wheel"),
-        ("roulette", "Play roulette"), ("cards", "Play cards"), ("card", "Play cards"),
-        ("mines", "Play mines"), ("bomb", "Play mines"), ("treasure", "Treasure hunt"),
-        ("numwar", "Number war"), ("duel", "Challenge a player"), ("stats", "View game stats"),
-        ("rank", "View your rank"), ("leaders", "Top players"), ("toprich", "Richest players"),
-        ("topkill", "Top virtual kill scores"), ("toprob", "Top successful robs"),
-        ("protect", "Buy virtual protection"), ("unprotect", "Remove protection"),
-        ("kill", "Virtual game action (reply to user)"), ("rob", "Virtual coin game (reply to user)"),
-        ("revive", "Revive game profile"), ("bluff", "Play bluff mini-game"), ("hack", "Play hack mini-game"),
-        ("items", "View your items"), ("task", "View tasks"), ("pfp", "Get profile photo"),
+        ("referral", "Get referral link"), ("achievements", "View achievements"),
+        ("games", "Open games"), ("dice", "Play dice"), ("rps", "Rock paper scissors"),
+        ("quiz", "Play quiz"), ("wheel", "Spin the wheel"), ("roulette", "Play roulette"),
+        ("cards", "Play cards"), ("mines", "Play mines"), ("treasure", "Treasure hunt"),
+        ("numwar", "Number war"), ("stats", "View stats"), ("rank", "View your rank"),
+        ("leaders", "Top players"), ("items", "View your items"), ("pfp", "Profile photo"),
+    ]
+    admin_commands = public_commands + [
         ("security", "Group security panel"), ("settings", "Group settings"),
         ("ban", "Ban a member"), ("unban", "Unban a member"), ("kick", "Kick a member"),
-        ("mute", "Mute a member"), ("unmute", "Unmute a member"), ("promote", "Promote a member"), ("demote", "Demote a member"),
-        ("warn", "Warn a member"), ("warns", "View warnings"), ("warnings", "View warnings"), ("unwarn", "Remove latest warning"), ("resetwarns", "Reset a member's warnings"), ("del", "Delete a replied message"), ("pin", "Pin a replied message"), ("unpin", "Unpin a message"), ("history", "Moderation history"),
-        ("setflood", "Configure flood limit"), ("flood", "Show flood settings"), ("setfloodmode", "Set flood action"), ("clearflood", "Clear flood counters"),
-        ("setrole", "Set a custom member label"), ("clearrole", "Clear a custom label"),
-        ("lock", "Lock group content"), ("unlock", "Unlock group content"), ("locks", "Open content locks"),
-        ("locktypes", "Show supported lock types"), ("rules", "Show group rules"), ("setrules", "Set group rules"),
-        ("filter", "Add a keyword auto-reply"), ("stopfilter", "Remove a keyword filter"),
-        ("save", "Save a replied text message"), ("get", "Get a saved message"), ("clear", "Clear a saved message"),
-        ("blocklist", "Show blocked keywords"), ("addblocklist", "Block a keyword"), ("rmblocklist", "Unblock a keyword"),
-        ("disablecmd", "Disable a group command"), ("enablecmd", "Enable a group command"), ("disabledcmds", "List disabled commands"),
-        ("id", "Show user and chat IDs"), ("info", "Show user information"), ("admins", "List group admins"), ("report", "Report a member"),
+        ("mute", "Mute a member"), ("unmute", "Unmute a member"), ("promote", "Promote a member"),
+        ("demote", "Demote a member"), ("warn", "Warn a member"), ("unwarn", "Remove warning"),
+        ("warns", "View warnings"), ("warnings", "View warnings"), ("resetwarns", "Reset warnings"),
+        ("del", "Delete a replied message"), ("pin", "Pin a message"), ("unpin", "Unpin a message"),
+        ("history", "Moderation history"), ("setflood", "Configure flood limit"),
+        ("flood", "Show flood settings"), ("setfloodmode", "Set flood action"),
+        ("clearflood", "Clear flood counters"), ("setrole", "Set member label"),
+        ("clearrole", "Clear member label"), ("role", "Manage member labels"),
+        ("lock", "Lock group content"), ("unlock", "Unlock group content"),
+        ("locks", "Open content locks"), ("locktypes", "Show lock types"),
+        ("rules", "Show group rules"), ("setrules", "Set group rules"),
+        ("filter", "Add keyword auto-reply"), ("stopfilter", "Remove keyword filter"),
+        ("save", "Save a message"), ("get", "Get saved message"), ("clear", "Clear saved message"),
+        ("blocklist", "Show blocked keywords"), ("addblocklist", "Block a keyword"),
+        ("rmblocklist", "Unblock a keyword"), ("disablecmd", "Disable group command"),
+        ("enablecmd", "Enable group command"), ("disabledcmds", "List disabled commands"),
+        ("id", "Show IDs"), ("info", "Show user info"), ("admins", "List group admins"),
+        ("report", "Report a member"), ("grouppromo", "Group promotion tools"),
+        ("deposit", "Deposit coins"), ("withdraw", "Withdraw coins"), ("transfer", "Transfer coins"),
+        ("toprich", "Richest players"), ("topkill", "Top virtual kill scores"),
+        ("toprob", "Top successful robs"), ("protect", "Buy virtual protection"),
+        ("unprotect", "Remove protection"), ("kill", "Virtual game action"),
+        ("rob", "Virtual coin game"), ("revive", "Revive game profile"),
+        ("bluff", "Play bluff game"), ("hack", "Play hack game"), ("task", "View tasks"),
     ]
-    commands = [BotCommand(command=name, description=description) for name, description in public_commands]
+    public = [BotCommand(command=name, description=description) for name, description in public_commands]
+    admin = [BotCommand(command=name, description=description) for name, description in admin_commands]
     try:
-        # Explicitly overwrite the common scopes too, so a stale previous
-        # all-private/all-group command list cannot keep /owner visible.
-        await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
-        await bot.set_my_commands(commands, scope=BotCommandScopeAllPrivateChats())
-        await bot.set_my_commands(commands, scope=BotCommandScopeAllGroupChats())
+        # Normal members see only public commands. Telegram automatically applies
+        # the administrator scope to group admins and the group creator.
+        await bot.set_my_commands(public, scope=BotCommandScopeDefault())
+        await bot.set_my_commands(public, scope=BotCommandScopeAllPrivateChats())
+        await bot.set_my_commands(public, scope=BotCommandScopeAllGroupChats())
+        await bot.set_my_commands(admin, scope=BotCommandScopeAllChatAdministrators())
         owner_id = settings.effective_owner_id
         if owner_id:
-            owner_commands = commands + [BotCommand(command="owner", description="Open ALEXA Owner Panel")]
+            owner_commands = admin + [BotCommand(command="owner", description="Open ALEXA Owner Panel")]
             await bot.set_my_commands(owner_commands, scope=BotCommandScopeChat(chat_id=owner_id))
         logger.info("Telegram command visibility configured", owner_id=settings.effective_owner_id or None)
     except Exception as exc:
         logger.warning("Could not configure command visibility", error=str(exc))
-
 
 
 
