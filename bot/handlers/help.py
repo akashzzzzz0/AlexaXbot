@@ -48,6 +48,7 @@ def build_help_text(_: callable) -> str:
         f"/unwarn — {_('help_cmd_unwarn')}\n"
         f"/warns — {_('help_cmd_warns')}\n"
         f"/history — {_('help_cmd_history')}\n"
+        "/purg — bulk delete from a replied-to message through the command\n"
         "/promote /demote — manage group admins\n"
         "/warnings /resetwarns /del /pin /unpin — moderation tools\n"
         "/role /setrole /clearrole — custom member labels\n\n"
@@ -124,7 +125,7 @@ HELP_GUIDES = {
         "/mute — mute a member\n/unmute — unmute a member\n"
         "/warn — issue a warning\n/warns or /warnings — view warnings\n"
         "/resetwarns — reset warnings\n/promote /demote — manage admins\n"
-        "/del — delete a replied-to message\n/pin /unpin — manage pinned messages\n\n"
+        "/del — delete a replied-to message\n/purg — bulk delete from a replied-to message through the command\n/pin /unpin — manage pinned messages\n\n"
         "Reply to a member's message when a command needs a target. "
         "ALEXA needs the relevant admin permissions to perform moderation actions."
     ),
