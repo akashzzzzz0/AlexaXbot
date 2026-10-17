@@ -197,6 +197,15 @@ class SecuritySettings(Base):
     group = relationship("Group", back_populates="security")
 
 
+class BioLinkProtectionSetting(Base):
+    """Independent per-group switch for checking links in joining members' bios."""
+    __tablename__ = "bio_link_protection_settings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    group_id = Column(BigInteger, ForeignKey("groups.id", ondelete="CASCADE"), unique=True, nullable=False)
+    enabled = Column(Boolean, default=False, nullable=False)
+
+
 class WelcomeSettings(Base):
     __tablename__ = "welcome_settings"
 
