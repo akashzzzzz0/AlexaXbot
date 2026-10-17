@@ -187,9 +187,20 @@ async def wordseek_guess(message: Message, db_session: AsyncSession, db_user, **
             ("\n🥇 First correct guess bonus included!" if first else ""),
             parse_mode="HTML",
         )
-        # End after the first correct answer so only one winner is rewarded.
-        game["round_over"] = True
-        await message.answer(f"🏁 WordSeek over! The word was <b>{target}</b>. Use /new for another round.", parse_mode="HTML")
+        # Keep the shared round open so other joined members can solve it too.
+        all_joined_solved = bool(game["joined"]) and set(game["joined"]).issubset(game["solved"])
+        if all_joined_solved or game["attempts"] >= MAX_ATTEMPTS:
+            game["round_over"] = True
+            await message.answer(
+                f"🏁 WordSeek over! The word was <b>{target}</b>. Use /new for another round.",
+                parse_mode="HTML",
+            )
+        else:
+            await message.answer(
+                "🔤 Round is still open! Other joined players can keep guessing. "
+                "Solved players are finished for this round.",
+                parse_mode="HTML",
+            )
         return
 
     await add_xp(db_session, db_user.id, PARTICIPATION_XP)
