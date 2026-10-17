@@ -4,6 +4,7 @@ from aiogram.filters import CommandStart, Command
 from sqlalchemy.ext.asyncio import AsyncSession
 from bot.config import settings
 from bot.keyboards.main_menu import main_menu_kb, back_button_kb
+from bot.handlers.auto_delete_middleware import schedule_start_menu_delete
 import structlog
 
 logger = structlog.get_logger()
@@ -67,11 +68,13 @@ async def _send_add_group_prompt(message: Message):
         photos = await message.bot.get_user_profile_photos(me.id, limit=1)
         if photos.total_count and photos.photos and photos.photos[0]:
             photo = photos.photos[0][-1]
-            await message.answer_photo(photo.file_id, caption=caption, reply_markup=kb, parse_mode="HTML")
+            sent = await message.answer_photo(photo.file_id, caption=caption, reply_markup=kb, parse_mode="HTML")
+            schedule_start_menu_delete(sent, 10)
             return
     except Exception as exc:
         logger.warning("Could not load ALEXA profile photo for /start", error=str(exc))
-    await message.answer(caption, reply_markup=kb, parse_mode="HTML")
+    sent = await message.answer(caption, reply_markup=kb, parse_mode="HTML")
+    schedule_start_menu_delete(sent, 10)
 
 
 @router.message(CommandStart())
@@ -101,10 +104,11 @@ async def cmd_start(message: Message, _: callable, db_session: AsyncSession = No
             except Exception:
                 pass
     name = message.from_user.first_name or "User"
-    await message.answer(
+    sent = await message.answer(
         _get_commands("en", name),
         reply_markup=main_menu_kb(_, is_owner=(message.from_user.id == settings.effective_owner_id)),
     )
+    schedule_start_menu_delete(sent, 10)
 
 
 @router.message(Command("menu"))
