@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from bot.database.models import (
     Group, GroupMember, GroupSettings, WelcomeSettings, GoodbyeSettings,
-    SecuritySettings, CaptchaChallenge, GroupStats, User, GroupFilter, GroupBlocklist
+    SecuritySettings, BioLinkProtectionSetting, CaptchaChallenge, GroupStats, User, GroupFilter, GroupBlocklist
 )
 from bot.services.security_service import (
     check_message_violations, is_raid_detected, create_captcha_challenge, contains_link
@@ -172,10 +172,17 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
                 logger.warning("Anti-bot could not remove joining bot", chat_id=chat.id, user_id=user.id, error=str(exc))
         return
 
-    # Best-effort bio-link protection. Telegram only returns a user's bio in an
-    # accessible private chat, so this check may be unavailable for many members.
-    # Reuse the existing anti-link toggle to avoid changing the database schema.
-    if security and security.anti_link:
+    # Bio-link protection has its own persistent moderation switch. For groups
+    # without an explicit choice yet, preserve the previous anti-link-linked behavior.
+    bio_setting = await db_session.scalar(
+        select(BioLinkProtectionSetting).where(BioLinkProtectionSetting.group_id == chat.id)
+    )
+    bio_protection_enabled = (
+        bool(bio_setting.enabled) if bio_setting is not None
+        else bool(security and security.anti_link)
+    )
+    # Telegram may not expose bios for every joining member, so this is best-effort.
+    if bio_protection_enabled:
         try:
             profile = await event.bot.get_chat(user.id)
             bio = getattr(profile, "bio", None) or ""
@@ -186,7 +193,7 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
                     await event.bot.send_message(
                         chat.id,
                         f"🚫 A member was removed because their profile bio contains a link. "
-                        f"Bio-link protection uses the existing anti-link setting.",
+                        f"Bio-link protection is controlled separately in Moderation.",
                     )
                 except Exception:
                     pass
