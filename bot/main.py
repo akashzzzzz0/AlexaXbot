@@ -84,6 +84,8 @@ async def configure_command_visibility(bot) -> None:
         ("deposit", "Deposit coins"), ("withdraw", "Withdraw coins"), ("transfer", "Transfer coins"),
         ("referral", "Get referral link"), ("games", "Open games"), ("dice", "Play dice"),
         ("rps", "Rock paper scissors"), ("quiz", "Play quiz"), ("wheel", "Spin the wheel"),
+        ("wordseek", "Multiplayer word guessing"), ("new", "Start WordSeek round"),
+        ("join", "Join WordSeek round"), ("wscores", "WordSeek round scores"),
         ("roulette", "Play roulette"), ("cards", "Play cards"), ("card", "Play cards"),
         ("mines", "Play mines"), ("bomb", "Play mines"), ("treasure", "Treasure hunt"),
         ("numwar", "Number war"), ("duel", "Challenge a player"), ("stats", "View game stats"),
