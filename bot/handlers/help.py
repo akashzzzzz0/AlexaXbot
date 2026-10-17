@@ -57,7 +57,6 @@ def build_help_text(_: callable) -> str:
         "/blocklist /addblocklist /rmblocklist — blocked words\n"
         "/rules /setrules /report /admins /id /info — group utilities\n"
         "/disablecmd /enablecmd /disabledcmds — command controls\n"
-        "/autodelete — delete command messages after a delay\n"
         "/grouppromo — admin announcement/promotion in this group\n\n"
         "🪙 <b>Virtual games</b>\n"
         "/bal /kill /rob /revive /protect /unprotect /rank /leaders\n"
@@ -74,15 +73,15 @@ def build_help_text(_: callable) -> str:
 
 def help_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🛡️ Moderation", callback_data="help:moderation"),
+            InlineKeyboardButton(text="🔒 Security", callback_data="help:security"),
+        ],
+        [
+            InlineKeyboardButton(text="🎮 Games", callback_data="help:games"),
+            InlineKeyboardButton(text="💰 Economy", callback_data="help:economy"),
+        ],
         [InlineKeyboardButton(text="📋 All Commands", callback_data="help:commands")],
-        [
-            InlineKeyboardButton(text="🛡️ Moderation Guide", callback_data="help:moderation"),
-            InlineKeyboardButton(text="🔒 Security Guide", callback_data="help:security"),
-        ],
-        [
-            InlineKeyboardButton(text="🎮 Games Guide", callback_data="help:games"),
-            InlineKeyboardButton(text="💰 Economy Guide", callback_data="help:economy"),
-        ],
         [InlineKeyboardButton(text="🏠 Main Menu", callback_data="menu:main")],
     ])
 
@@ -129,17 +128,26 @@ HELP_GUIDES = {
 
 @router.message(Command('help'))
 async def cmd_help(message: Message, _: callable, **kwargs):
+    # /help shows the complete command list immediately.
     await message.answer(
-        "❓ <b>ALEXA Help Center</b>\nChoose a guide below, or open All Commands.",
+        build_help_text(_),
         parse_mode='HTML',
-        reply_markup=help_menu_kb(),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🧭 Help Sections", callback_data="menu:help")],
+            [InlineKeyboardButton(text="🏠 Main Menu", callback_data="menu:main")],
+        ]),
     )
 
 
 @router.callback_query(F.data == "menu:help")
 async def menu_help(callback: CallbackQuery, **kwargs):
-    await callback.message.edit_text(
-        "❓ <b>ALEXA Help Center</b>\nChoose a guide below, or open All Commands.",
+    # Remove the temporary /start welcome/menu and show the dedicated help UI.
+    try:
+        await callback.message.delete()
+    except Exception as exc:
+        logger.debug("Could not delete previous start menu for help", error=str(exc))
+    await callback.message.answer(
+        "❓ <b>ALEXA Help Center</b>\nChoose a section below. Tap <b>All Commands</b> for the full command list.",
         parse_mode='HTML',
         reply_markup=help_menu_kb(),
     )
