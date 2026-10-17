@@ -284,10 +284,10 @@ async def _owner_render_biolink(callback: CallbackQuery, session: AsyncSession, 
         "warn": "warnings only",
     }
     await callback.message.edit_text(
-        f"🛡️ <b>Bio Link Protection — {escape(group.title)}</b>\\n\\n"
-        f"Status: <b>{'ON' if setting.enabled else 'OFF'}</b>\\n"
-        f"Action: <b>{escape(labels.get(config.action, config.action))}</b>\\n"
-        f"Mute duration: <b>{max(1, config.mute_duration // 60)} minutes</b>\\n\\n"
+        f"🛡️ <b>Bio Link Protection — {escape(group.title)}</b>\n\n"
+        f"Status: <b>{'ON' if setting.enabled else 'OFF'}</b>\n"
+        f"Action: <b>{escape(labels.get(config.action, config.action))}</b>\n"
+        f"Mute duration: <b>{max(1, config.mute_duration // 60)} minutes</b>\n\n"
         "Manage this group's Bio Link Protection from the Owner Panel.",
         parse_mode="HTML",
         reply_markup=_owner_biolink_kb(group_id, bool(setting.enabled), config.action, config.mute_duration),
