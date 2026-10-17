@@ -201,7 +201,7 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
                 try:
                     await event.bot.send_message(
                         chat.id,
-                        f"🚫 A member was removed because their profile bio contains a link. "
+                        f"🚫 A member was removed because their profile bio contains a link, Telegram username, bot link, or channel link. "
                         f"Bio-link protection is controlled separately in Moderation.",
                     )
                 except Exception:
