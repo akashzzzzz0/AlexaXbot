@@ -21,6 +21,22 @@ import structlog
 
 logger = structlog.get_logger()
 router = Router()
+
+async def _delete_after_20_seconds(bot, chat_id: int, message_id: int):
+    """Remove temporary moderation notices after 20 seconds."""
+    await asyncio.sleep(20)
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception as exc:
+        logger.debug("Temporary notice could not be deleted", chat_id=chat_id, message_id=message_id, error=str(exc))
+
+
+async def _send_temporary_notice(bot, chat_id: int, text: str):
+    """Send a notice that automatically disappears after 20 seconds."""
+    sent = await bot.send_message(chat_id, text)
+    asyncio.create_task(_delete_after_20_seconds(bot, chat_id, sent.message_id))
+    return sent
+
 _recent_welcome_keys = {}
 
 
@@ -217,7 +233,7 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
                         notice = f"🔇 Member muted for {max(1, duration // 60)} minutes because their profile bio contains a link."
                     else:
                         notice = "⚠️ Warning: profile bio contains a link. Please remove it to avoid moderation."
-                    await event.bot.send_message(chat.id, notice)
+                    await _send_temporary_notice(event.bot, chat.id, notice)
                 except Exception as action_exc:
                     logger.warning("Bio-link action failed", chat_id=chat.id, user_id=user.id, action=action, error=str(action_exc))
                 logger.info("Member bio contains a link", chat_id=chat.id, user_id=user.id, action=action)
