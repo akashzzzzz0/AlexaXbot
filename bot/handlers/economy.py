@@ -79,7 +79,7 @@ async def cmd_deposit(message: Message, _: callable, state: FSMContext, **kwargs
     await message.reply(_('enter_amount'))
 
 
-@router.message(EconomyStates.waiting_deposit)
+@router.message(EconomyStates.waiting_deposit, F.text & ~F.text.startswith('/'))
 async def process_deposit(message: Message, _: callable, db_session: AsyncSession, db_user, state: FSMContext, **kwargs):
     try:
         amount = int(message.text.strip())
@@ -104,7 +104,7 @@ async def cmd_withdraw(message: Message, _: callable, state: FSMContext, **kwarg
     await message.reply(_('enter_amount'))
 
 
-@router.message(EconomyStates.waiting_withdraw)
+@router.message(EconomyStates.waiting_withdraw, F.text & ~F.text.startswith('/'))
 async def process_withdraw(message: Message, _: callable, db_session: AsyncSession, db_user, state: FSMContext, **kwargs):
     try:
         amount = int(message.text.strip())
@@ -129,7 +129,7 @@ async def cmd_transfer(message: Message, _: callable, state: FSMContext, **kwarg
     await message.reply(_('transfer_enter_user'), parse_mode='HTML')
 
 
-@router.message(EconomyStates.waiting_transfer_user)
+@router.message(EconomyStates.waiting_transfer_user, F.text & ~F.text.startswith('/'))
 async def process_transfer_user(message: Message, _: callable, db_session: AsyncSession, db_user, state: FSMContext, **kwargs):
     from sqlalchemy import select as _select
     from bot.database.models import User
@@ -150,7 +150,7 @@ async def process_transfer_user(message: Message, _: callable, db_session: Async
     await message.reply(_('transfer_enter_amount').format(name=target.first_name), parse_mode='HTML')
 
 
-@router.message(EconomyStates.waiting_transfer_amount)
+@router.message(EconomyStates.waiting_transfer_amount, F.text & ~F.text.startswith('/'))
 async def process_transfer_amount(message: Message, _: callable, db_session: AsyncSession, db_user, state: FSMContext, **kwargs):
     try:
         amount = int(message.text.strip())
