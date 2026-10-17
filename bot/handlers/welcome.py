@@ -412,8 +412,25 @@ async def group_service_message_welcome(message: Message, db_session: AsyncSessi
 
 @router.message(F.chat.type.in_({"group", "supergroup"}))
 async def group_message_handler(message: Message, db_session: AsyncSession, db_user=None, db_group=None, group_security=None, _=None, **kwargs):
-    if not db_group or not group_security:
+    # Resolve group/security directly as a fallback if middleware did not inject them.
+    # This prevents the link-protection handler from silently skipping messages.
+    if not db_group:
+        db_group = await db_session.get(Group, message.chat.id)
+    if not db_group:
         return
+    if not group_security:
+        group_security = await db_session.scalar(
+            select(SecuritySettings).where(SecuritySettings.group_id == message.chat.id)
+        )
+    if not group_security:
+        group_security = SecuritySettings(group_id=message.chat.id)
+        db_session.add(group_security)
+        try:
+            await db_session.flush()
+        except Exception:
+            await db_session.rollback()
+            logger.exception("Could not initialize group security settings", group_id=message.chat.id)
+            return
     # Bot accounts are not persisted as regular users by DatabaseMiddleware.
     # Still enforce the explicit bot-message lock before returning.
     if message.from_user and message.from_user.is_bot:
