@@ -514,7 +514,7 @@ async def owner_users(callback: CallbackQuery, _: callable, db_session: AsyncSes
             name = escape((user.first_name or "User") + (f" {user.last_name}" if user.last_name else ""))
             username = f" (@{escape(user.username)})" if user.username else ""
             lines.append(f'• <a href="tg://user?id={user.id}">{name}</a>{username} — <code>{user.id}</code>')
-        body = "\\n".join(lines)
+        body = "\n".join(lines)
 
     builder = InlineKeyboardBuilder()
     if page > 0:
@@ -526,9 +526,9 @@ async def owner_users(callback: CallbackQuery, _: callable, db_session: AsyncSes
 
     page_label = f"Page {page + 1}/{max_page + 1}" if total else "Page 0/0"
     await callback.message.edit_text(
-        "👤 <b>Active DM Users</b>\\n"
-        f"👥 Total: <b>{format_number(total)}</b>\\n"
-        f"📄 {page_label} (25 per page)\\n\\n" + body,
+        "👤 <b>Active DM Users</b>\n"
+        f"👥 Total: <b>{format_number(total)}</b>\n"
+        f"📄 {page_label} (25 per page)\n\n" + body,
         parse_mode="HTML", reply_markup=builder.as_markup()
     )
     await callback.answer()
