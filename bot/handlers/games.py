@@ -555,19 +555,26 @@ async def game_cards(callback: CallbackQuery, _: callable, db_session=None, db_u
     if db_user is None or db_session is None:
         await callback.answer(_('error_generic'), show_alert=True)
         return
+    wager = 25
+    from bot.services.economy_service import deduct_coins, add_coins
+    ok, balance = await deduct_coins(db_session, db_user.id, wager, 'card_bet', 'Card game wager')
+    if not ok:
+        await callback.answer(f"Card game costs {wager} coins. Pocket balance: {format_number(balance)}.", show_alert=True)
+        return
     p_rank, p_suit = random_card()
     b_rank, b_suit = random_card()
     p_val = CARD_RANKS.index(p_rank)
     b_val = CARD_RANKS.index(b_rank)
     if p_val > b_val:
-        result_text = _('game_won').format(amount=40)
+        payout = wager * 2
+        await add_coins(db_session, db_user.id, payout, 'card_win', 'Card game payout')
+        result_text = _('game_won').format(amount=format_number(wager))
         icon = '🏆'
-        from bot.services.economy_service import add_coins
-        await add_coins(db_session, db_user.id, 40, 'game_win', 'Card game win')
     elif p_val < b_val:
-        result_text = _('game_lost').format(amount=0)
+        result_text = _('game_lost').format(amount=format_number(wager))
         icon = '💀'
     else:
+        await add_coins(db_session, db_user.id, wager, 'card_draw', 'Card game tie refund')
         result_text = _('game_draw')
         icon = '🤝'
     text = (
