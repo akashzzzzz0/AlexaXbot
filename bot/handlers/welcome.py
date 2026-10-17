@@ -62,7 +62,7 @@ def _bio_link_settings_kb(enabled: bool, action: str, duration: int):
     return builder.as_markup()
 
 
-@router.message(F.chat.type.in_({"group", "supergroup"}), F.text.regexp(r"^/biolink(?:@\\w+)?(?:\\s|$)"))
+@router.message(F.chat.type.in_({"group", "supergroup"}), F.text.regexp(r"^/biolink(?:@\w+)?(?:\s|$)"))
 async def bio_link_settings_command(message: Message, db_session: AsyncSession, **kwargs):
     try:
         member = await message.bot.get_chat_member(message.chat.id, message.from_user.id)
@@ -92,10 +92,10 @@ async def bio_link_settings_command(message: Message, db_session: AsyncSession, 
         "warn": "warnings only",
     }
     await message.reply(
-        "🛡️ <b>Bio Link Protection</b>\\n\\n"
-        f"Status: {'ON' if setting.enabled else 'OFF'}\\n"
-        f"Action: {action_labels.get(config.action, config.action)}\\n"
-        f"Mute duration: {max(1, config.mute_duration // 60)} minutes\\n\\n"
+        "🛡️ <b>Bio Link Protection</b>\n\n"
+        f"Status: {'ON' if setting.enabled else 'OFF'}\n"
+        f"Action: {action_labels.get(config.action, config.action)}\n"
+        f"Mute duration: {max(1, config.mute_duration // 60)} minutes\n\n"
         "Choose how ALEXA should handle members whose profile bio contains a link.",
         reply_markup=_bio_link_settings_kb(bool(setting.enabled), config.action, config.mute_duration),
         parse_mode="HTML",
@@ -126,7 +126,7 @@ async def bio_link_settings_callback(callback: CallbackQuery, db_session: AsyncS
         config = BioLinkProtectionConfig(group_id=group_id, action="warn_mute", mute_duration=3600)
         db_session.add(config)
     parts = callback.data.split(":")
-    if len(parts) >= 3 and parts[1] == "toggle":
+    if len(parts) >= 2 and parts[1] == "toggle":
         setting.enabled = not setting.enabled
     elif len(parts) == 3 and parts[1] == "action":
         if parts[2] not in {"warn_mute", "warn_ban", "mute", "ban"}:
@@ -157,10 +157,10 @@ async def bio_link_settings_callback(callback: CallbackQuery, db_session: AsyncS
         "ban": "immediate ban",
     }
     await callback.message.edit_text(
-        "🛡️ <b>Bio Link Protection</b>\\n\\n"
-        f"Status: {'ON' if setting.enabled else 'OFF'}\\n"
-        f"Action: {action_labels.get(config.action, config.action)}\\n"
-        f"Mute duration: {max(1, config.mute_duration // 60)} minutes\\n\\n"
+        "🛡️ <b>Bio Link Protection</b>\n\n"
+        f"Status: {'ON' if setting.enabled else 'OFF'}\n"
+        f"Action: {action_labels.get(config.action, config.action)}\n"
+        f"Mute duration: {max(1, config.mute_duration // 60)} minutes\n\n"
         "Choose how ALEXA should handle members whose profile bio contains a link.",
         reply_markup=_bio_link_settings_kb(bool(setting.enabled), config.action, config.mute_duration),
         parse_mode="HTML",
