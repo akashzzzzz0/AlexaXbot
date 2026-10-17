@@ -117,6 +117,12 @@ async def cmd_wheel(message: Message, _: callable, db_session=None, db_user=None
     if db_user is None or db_session is None:
         await message.reply(_('error_generic'))
         return
+    wager = 20
+    from bot.services.economy_service import deduct_coins
+    ok, balance = await deduct_coins(db_session, db_user.id, wager, 'wheel_bet', 'Wheel spin wager')
+    if not ok:
+        await message.reply(f"🎡 Wheel spin costs {wager} coins. Your balance: {format_number(balance)}.")
+        return
     segments = [('💀', 0), ('🟡 0.5×', 0.5), ('🟢 1.5×', 1.5), ('🔵 2×', 2), ('🟣 3×', 3), ('🌟 5×', 5), ('💎 10×', 10)]
     probs = [0.30, 0.05, 0.20, 0.25, 0.15, 0.03, 0.02]
     rand = random.random()
@@ -128,16 +134,20 @@ async def cmd_wheel(message: Message, _: callable, db_session=None, db_user=None
             chosen_label, chosen_mult = segments[i]
             break
     spin_animation = '🎡 ' + ' → '.join([s[0] for s in random.sample(segments, 4)]) + f' → <b>{chosen_label}</b>'
-    if chosen_label == '💀':
-        outcome = _('game_lost').format(amount=0)
+    if chosen_mult <= 0:
+        outcome = _('game_lost').format(amount=format_number(wager))
     else:
-        # Free spin: no wager is taken. Convert the displayed multiplier into
-        # a small virtual-coin reward so the result matches the wallet change.
-        reward = max(1, int(chosen_mult * 10))
-        if db_session is not None and db_user is not None:
+        payout = int(wager * chosen_mult)
+        if payout > 0:
             from bot.services.economy_service import add_coins
-            await add_coins(db_session, db_user.id, reward, 'game_win', 'Free wheel spin reward')
-        outcome = _('game_won').format(amount=format_number(reward))
+            await add_coins(db_session, db_user.id, payout, 'wheel_payout', f'Wheel payout at {chosen_mult}x')
+        net = payout - wager
+        if net > 0:
+            outcome = _('game_won').format(amount=format_number(net))
+        elif net < 0:
+            outcome = _('game_lost').format(amount=format_number(abs(net)))
+        else:
+            outcome = _('game_draw')
     text = (
         f"🎡 <b>{_('btn_game_wheel')}</b>\n"
         f"\n\n"
@@ -165,14 +175,19 @@ async def process_rps(callback: CallbackQuery, _: callable, db_session=None, db_
     if db_user is None or db_session is None:
         await callback.answer(_('error_generic'), show_alert=True)
         return
-    result = await play_rps(db_session, db_user.id, player_choice, wager=0)
+    wager = 20
+    result = await play_rps(db_session, db_user.id, player_choice, wager=wager)
+    if result.get('error') == 'insufficient_funds':
+        _, balance = await __import__('bot.services.economy_service', fromlist=['get_balance']).get_balance(db_session, db_user.id)
+        await callback.answer(f"RPS costs {wager} coins. Your pocket balance is {format_number(balance)}.", show_alert=True)
+        return
     emojis = {'rock': _('btn_rock'), 'paper': _('btn_paper'), 'scissors': _('btn_scissors')}
     p_e = emojis.get(result['player_choice'], '❓')
     b_e = emojis.get(result['bot_choice'], '❓')
     if result['result'] == 'win':
-        outcome = _('game_won').format(amount=0)
+        outcome = _('game_won').format(amount=format_number(result.get('winnings', 0)))
     elif result['result'] == 'lose':
-        outcome = _('game_lost').format(amount=0)
+        outcome = _('game_lost').format(amount=format_number(wager))
     else:
         outcome = _('game_draw')
     text = (
@@ -275,19 +290,26 @@ async def cmd_cards(message: Message, _: callable, db_session=None, db_user=None
     if db_user is None or db_session is None:
         await message.reply(_('error_generic'))
         return
+    wager = 25
+    from bot.services.economy_service import deduct_coins, add_coins
+    ok, balance = await deduct_coins(db_session, db_user.id, wager, 'card_bet', 'Card game wager')
+    if not ok:
+        await message.reply(f"🃏 Card game costs {wager} coins. Your balance: {format_number(balance)}.")
+        return
     p_rank, p_suit = random_card()
     b_rank, b_suit = random_card()
     p_val = CARD_RANKS.index(p_rank)
     b_val = CARD_RANKS.index(b_rank)
     if p_val > b_val:
-        result_text = _('game_won').format(amount=40)
+        payout = wager * 2
+        await add_coins(db_session, db_user.id, payout, 'card_win', 'Card game payout')
+        result_text = _('game_won').format(amount=format_number(wager))
         icon = '🏆'
-        from bot.services.economy_service import add_coins
-        await add_coins(db_session, db_user.id, 40, 'game_win', 'Card game win')
     elif p_val < b_val:
-        result_text = _('game_lost').format(amount=0)
+        result_text = _('game_lost').format(amount=format_number(wager))
         icon = '💀'
     else:
+        await add_coins(db_session, db_user.id, wager, 'card_draw', 'Card game tie refund')
         result_text = _('game_draw')
         icon = '🤝'
     text = (
