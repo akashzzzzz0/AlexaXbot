@@ -20,7 +20,7 @@ router = Router()
 
 _bio_link_settings_drafts = {}
 router.message.outer_middleware(AdminActionMiddleware(
-    commands={"ban", "unban", "kick", "mute", "unmute", "warn", "unwarn", "warns", "warnings", "history", "note", "del", "pin", "unpin", "ro", "setrole", "clearrole", "role", "resetwarns", "promote", "demote", "warnings", "del", "pin", "unpin"}
+    commands={"ban", "unban", "kick", "mute", "unmute", "warn", "unwarn", "warns", "warnings", "history", "note", "del", "purg", "pin", "unpin", "ro", "setrole", "clearrole", "role", "resetwarns", "promote", "demote"}
 ))
 router.callback_query.outer_middleware(AdminActionMiddleware(prefixes=("mod:", "mute_duration:", "ban_duration:", "warn_action:", "ban_confirm:")))
 
@@ -759,6 +759,50 @@ async def cmd_delete_message(message: Message, bot: Bot, **kwargs):
         await bot.delete_message(message.chat.id, message.message_id)
     except Exception as exc:
         await message.reply(f"Delete failed. Check bot admin/delete permissions. ({escape(str(exc)[:150])})", parse_mode="HTML")
+
+
+
+@router.message(Command("purg"))
+async def cmd_purg(message: Message, bot: Bot, **kwargs):
+    if message.chat.type not in ("group", "supergroup"):
+        return
+    if not message.reply_to_message:
+        await message.reply("🧹 Reply to the first message you want to delete with /purg.")
+        return
+    start_id = message.reply_to_message.message_id
+    end_id = message.message_id
+    if end_id < start_id or end_id - start_id + 1 > 1000:
+        await message.reply("Purge range is too large. Select a range of up to 1000 message IDs.")
+        return
+    try:
+        me = await bot.get_chat_member(message.chat.id, bot.id)
+        status = str(getattr(me.status, "value", me.status))
+        if status not in {"administrator", "creator"} or (status == "administrator" and not getattr(me, "can_delete_messages", False)):
+            await message.reply("ALEXA needs admin + Delete Messages permission to purge.")
+            return
+    except Exception:
+        await message.reply("Could not verify ALEXA's delete-message permission.")
+        return
+    ids = list(range(start_id, end_id + 1))
+    deleted = failed = 0
+    for offset in range(0, len(ids), 100):
+        batch = ids[offset:offset + 100]
+        try:
+            await bot.delete_messages(chat_id=message.chat.id, message_ids=batch)
+            deleted += len(batch)
+        except Exception:
+            for message_id in batch:
+                try:
+                    await bot.delete_message(chat_id=message.chat.id, message_id=message_id)
+                    deleted += 1
+                except Exception:
+                    failed += 1
+    await message.answer(
+        f"🧹 <b>Purge finished</b>\\nDeleted: <b>{deleted}</b>\\n"
+        f"Could not delete: <b>{failed}</b>\\n"
+        "Telegram may not allow deleting messages older than 48 hours.",
+        parse_mode="HTML",
+    )
 
 
 @router.message(Command("pin"))
