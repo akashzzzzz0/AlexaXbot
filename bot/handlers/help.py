@@ -1,5 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from bot.keyboards.main_menu import back_button_kb
 import structlog
@@ -9,79 +9,161 @@ router = Router()
 
 
 def build_help_text(_: callable) -> str:
-    """Build i18n help text using the _() callable."""
+    """Build the complete command list using the i18n callable."""
     return (
-        f"  ❓ <b>{_('help_center_title')}</b>\n"
-        f"  💰 <b>{_('help_section_economy')}</b>\n"
-        f"  /wallet — {_('help_cmd_wallet')}\n"
-        f"  /daily — {_('help_cmd_daily')}\n"
-        f"  /weekly — {_('help_cmd_weekly')}\n"
-        f"  /monthly — {_('help_cmd_monthly')}\n"
-        f"  /deposit — {_('help_cmd_deposit')}\n"
-        f"  /withdraw — {_('help_cmd_withdraw')}\n"
-        f"  /transfer — {_('help_cmd_transfer')}\n"
-        f"  /referral — {_('help_cmd_referral')}\n"
-        f"  /achievements — {_('help_cmd_achievements')}\n\n"
-        f"  🎮 <b>{_('help_section_games')}</b>\n"
-        f"  /dice — {_('help_cmd_dice')}\n"
-        f"  /rps — {_('help_cmd_rps')}\n"
-        f"  /quiz — {_('help_cmd_quiz')}\n"
-        f"  /wheel — {_('help_cmd_wheel')}\n"
-        f"  /numwar — {_('help_cmd_numwar')}\n"
-        f"  /cards — {_('help_cmd_cards')}\n"
-        f"  /treasure — {_('help_cmd_treasure')}\n"
-        f"  /mines — {_('help_cmd_mines')}\n"
-        f"  /roulette — {_('help_cmd_roulette')}\n"
-        f"  🛡️ <b>{_('help_section_security')}</b>\n"
-        f"  /security — {_('help_cmd_security')}\n"
-        f"  /lock — {_('help_cmd_lock')}\n"
-        f"  /unlock — {_('help_cmd_unlock')}\n"
-        "  /locks /locktypes — list content locks\n"
-        "  /setflood /flood /setfloodmode /clearflood — flood controls\n\n"
-        f"  🔨 <b>{_('help_section_moderation')}</b>\n"
-        f"  /ban — {_('help_cmd_ban')}\n"
-        f"  /unban — {_('help_cmd_unban')}\n"
-        f"  /kick — {_('help_cmd_kick')}\n"
-        f"  /mute — {_('help_cmd_mute')}\n"
-        f"  /unmute — {_('help_cmd_unmute')}\n"
-        f"  /warn — {_('help_cmd_warn')}\n"
-        f"  /unwarn — {_('help_cmd_unwarn')}\n"
-        f"  /warns — {_('help_cmd_warns')}\n"
-        f"  /history — {_('help_cmd_history')}\n"
-        "  /promote /demote — manage group admins\n"
-        "  /warnings /resetwarns /del /pin /unpin — moderation tools\n"
-        "  /role /setrole /clearrole — custom member labels\n\n"
-        "  🤖 <b>Automation</b>\n"
-        "  /filter /stopfilter — keyword auto-replies\n"
-        "  /save /get /clear — saved text messages\n"
-        "  /blocklist /addblocklist /rmblocklist — blocked words\n"
-        "  /rules /setrules /report /admins /id /info — group utilities\n"
-        "  /disablecmd /enablecmd /disabledcmds — command controls\n"
-        "  /autodelete — delete command messages after a delay\n"
-        "  /grouppromo — admin announcement/promotion in this group\n\n"
-        "  🪙 <b>Virtual games</b>\n"
-        "  /bal /kill /rob /revive /protect /unprotect /rank /leaders\n"
-        "  /items /task /bomb /bluff /card /hack /toprich /topkill /toprob /pfp\n\n"
-        f"  ⚙️ <b>{_('help_section_settings')}</b>\n"
-        f"  /settings — {_('help_cmd_settings')}\n\n"
-        f"  ℹ️ <b>{_('help_section_other')}</b>\n"
-        f"  /language — {_('help_cmd_language')}\n"
-        f"  /stats — {_('help_cmd_stats')}\n"
-        f"  /help — {_('help_cmd_help')}\n\n"
-        f"  <i>{_('help_hint')}</i>"
+        f"❓ <b>{_('help_center_title')}</b>\n"
+        f"💰 <b>{_('help_section_economy')}</b>\n"
+        f"/wallet — {_('help_cmd_wallet')}\n"
+        f"/daily — {_('help_cmd_daily')}\n"
+        f"/weekly — {_('help_cmd_weekly')}\n"
+        f"/monthly — {_('help_cmd_monthly')}\n"
+        f"/deposit — {_('help_cmd_deposit')}\n"
+        f"/withdraw — {_('help_cmd_withdraw')}\n"
+        f"/transfer — {_('help_cmd_transfer')}\n"
+        f"/referral — {_('help_cmd_referral')}\n"
+        f"/achievements — {_('help_cmd_achievements')}\n\n"
+        f"🎮 <b>{_('help_section_games')}</b>\n"
+        f"/dice — {_('help_cmd_dice')}\n"
+        f"/rps — {_('help_cmd_rps')}\n"
+        f"/quiz — {_('help_cmd_quiz')}\n"
+        f"/wheel — {_('help_cmd_wheel')}\n"
+        f"/numwar — {_('help_cmd_numwar')}\n"
+        f"/cards — {_('help_cmd_cards')}\n"
+        f"/treasure — {_('help_cmd_treasure')}\n"
+        f"/mines — {_('help_cmd_mines')}\n"
+        f"/roulette — {_('help_cmd_roulette')}\n\n"
+        f"🛡️ <b>{_('help_section_security')}</b>\n"
+        f"/security — {_('help_cmd_security')}\n"
+        f"/lock — {_('help_cmd_lock')}\n"
+        f"/unlock — {_('help_cmd_unlock')}\n"
+        "/locks /locktypes — list content locks\n"
+        "/setflood /flood /setfloodmode /clearflood — flood controls\n\n"
+        f"🔨 <b>{_('help_section_moderation')}</b>\n"
+        f"/ban — {_('help_cmd_ban')}\n"
+        f"/unban — {_('help_cmd_unban')}\n"
+        f"/kick — {_('help_cmd_kick')}\n"
+        f"/mute — {_('help_cmd_mute')}\n"
+        f"/unmute — {_('help_cmd_unmute')}\n"
+        f"/warn — {_('help_cmd_warn')}\n"
+        f"/unwarn — {_('help_cmd_unwarn')}\n"
+        f"/warns — {_('help_cmd_warns')}\n"
+        f"/history — {_('help_cmd_history')}\n"
+        "/promote /demote — manage group admins\n"
+        "/warnings /resetwarns /del /pin /unpin — moderation tools\n"
+        "/role /setrole /clearrole — custom member labels\n\n"
+        "🤖 <b>Automation</b>\n"
+        "/filter /stopfilter — keyword auto-replies\n"
+        "/save /get /clear — saved text messages\n"
+        "/blocklist /addblocklist /rmblocklist — blocked words\n"
+        "/rules /setrules /report /admins /id /info — group utilities\n"
+        "/disablecmd /enablecmd /disabledcmds — command controls\n"
+        "/autodelete — delete command messages after a delay\n"
+        "/grouppromo — admin announcement/promotion in this group\n\n"
+        "🪙 <b>Virtual games</b>\n"
+        "/bal /kill /rob /revive /protect /unprotect /rank /leaders\n"
+        "/items /task /bomb /bluff /card /hack /toprich /topkill /toprob /pfp\n\n"
+        f"⚙️ <b>{_('help_section_settings')}</b>\n"
+        f"/settings — {_('help_cmd_settings')}\n\n"
+        f"ℹ️ <b>{_('help_section_other')}</b>\n"
+        f"/language — {_('help_cmd_language')}\n"
+        f"/stats — {_('help_cmd_stats')}\n"
+        f"/help — {_('help_cmd_help')}\n\n"
+        f"<i>{_('help_hint')}</i>"
     )
+
+
+def help_menu_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 All Commands", callback_data="help:commands")],
+        [
+            InlineKeyboardButton(text="🛡️ Moderation Guide", callback_data="help:moderation"),
+            InlineKeyboardButton(text="🔒 Security Guide", callback_data="help:security"),
+        ],
+        [
+            InlineKeyboardButton(text="🎮 Games Guide", callback_data="help:games"),
+            InlineKeyboardButton(text="💰 Economy Guide", callback_data="help:economy"),
+        ],
+        [InlineKeyboardButton(text="🏠 Main Menu", callback_data="menu:main")],
+    ])
+
+
+HELP_GUIDES = {
+    "help:moderation": (
+        "🛡️ <b>Moderation Guide</b>\n\n"
+        "/ban — ban a member\n/unban — remove a ban\n/kick — remove a member\n"
+        "/mute — mute a member\n/unmute — unmute a member\n"
+        "/warn — issue a warning\n/warns or /warnings — view warnings\n"
+        "/resetwarns — reset warnings\n/promote /demote — manage admins\n"
+        "/del — delete a replied-to message\n/pin /unpin — manage pinned messages\n\n"
+        "Reply to a member's message when a command needs a target. "
+        "ALEXA needs the relevant admin permissions to perform moderation actions."
+    ),
+    "help:security": (
+        "🔒 <b>Security Guide</b>\n\n"
+        "/security — view security controls\n"
+        "/lock and /unlock — lock or unlock supported content types\n"
+        "/locks /locktypes — view lock types\n"
+        "/setflood /flood /setfloodmode /clearflood — configure flood protection\n"
+        "Bio Link Protection is a separate group setting where available. "
+        "ALEXA needs administrator rights and permission to delete messages for enforcement."
+    ),
+    "help:games": (
+        "🎮 <b>Games Guide</b>\n\n"
+        "/dice — dice game\n/rps — rock-paper-scissors\n/quiz — quiz\n"
+        "/wheel — wheel of fortune\n/numwar — number war\n/cards — card game\n"
+        "/treasure — treasure game\n/mines — mines game\n/roulette — roulette\n"
+        "/bal /kill /rob /revive /protect /unprotect /rank /leaders — virtual game tools\n\n"
+        "Use a game's command in the chat where you want to play."
+    ),
+    "help:economy": (
+        "💰 <b>Economy Guide</b>\n\n"
+        "/wallet — view your wallet\n/daily — claim a daily reward\n"
+        "/weekly — claim a weekly reward\n/monthly — claim a monthly reward\n"
+        "/deposit and /withdraw — manage supported wallet actions\n"
+        "/transfer — transfer coins\n/referral — get your referral link\n"
+        "/achievements — view achievements and rewards\n\n"
+        "Rewards and balances are virtual bot features, not real money."
+    ),
+}
 
 
 @router.message(Command('help'))
 async def cmd_help(message: Message, _: callable, **kwargs):
-    await message.answer(build_help_text(_), parse_mode='HTML')
+    await message.answer(
+        "❓ <b>ALEXA Help Center</b>\nChoose a guide below, or open All Commands.",
+        parse_mode='HTML',
+        reply_markup=help_menu_kb(),
+    )
 
 
 @router.callback_query(F.data == "menu:help")
-async def menu_help(callback: CallbackQuery, _: callable, **kwargs):
+async def menu_help(callback: CallbackQuery, **kwargs):
     await callback.message.edit_text(
-        build_help_text(_),
+        "❓ <b>ALEXA Help Center</b>\nChoose a guide below, or open All Commands.",
         parse_mode='HTML',
-        reply_markup=back_button_kb(_, 'menu:main'),
+        reply_markup=help_menu_kb(),
     )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("help:"))
+async def help_section(callback: CallbackQuery, _: callable, **kwargs):
+    section = callback.data
+    if section == "help:commands":
+        text = build_help_text(_)
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Back to Help", callback_data="menu:help")],
+            [InlineKeyboardButton(text="🏠 Main Menu", callback_data="menu:main")],
+        ])
+    else:
+        text = HELP_GUIDES.get(section)
+        if not text:
+            await callback.answer("This help section is not available.", show_alert=True)
+            return
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 All Commands", callback_data="help:commands")],
+            [InlineKeyboardButton(text="◀️ Back to Help", callback_data="menu:help")],
+            [InlineKeyboardButton(text="🏠 Main Menu", callback_data="menu:main")],
+        ])
+    await callback.message.edit_text(text, parse_mode='HTML', reply_markup=keyboard)
     await callback.answer()
