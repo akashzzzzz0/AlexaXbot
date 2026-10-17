@@ -206,6 +206,16 @@ class BioLinkProtectionSetting(Base):
     enabled = Column(Boolean, default=False, nullable=False)
 
 
+class BioLinkProtectionConfig(Base):
+    """Per-group action and mute duration for bio-link protection."""
+    __tablename__ = "bio_link_protection_configs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    group_id = Column(BigInteger, ForeignKey("groups.id", ondelete="CASCADE"), unique=True, nullable=False)
+    action = Column(String(16), default="mute", nullable=False)
+    mute_duration = Column(Integer, default=3600, nullable=False)
+
+
 class WelcomeSettings(Base):
     __tablename__ = "welcome_settings"
 
