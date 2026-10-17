@@ -108,9 +108,9 @@ async def open_bio_link_protection(callback: CallbackQuery, db_session: AsyncSes
         return
     enabled = await _bio_link_protection_enabled(db_session, chat.id)
     await callback.message.edit_text(
-        "🛡️ <b>Bio Link Protection</b>\\n\\n"
+        "🛡️ <b>Bio Link Protection</b>\n\n"
         "When enabled, ALEXA checks for links in member bios where Telegram makes the bio available, "
-        "and applies the group's configured protection.\\n\\n"
+        "and applies the group's configured protection.\n\n"
         f"Current status: <b>{'🟢 ON' if enabled else '🔴 OFF'}</b>",
         parse_mode="HTML",
         reply_markup=bio_link_protection_kb(enabled),
@@ -155,9 +155,9 @@ async def _set_bio_link_protection(callback: CallbackQuery, db_session: AsyncSes
         return
 
     await callback.message.edit_text(
-        "🛡️ <b>Bio Link Protection</b>\\n\\n"
+        "🛡️ <b>Bio Link Protection</b>\n\n"
         "When enabled, ALEXA checks for links in member bios where Telegram makes the bio available, "
-        "and applies the group's configured protection.\\n\\n"
+        "and applies the group's configured protection.\n\n"
         f"Current status: <b>{'🟢 ON' if enabled else '🔴 OFF'}</b>",
         parse_mode="HTML",
         reply_markup=bio_link_protection_kb(enabled),
