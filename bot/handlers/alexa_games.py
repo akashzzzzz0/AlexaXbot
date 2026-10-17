@@ -258,6 +258,6 @@ async def card_game(message: Message, db_session: AsyncSession, db_user, **kwarg
     player_label = ranks.get(player_card, str(player_card))
     bot_label = ranks.get(bot_card, str(bot_card))
     await message.reply(
-        f"🃏 <b>Card Duel</b>\\nYour card: <b>{player_label}</b> · Bot card: <b>{bot_label}</b>\\n\\n{result}",
+        f"🃏 <b>Card Duel</b>\nYour card: <b>{player_label}</b> · Bot card: <b>{bot_label}</b>\n\n{result}",
         parse_mode="HTML",
     )
