@@ -130,7 +130,7 @@ async def cmd_transfer(message: Message, _: callable, state: FSMContext, **kwarg
 
 
 @router.message(EconomyStates.waiting_transfer_user)
-async def process_transfer_user(message: Message, _: callable, db_session: AsyncSession, state: FSMContext, **kwargs):
+async def process_transfer_user(message: Message, _: callable, db_session: AsyncSession, db_user, state: FSMContext, **kwargs):
     from sqlalchemy import select as _select
     from bot.database.models import User
     text = message.text.strip().lstrip('@')
@@ -141,6 +141,9 @@ async def process_transfer_user(message: Message, _: callable, db_session: Async
         target = await db_session.scalar(_select(User).where(User.username == text))
     if not target:
         await message.reply(_('transfer_user_not_found'))
+        return
+    if target.id == db_user.id:
+        await message.reply("You can't transfer coins to yourself. Please choose another user.")
         return
     await state.update_data(transfer_target_id=target.id, transfer_target_name=target.first_name)
     await state.set_state(EconomyStates.waiting_transfer_amount)
