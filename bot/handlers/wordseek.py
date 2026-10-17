@@ -93,8 +93,8 @@ async def wordseek_new(message: Message, **kwargs):
     )
 
 
-@router.message(F.text.regexp(r"^[A-Za-z]{5}$"))
-async def wordseek_guess(message: Message, db_session: AsyncSession, db_user, **kwargs):
+@router.message(F.text.regexp(r"(?i)^[a-z]{5}$"))
+async def wordseek_guess(message: Message, db_session: AsyncSession = None, db_user=None, **kwargs):
     if not message.chat or message.chat.type == "private" or not message.from_user:
         return
     game = games.get(message.chat.id)
@@ -113,13 +113,20 @@ async def wordseek_guess(message: Message, db_session: AsyncSession, db_user, **
     marks = render_guess(guess, target)
     if guess == target:
         reward = WIN_COINS + FIRST_BONUS
-        await add_coins(db_session, db_user.id, reward, "wordseek_win", "WordSeek correct word")
-        await add_xp(db_session, db_user.id, WIN_XP)
-        game["scores"][uid] = game["scores"].get(uid, 0) + reward
+        rewards_text = "Rewards unavailable (database not ready)."
+        if db_session is not None and db_user is not None:
+            try:
+                await add_coins(db_session, db_user.id, reward, "wordseek_win", "WordSeek correct word")
+                await add_xp(db_session, db_user.id, WIN_XP)
+                game["scores"][uid] = game["scores"].get(uid, 0) + reward
+                rewards_text = f"🪙 +{reward} coins · ⭐ +{WIN_XP} XP"
+            except Exception:
+                # Keep the game responsive even if the economy database is temporarily unavailable.
+                rewards_text = "⚠️ Guess counted, but rewards could not be saved."
         await message.reply(
             f"{marks} <b>{guess}</b>\n🎉 <b>{escape(message.from_user.full_name)}</b> guessed it!\n"
-            f"🪙 +{reward} coins · ⭐ +{WIN_XP} XP" +
-            "\n🥇 First correct guess bonus included!",
+            f"{rewards_text}" +
+            ("\n🥇 First correct guess bonus included!" if rewards_text.startswith("🪙") else ""),
             parse_mode="HTML",
         )
         game["round_over"] = True
@@ -129,11 +136,18 @@ async def wordseek_guess(message: Message, db_session: AsyncSession, db_user, **
         )
         return
 
-    await add_xp(db_session, db_user.id, PARTICIPATION_XP)
+    xp_text = "⭐ +2 XP"
+    if db_session is not None and db_user is not None:
+        try:
+            await add_xp(db_session, db_user.id, PARTICIPATION_XP)
+        except Exception:
+            xp_text = "⚠️ XP could not be saved."
+    else:
+        xp_text = "⚠️ XP unavailable (database not ready)."
     await message.reply(
         f"{marks} <b>{guess}</b>\n"
         f"👤 {escape(message.from_user.full_name)} · Attempt {game['attempts']}/{MAX_ATTEMPTS}\n"
-        f"⭐ +{PARTICIPATION_XP} XP"
+        f"{xp_text}"
     )
     if game["attempts"] >= MAX_ATTEMPTS:
         game["round_over"] = True
