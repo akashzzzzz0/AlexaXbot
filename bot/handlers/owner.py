@@ -1,7 +1,7 @@
 import asyncio
 from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery, Message, BotCommand, BotCommandScopeDefault, BotCommandScopeChat
-from aiogram.exceptions import TelegramRetryAfter
+from aiogram.exceptions import TelegramRetryAfter, TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -24,6 +24,7 @@ _maintenance_mode = False
 class OwnerStates(StatesGroup):
     waiting_broadcast = State()
     waiting_group_promotion = State()
+    waiting_unban_user_id = State()
 
 
 def is_owner(user_id: int) -> bool:
@@ -102,6 +103,8 @@ def _group_detail_kb(group_id: int):
     builder.button(text="🚨 Emergency Lockdown", callback_data=f"owner:emergency_view:{group_id}")
     builder.button(text="📈 Activity", callback_data=f"owner:activity:{group_id}")
     builder.button(text="🔗 Group Link", callback_data=f"owner:link:{group_id}")
+    builder.button(text="🔓 Unban Member", callback_data=f"owner:banlist:{group_id}")
+    builder.button(text="🆔 Unban by User ID", callback_data=f"owner:unbanid:{group_id}")
     builder.button(text="🔨 Ban All", callback_data=f"owner:banall:{group_id}")
     builder.button(text="🔄 Refresh", callback_data=f"owner:group:{group_id}")
     builder.button(text="◀️ Groups", callback_data="owner:groups")
@@ -603,6 +606,176 @@ async def owner_global_set(callback: CallbackQuery, _: callable, db_session: Asy
         await callback.answer("Could not apply global setting.", show_alert=True); return
     # Refresh the global dashboard; it will acknowledge this callback once.
     await owner_global_controls(callback, _, db_session)
+
+
+
+def _known_bans_kb(group_id: int, members):
+    builder = InlineKeyboardBuilder()
+    for member in members:
+        user = member.user
+        telegram_id = getattr(user, "telegram_id", None) or user.id
+        name = " ".join(part for part in [user.first_name, user.last_name] if part).strip() or "Unknown user"
+        username = f" (@{user.username})" if user.username else ""
+        builder.button(
+            text=f"🔓 {name[:24]}{username[:12]}",
+            callback_data=f"owner:unban:{group_id}:{telegram_id}",
+        )
+    builder.button(text="🆔 Unban by User ID", callback_data=f"owner:unbanid:{group_id}")
+    builder.button(text="🔄 Refresh List", callback_data=f"owner:banlist:{group_id}")
+    builder.button(text="◀️ Group Dashboard", callback_data=f"owner:group:{group_id}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+@router.callback_query(F.data.startswith("owner:banlist:"))
+async def owner_known_bans(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Not available.", show_alert=True); return
+    try: group_id = int(callback.data.rsplit(":", 1)[1])
+    except ValueError:
+        await callback.answer("Invalid group.", show_alert=True); return
+    group = await db_session.get(Group, group_id)
+    if not group or not group.is_active:
+        await callback.answer("Group is not active/registered.", show_alert=True); return
+    try:
+        me = await callback.bot.get_chat_member(group_id, callback.bot.id)
+        status = str(getattr(me.status, "value", me.status))
+        if status not in {"administrator", "creator"} or (status == "administrator" and not getattr(me, "can_restrict_members", False)):
+            await callback.answer("ALEXA needs admin + Restrict Members permission in this group.", show_alert=True); return
+    except Exception:
+        await callback.answer("Could not verify ALEXA's permissions in this group.", show_alert=True); return
+    result = await db_session.execute(
+        select(GroupMember).where(
+            GroupMember.group_id == group_id,
+            GroupMember.is_banned.is_(True),
+        ).order_by(desc(GroupMember.last_activity)).limit(30)
+    )
+    members = result.scalars().all()
+    if not members:
+        text = (
+            f"🔓 <b>Known Bans — {escape(group.title)}</b>\\n\\n"
+            "No members marked as banned in ALEXA's database. Telegram does not provide bots a complete list of every banned member, "
+            "so use <b>Unban by User ID</b> for bans not recorded here."
+        )
+    else:
+        text = (
+            f"🔓 <b>Known Bans — {escape(group.title)}</b>\\n\\n"
+            f"Showing up to {len(members)} member(s) recorded as banned by ALEXA. Tap a member to unban.\\n"
+            "For bans not in this database, use Unban by User ID."
+        )
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=_known_bans_kb(group_id, members))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner:unbanid:"))
+async def owner_unban_by_id_start(callback: CallbackQuery, state: FSMContext, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Not available.", show_alert=True); return
+    try: group_id = int(callback.data.rsplit(":", 1)[1])
+    except ValueError:
+        await callback.answer("Invalid group.", show_alert=True); return
+    group = await db_session.get(Group, group_id)
+    if not group or not group.is_active:
+        await callback.answer("Group is not active/registered.", show_alert=True); return
+    try:
+        me = await callback.bot.get_chat_member(group_id, callback.bot.id)
+        status = str(getattr(me.status, "value", me.status))
+        if status not in {"administrator", "creator"} or (status == "administrator" and not getattr(me, "can_restrict_members", False)):
+            await callback.answer("ALEXA needs admin + Restrict Members permission.", show_alert=True); return
+    except Exception:
+        await callback.answer("Could not verify ALEXA's permissions.", show_alert=True); return
+    await state.set_state(OwnerStates.waiting_unban_user_id)
+    await state.update_data(unban_group_id=group_id)
+    await callback.message.answer(
+        f"🆔 <b>Unban Member — {escape(group.title)}</b>\\n\\n"
+        "Send the member's numeric Telegram User ID. Username alone cannot be used by Telegram's unban API.\\n"
+        "Send /cancel to cancel.",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(OwnerStates.waiting_unban_user_id)
+async def owner_unban_user_id_input(message: Message, state: FSMContext, db_session: AsyncSession, **kwargs):
+    if not is_owner(message.from_user.id) or message.chat.type != "private":
+        await state.clear(); return
+    value = (message.text or "").strip()
+    if value.lower() == "/cancel":
+        await state.clear(); await message.answer("Unban cancelled."); return
+    try:
+        user_id = int(value)
+        if user_id <= 0: raise ValueError
+    except ValueError:
+        await message.answer("Please send a valid numeric Telegram User ID, or /cancel.")
+        return
+    data = await state.get_data()
+    try: group_id = int(data["unban_group_id"])
+    except (KeyError, TypeError, ValueError):
+        await state.clear(); await message.answer("Group selection expired. Open Owner Panel again."); return
+    group = await db_session.get(Group, group_id)
+    if not group or not group.is_active:
+        await state.clear(); await message.answer("Group is not active/registered."); return
+    try:
+        me = await message.bot.get_chat_member(group_id, message.bot.id)
+        status = str(getattr(me.status, "value", me.status))
+        if status not in {"administrator", "creator"} or (status == "administrator" and not getattr(me, "can_restrict_members", False)):
+            await state.clear(); await message.answer("ALEXA needs admin + Restrict Members permission in that group."); return
+        await message.bot.unban_chat_member(chat_id=group_id, user_id=user_id, only_if_banned=True)
+        record = await db_session.scalar(
+            select(GroupMember).where(GroupMember.group_id == group_id, GroupMember.user_id == user_id)
+        )
+        if record:
+            record.is_banned = False
+            record.ban_reason = None
+        await db_session.commit()
+        await message.answer(f"✅ User <code>{user_id}</code> unbanned from <b>{escape(group.title)}</b>.", parse_mode="HTML")
+    except TelegramBadRequest as exc:
+        await message.answer(f"Telegram could not unban this ID: {escape(str(exc)[:250])}", parse_mode="HTML")
+    except TelegramForbiddenError:
+        await message.answer("Unban failed: ALEXA does not have permission in that group.")
+    except Exception as exc:
+        await db_session.rollback()
+        logger.warning("owner_unban_by_id_failed", group_id=group_id, user_id=user_id, error=str(exc))
+        await message.answer("Unban failed. Check the group permissions and user ID.")
+    finally:
+        await state.clear()
+
+
+@router.callback_query(F.data.startswith("owner:unban:"))
+async def owner_unban_known_member(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Not available.", show_alert=True); return
+    try:
+        _, _, group_id_text, user_id_text = callback.data.split(":", 3)
+        group_id, user_id = int(group_id_text), int(user_id_text)
+    except ValueError:
+        await callback.answer("Invalid member.", show_alert=True); return
+    group = await db_session.get(Group, group_id)
+    if not group or not group.is_active:
+        await callback.answer("Group is not active/registered.", show_alert=True); return
+    try:
+        me = await callback.bot.get_chat_member(group_id, callback.bot.id)
+        status = str(getattr(me.status, "value", me.status))
+        if status not in {"administrator", "creator"} or (status == "administrator" and not getattr(me, "can_restrict_members", False)):
+            await callback.answer("ALEXA needs admin + Restrict Members permission.", show_alert=True); return
+        await callback.bot.unban_chat_member(chat_id=group_id, user_id=user_id, only_if_banned=True)
+        record = await db_session.scalar(
+            select(GroupMember).where(GroupMember.group_id == group_id, GroupMember.user_id == user_id)
+        )
+        if record:
+            record.is_banned = False
+            record.ban_reason = None
+        await db_session.commit()
+        await callback.answer("Member unbanned successfully.", show_alert=True)
+        await owner_known_bans(callback, db_session)
+    except TelegramBadRequest as exc:
+        await callback.answer(f"Telegram unban failed: {str(exc)[:180]}", show_alert=True)
+    except TelegramForbiddenError:
+        await callback.answer("ALEXA lacks permission to unban this member.", show_alert=True)
+    except Exception as exc:
+        await db_session.rollback()
+        logger.warning("owner_unban_known_member_failed", group_id=group_id, user_id=user_id, error=str(exc))
+        await callback.answer("Unban failed. Check permissions.", show_alert=True)
 
 
 @router.callback_query(F.data == "owner:banall")
