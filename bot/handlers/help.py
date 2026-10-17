@@ -74,18 +74,18 @@ def build_help_text(_: callable) -> str:
 def build_public_help_text(_: callable) -> str:
     """Command list safe to show to ordinary group members."""
     return (
-        "❓ <b>ALEXA Help Center</b>\\n\\n"
-        "💰 <b>Economy</b>\\n"
-        "/wallet — View wallet\\n/daily — Claim daily reward\\n"
-        "/weekly — Claim weekly reward\\n/monthly — Claim monthly reward\\n"
-        "/referral — Get referral link\\n/achievements — View achievements\\n\\n"
-        "🎮 <b>Games</b>\\n"
-        "/dice — Play dice\\n/rps — Rock Paper Scissors\\n/quiz — Play quiz\\n"
-        "/wheel — Spin the wheel\\n/numwar — Number War\\n/cards — Card game\\n"
-        "/treasure — Treasure hunt\\n/mines — Mines game\\n/roulette — Roulette\\n"
-        "/bal — View game balance\\n/rank — View your rank\\n/leaders — Top players\\n"
-        "/items — View game items\\n/pfp — View profile picture\\n\\n"
-        "ℹ️ <b>Other</b>\\n/language — Change language\\n/stats — View statistics\\n/help — Show help"
+        "❓ <b>ALEXA Help Center</b>\n\n"
+        "💰 <b>Economy</b>\n"
+        "/wallet — View wallet\n/daily — Claim daily reward\n"
+        "/weekly — Claim weekly reward\n/monthly — Claim monthly reward\n"
+        "/referral — Get referral link\n/achievements — View achievements\n\n"
+        "🎮 <b>Games</b>\n"
+        "/dice — Play dice\n/rps — Rock Paper Scissors\n/quiz — Play quiz\n"
+        "/wheel — Spin the wheel\n/numwar — Number War\n/cards — Card game\n"
+        "/treasure — Treasure hunt\n/mines — Mines game\n/roulette — Roulette\n"
+        "/bal — View game balance\n/rank — View your rank\n/leaders — Top players\n"
+        "/items — View game items\n/pfp — View profile picture\n\n"
+        "ℹ️ <b>Other</b>\n/language — Change language\n/stats — View statistics\n/help — Show help"
     )
 
 
@@ -134,7 +134,6 @@ HELP_GUIDES = {
         "/lock and /unlock — lock or unlock supported content types\n"
         "/locks /locktypes — view lock types\n"
         "/setflood /flood /setfloodmode /clearflood — configure flood protection\n"
-        "/biolink — configure Bio Link Protection (3 warnings then mute/ban, where supported)\\n"
         "Bio Link Protection is a separate group setting where available. "
         "ALEXA needs administrator rights and permission to delete messages for enforcement."
     ),
