@@ -1,10 +1,13 @@
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-def moderation_menu_kb(_, is_group=False):
+def moderation_menu_kb(_, is_group=False, bio_link_enabled=False):
     b=InlineKeyboardBuilder()
     items=[("🚫 Ban","mod:ban"),("🔓 Unban","mod:unban"),("🔇 Mute","mod:mute"),("🔊 Unmute","mod:unmute"),("👢 Kick","mod:kick"),("⚠️ Warn","mod:warn"),("↩️ Remove warn","mod:unwarn"),("⏱️ Temp ban","mod:tban"),("⏱️ Temp mute","mod:tmute"),("📝 Notes","mod:notes"),("📋 History","mod:history"),("🎭 Roles","mod:roles"),("🚦 Strikes","mod:strike"),("◀️ Home","menu:main")]
-    for text,cb in items: b.button(text=text,callback_data=cb)
-    b.adjust(2,2,2,2,2,2,2); return b.as_markup()
+    for text,cb in items:
+        b.button(text=text,callback_data=cb)
+    status = "🟢" if bio_link_enabled else "🔴"
+    b.button(text=f"{status} Bio Link Protection", callback_data="mod:bio_link_protection")
+    b.adjust(2,2,2,2,2,2,2,1); return b.as_markup()
 def mute_duration_kb(_, user_id=0):
     b=InlineKeyboardBuilder()
     for label,d in [("15m","15m"),("1h","1h"),("6h","6h"),("1d","1d"),("7d","7d"),("Forever","forever")]: b.button(text=label,callback_data=f"mute_duration:{user_id}:{d}")
