@@ -542,36 +542,50 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                         profile = await message.bot.get_chat(message.from_user.id)
                         bio = getattr(profile, "bio", None) or ""
                         if bio and contains_link(bio):
+                            config = await db_session.scalar(
+                                select(BioLinkProtectionConfig).where(
+                                    BioLinkProtectionConfig.group_id == db_group.id
+                                )
+                            )
+                            action = config.action if config else "mute"
+                            duration = config.mute_duration if config else 3600
                             try:
                                 await message.delete()
                             except Exception:
                                 pass
-                            if db_user:
-                                count, reached = await warn_user(
-                                    db_session, db_group.id, db_user.id, message.bot.id,
-                                    "Link found in profile bio (Bio Link Protection)", max_warns=3
-                                )
-                                if reached:
+                            if action == "warn":
+                                if db_user:
+                                    count, _ = await warn_user(
+                                        db_session, db_group.id, db_user.id, message.bot.id,
+                                        "Link found in profile bio (Bio Link Protection)", max_warns=3
+                                    )
+                                    notice = f"⚠️ Message removed. Bio-link warning {count}/3. Please remove the link from your bio."
+                                else:
+                                    notice = "⚠️ Message removed because a link was found in your bio. Please remove it."
+                            elif action == "mute":
+                                muted = False
+                                if db_user:
                                     muted = await mute_user(
                                         message.bot, db_session, db_group.id, db_user.id,
-                                        message.bot.id, 3600, "3 bio-link warnings reached"
+                                        message.bot.id, duration, "Link found in profile bio"
                                     )
-                                    notice = (
-                                        f"🚫 Message removed. {message.from_user.first_name or 'Member'} "
-                                        "reached 3/3 bio-link warnings and has been muted for 1 hour."
-                                        if muted else
-                                        f"⚠️ Message removed. Bio-link warning {count}/3; mute failed. "
-                                        "Please check ALEXA's Restrict Members permission."
+                                notice = (
+                                    f"🔇 Message removed. Member muted for {max(1, duration // 60)} minutes because their bio contains a link."
+                                    if muted else
+                                    "⚠️ Message removed because a link was found in the member's bio, but mute failed. Check ALEXA's Restrict Members permission."
+                                )
+                            else:
+                                banned = False
+                                if db_user:
+                                    banned = await ban_user(
+                                        message.bot, db_session, db_group.id, db_user.id,
+                                        message.bot.id, "Link found in profile bio"
                                     )
-                                else:
-                                    notice = (
-                                        f"⚠️ Message removed because a link was found in the member's bio. "
-                                        f"Warning {count}/3; at 3 warnings, mute for 1 hour."
-                                    )
-                                try:
-                                    await message.bot.send_message(message.chat.id, notice)
-                                except Exception:
-                                    pass
+                                notice = "🚫 Member banned because their bio contains a link." if banned else "⚠️ Message removed, but ban failed. Check ALEXA's Ban Users permission."
+                            try:
+                                await message.bot.send_message(message.chat.id, notice)
+                            except Exception:
+                                pass
                             return
             except Exception as exc:
                 logger.debug(
