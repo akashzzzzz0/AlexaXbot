@@ -135,7 +135,7 @@ async def open_bio_link_settings(callback: CallbackQuery, db_session: AsyncSessi
         await callback.answer("Could not verify your group-admin permissions.", show_alert=True)
         return
     config = await db_session.scalar(select(BioLinkProtectionConfig).where(BioLinkProtectionConfig.group_id == chat.id))
-    action = config.action if config else "mute"
+    action = config.action if config else "warn_mute"
     duration = config.mute_duration if config else 3600
     _bio_link_settings_drafts[(chat.id, callback.from_user.id)] = {"action": action, "duration": duration}
     await callback.message.edit_text(
@@ -153,11 +153,11 @@ async def open_bio_link_settings(callback: CallbackQuery, db_session: AsyncSessi
 @router.callback_query(F.data.startswith("mod:bio_action:"))
 async def select_bio_link_action(callback: CallbackQuery, **kwargs):
     action = callback.data.rsplit(":", 1)[-1]
-    if action not in ("warn", "mute", "ban"):
+    if action not in ("warn_mute", "warn_ban", "mute", "ban"):
         await callback.answer("Invalid action.", show_alert=True)
         return
     key = (callback.message.chat.id, callback.from_user.id)
-    draft = _bio_link_settings_drafts.setdefault(key, {"action": "mute", "duration": 3600})
+    draft = _bio_link_settings_drafts.setdefault(key, {"action": "warn_mute", "duration": 3600})
     draft["action"] = action
     await callback.message.edit_reply_markup(reply_markup=bio_link_action_kb(draft["action"], draft["duration"]))
     await callback.answer(f"Action selected: {action.upper()}. Save to apply.")
@@ -174,7 +174,7 @@ async def select_bio_link_duration(callback: CallbackQuery, **kwargs):
         await callback.answer("Invalid duration.", show_alert=True)
         return
     key = (callback.message.chat.id, callback.from_user.id)
-    draft = _bio_link_settings_drafts.setdefault(key, {"action": "mute", "duration": 3600})
+    draft = _bio_link_settings_drafts.setdefault(key, {"action": "warn_mute", "duration": 3600})
     draft["duration"] = duration
     await callback.message.edit_reply_markup(reply_markup=bio_link_action_kb(draft["action"], duration))
     await callback.answer("Mute duration selected. Save to apply.")
@@ -195,7 +195,7 @@ async def save_bio_link_settings(callback: CallbackQuery, db_session: AsyncSessi
         await callback.answer("Could not verify your group-admin permissions.", show_alert=True)
         return
     key = (chat.id, callback.from_user.id)
-    draft = _bio_link_settings_drafts.get(key, {"action": "mute", "duration": 3600})
+    draft = _bio_link_settings_drafts.get(key, {"action": "warn_mute", "duration": 3600})
     config = await db_session.scalar(select(BioLinkProtectionConfig).where(BioLinkProtectionConfig.group_id == chat.id))
     if config is None:
         config = BioLinkProtectionConfig(group_id=chat.id, action=draft["action"], mute_duration=draft["duration"])
