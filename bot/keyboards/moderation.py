@@ -16,8 +16,22 @@ def bio_link_protection_kb(enabled=False):
         b.button(text="🔴 Turn OFF", callback_data="mod:bio_link_off")
     else:
         b.button(text="🟢 Turn ON", callback_data="mod:bio_link_on")
+    b.button(text="⚙️ Settings", callback_data="mod:bio_link_settings")
     b.button(text="◀️ Back to Moderation", callback_data="mod:menu")
     b.adjust(1)
+    return b.as_markup()
+
+def bio_link_action_kb(action="mute", mute_duration=3600):
+    b = InlineKeyboardBuilder()
+    for label, value in [("⚠️ Warn", "warn"), ("🔇 Mute", "mute"), ("🚫 Ban", "ban")]:
+        prefix = "✅ " if action == value else ""
+        b.button(text=f"{prefix}{label}", callback_data=f"mod:bio_action:{value}")
+    for label, seconds in [("15 min", 900), ("30 min", 1800), ("1 hour", 3600), ("6 hours", 21600), ("12 hours", 43200), ("24 hours", 86400)]:
+        prefix = "✅ " if mute_duration == seconds else ""
+        b.button(text=f"{prefix}⏱️ {label}", callback_data=f"mod:bio_duration:{seconds}")
+    b.button(text="💾 Save Settings", callback_data="mod:bio_settings_save")
+    b.button(text="◀️ Back", callback_data="mod:bio_link_protection")
+    b.adjust(1, 1, 1, 2, 2, 2, 1, 1)
     return b.as_markup()
 
 def mute_duration_kb(_, user_id=0):
