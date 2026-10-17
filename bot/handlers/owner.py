@@ -58,8 +58,38 @@ def _group_list_kb(groups, action: str):
     builder = InlineKeyboardBuilder()
     for group in groups:
         builder.button(text=f"👥 {group.title[:48]}", callback_data=f"owner:{action}:{group.id}")
-    builder.button(text="◀️ Back", callback_data="owner:menu")
+    builder.button(text="◀️ Back to Owner Panel", callback_data="owner:menu")
     builder.adjust(1)
+    return builder.as_markup()
+
+
+async def _emergency_groups_kb(groups, session: AsyncSession):
+    builder = InlineKeyboardBuilder()
+    for group in groups:
+        security = await session.scalar(
+            select(SecuritySettings).where(SecuritySettings.group_id == group.id)
+        )
+        enabled = bool(security and security.emergency_mode)
+        status = "🔴 LOCKDOWN ON" if enabled else "🟢 LOCKDOWN OFF"
+        builder.button(
+            text=f"{status} · {group.title[:30]}",
+            callback_data=f"owner:emergency:{group.id}",
+        )
+    builder.button(text="◀️ Back to Owner Panel", callback_data="owner:menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def _emergency_detail_kb(group_id: int, enabled: bool):
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="🔓 Disable Lockdown" if enabled else "🚨 Activate Lockdown",
+        callback_data=f"owner:emergency:{group_id}",
+    )
+    builder.button(text="🔄 Refresh Group Status", callback_data=f"owner:emergency_view:{group_id}")
+    builder.button(text="📋 All Groups", callback_data="owner:emergency")
+    builder.button(text="👑 Owner Panel", callback_data="owner:menu")
+    builder.adjust(1, 1, 2)
     return builder.as_markup()
 
 
@@ -707,8 +737,14 @@ async def emergency_controls(callback: CallbackQuery, _: callable, db_session: A
         return
     groups = await _active_groups(db_session)
     await callback.message.edit_text(
-        "🚨 <b>Emergency Lockdown</b>\n\nSelect a group to toggle lockdown. When enabled, non-admin group messages are deleted.",
-        parse_mode="HTML", reply_markup=_group_list_kb(groups, "emergency") if groups else back_button_kb(_, "owner:menu")
+        "🚨 <b>EMERGENCY LOCKDOWN</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "Choose a group to activate or disable lockdown.\n\n"
+        "🔴 <b>ON</b> — non-admin messages are deleted\n"
+        "🟢 <b>OFF</b> — normal group messages\n\n"
+        "⚠️ ALEXA needs <b>Delete Messages</b> permission in each group.",
+        parse_mode="HTML",
+        reply_markup=await _emergency_groups_kb(groups, db_session) if groups else back_button_kb(_, "owner:menu")
     )
     await callback.answer()
 
@@ -732,12 +768,45 @@ async def owner_emergency_toggle(callback: CallbackQuery, _: callable, db_sessio
         await db_session.flush()
     security.emergency_mode = not bool(security.emergency_mode)
     await db_session.flush()
+    await db_session.commit()
     status = "ON" if security.emergency_mode else "OFF"
+    enabled = bool(security.emergency_mode)
     await callback.answer(f"Emergency lockdown {status} for {group.title}.", show_alert=True)
     await callback.message.edit_text(
-        f"🚨 <b>{escape(group.title)}</b>\nEmergency lockdown: <b>{status}</b>\n\nWhen enabled, non-admin messages are deleted.",
-        parse_mode="HTML", reply_markup=_group_detail_kb(group_id)
+        f"🚨 <b>EMERGENCY LOCKDOWN</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"👥 Group: <b>{escape(group.title)}</b>\n"
+        f"Status: <b>{'🔴 ON' if enabled else '🟢 OFF'}</b>\n\n"
+        f"{'⛔ Non-admin messages will be deleted.' if enabled else '✅ Normal messages are allowed.'}\n\n"
+        "ALEXA must have <b>Delete Messages</b> permission in this group.",
+        parse_mode="HTML", reply_markup=_emergency_detail_kb(group_id, enabled)
     )
+
+
+@router.callback_query(F.data.startswith("owner:emergency_view:"))
+async def owner_emergency_view(callback: CallbackQuery, _: callable, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Not available.", show_alert=True)
+        return
+    try:
+        group_id = int(callback.data.rsplit(":", 1)[1])
+    except ValueError:
+        await callback.answer("Invalid group.", show_alert=True)
+        return
+    group = await db_session.get(Group, group_id)
+    if not group or not group.is_active:
+        await callback.answer("Group is not active.", show_alert=True)
+        return
+    security = await db_session.scalar(select(SecuritySettings).where(SecuritySettings.group_id == group_id))
+    enabled = bool(security and security.emergency_mode)
+    await callback.message.edit_text(
+        f"🚨 <b>EMERGENCY LOCKDOWN</b>\n━━━━━━━━━━━━━━━━━━\n"
+        f"👥 Group: <b>{escape(group.title)}</b>\n"
+        f"Status: <b>{'🔴 ON' if enabled else '🟢 OFF'}</b>\n\n"
+        "ALEXA must have <b>Delete Messages</b> permission in this group.",
+        parse_mode="HTML", reply_markup=_emergency_detail_kb(group_id, enabled)
+    )
+    await callback.answer("Status refreshed.")
 
 
 @router.callback_query(F.data == "owner:menu")
