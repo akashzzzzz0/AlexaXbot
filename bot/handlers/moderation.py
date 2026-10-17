@@ -139,10 +139,10 @@ async def open_bio_link_settings(callback: CallbackQuery, db_session: AsyncSessi
     duration = config.mute_duration if config else 3600
     _bio_link_settings_drafts[(chat.id, callback.from_user.id)] = {"action": action, "duration": duration}
     await callback.message.edit_text(
-        "⚙️ <b>Bio Link Protection Settings</b>\\n\\n"
+        "⚙️ <b>Bio Link Protection Settings</b>\n\n"
         "Choose what ALEXA should do when a member's bio contains a link. "
-        "Select an action and, if using mute, a duration. Then press Save Settings.\\n\\n"
-        f"Selected action: <b>{action.upper()}</b>\\n"
+        "Select an action and, if using mute, a duration. Then press Save Settings.\n\n"
+        f"Selected action: <b>{action.upper()}</b>\n"
         f"Mute duration: <b>{duration // 60} minutes</b>",
         parse_mode="HTML",
         reply_markup=bio_link_action_kb(action, duration),
@@ -212,9 +212,9 @@ async def save_bio_link_settings(callback: CallbackQuery, db_session: AsyncSessi
         return
     _bio_link_settings_drafts.pop(key, None)
     await callback.message.edit_text(
-        "✅ <b>Bio Link Protection settings saved</b>\\n\\n"
-        f"Action: <b>{config.action.upper()}</b>\\n"
-        f"Mute duration: <b>{config.mute_duration // 60} minutes</b>\\n\\n"
+        "✅ <b>Bio Link Protection settings saved</b>\n\n"
+        f"Action: <b>{config.action.upper()}</b>\n"
+        f"Mute duration: <b>{config.mute_duration // 60} minutes</b>\n\n"
         "These settings apply only to this group.",
         parse_mode="HTML",
         reply_markup=bio_link_protection_kb(await _bio_link_protection_enabled(db_session, chat.id)),
