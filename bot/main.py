@@ -163,6 +163,22 @@ async def on_startup(bot) -> None:
 
     logger.info('Bot startup complete', db_ready=db_ok)
 
+    # Notify the configured owner privately whenever ALEXA starts successfully.
+    owner_id = settings.effective_owner_id
+    if owner_id:
+        try:
+            me = await bot.get_me()
+            await bot.send_message(
+                owner_id,
+                "🤖 <b>ALEXA Bot Is Active Now!</b>\n\n"
+                f"✅ Bot: @{me.username or me.first_name}\n"
+                "🟢 Startup completed and the bot is ready to run."
+            )
+            logger.info("Owner notified that bot is active", owner_id=owner_id)
+        except Exception as exc:
+            # A missing /start or blocked bot must not stop group operation.
+            logger.warning("Could not send startup DM to owner", owner_id=owner_id, error=str(exc))
+
 
 async def on_shutdown(bot, runner) -> None:
     logger.info('Bot shutting down')
