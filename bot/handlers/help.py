@@ -34,7 +34,7 @@ def build_help_text(_: callable) -> str:
         f"  /roulette — {_('help_cmd_roulette')}\n"
         "  /wordseek — Multiplayer 5-letter word guessing\n"
         "  /new — Start a WordSeek group round\n"
-        "  /join — Join the current WordSeek round\n"
+
         "  /wscores — View current round scores\n\n"
         f"  🛡️ <b>{_('help_section_security')}</b>\n"
         f"  /security — {_('help_cmd_security')}\n"
