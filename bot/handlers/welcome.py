@@ -569,13 +569,35 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                                 await message.delete()
                             except Exception:
                                 pass
-                            if action == "warn":
+                            if action in ("warn", "warn_mute", "warn_ban"):
                                 if db_user:
-                                    count, _ = await warn_user(
+                                    count, reached = await warn_user(
                                         db_session, db_group.id, db_user.id, message.bot.id,
                                         "Link found in profile bio (Bio Link Protection)", max_warns=3
                                     )
-                                    notice = f"⚠️ Message removed. Bio-link warning {count}/3. Please remove the link from your bio."
+                                    if reached and action == "warn_mute":
+                                        muted = await mute_user(
+                                            message.bot, db_session, db_group.id, db_user.id,
+                                            message.bot.id, duration, "3 bio-link warnings reached"
+                                        )
+                                        notice = (
+                                            f"🔇 Bio-link warning limit reached (3/3). Member muted for {max(1, duration // 60)} minutes."
+                                            if muted else
+                                            "⚠️ Bio-link warning limit reached (3/3), but mute failed. Check ALEXA's Restrict Members permission."
+                                        )
+                                    elif reached and action == "warn_ban":
+                                        banned = await ban_user(
+                                            message.bot, db_session, db_group.id, db_user.id,
+                                            message.bot.id, "3 bio-link warnings reached"
+                                        )
+                                        notice = (
+                                            "🚫 Bio-link warning limit reached (3/3). Member banned."
+                                            if banned else
+                                            "⚠️ Bio-link warning limit reached (3/3), but ban failed. Check ALEXA's Ban Users permission."
+                                        )
+                                    else:
+                                        next_action = "muted" if action == "warn_mute" else "banned" if action == "warn_ban" else "moderated"
+                                        notice = f"⚠️ Message removed. Bio-link warning {count}/3. At 3 warnings, the member will be {next_action}."
                                 else:
                                     notice = "⚠️ Message removed because a link was found in your bio. Please remove it."
                             elif action == "mute":
