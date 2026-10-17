@@ -180,7 +180,7 @@ async def menu_help(callback: CallbackQuery, **kwargs):
     except Exception as exc:
         logger.debug("Could not delete previous start menu for help", error=str(exc))
     await callback.message.answer(
-        "❓ <b>ALEXA Help Center</b>\nChoose a section below. Tap <b>All Commands</b> for the full command list.",
+        "❓ <b>ALEXA Help Center</b>\nChoose a section below.",
         parse_mode='HTML',
         reply_markup=help_menu_kb(is_admin=is_admin),
     )
