@@ -336,8 +336,8 @@ async def owner_biolink_action(callback: CallbackQuery, db_session: AsyncSession
         await callback.answer("Not available.", show_alert=True)
         return
     try:
-        _, _, _, group_id_text, action = callback.data.split(":", 4)
-        group_id = int(group_id_text)
+        parts = callback.data.split(":", 3)
+        group_id, action = int(parts[2]), parts[3]
     except (ValueError, TypeError):
         await callback.answer("Invalid setting.", show_alert=True)
         return
@@ -363,8 +363,8 @@ async def owner_biolink_duration(callback: CallbackQuery, db_session: AsyncSessi
         await callback.answer("Not available.", show_alert=True)
         return
     try:
-        _, _, _, group_id_text, duration_text = callback.data.split(":", 4)
-        group_id, duration = int(group_id_text), int(duration_text)
+        parts = callback.data.split(":", 3)
+        group_id, duration = int(parts[2]), int(parts[3])
     except (ValueError, TypeError):
         await callback.answer("Invalid duration.", show_alert=True)
         return
