@@ -6,8 +6,20 @@ def moderation_menu_kb(_, is_group=False, bio_link_enabled=False):
     for text,cb in items:
         b.button(text=text,callback_data=cb)
     status = "🟢" if bio_link_enabled else "🔴"
-    b.button(text=f"{status} Bio Link Protection", callback_data="mod:bio_link_protection")
+    b.button(text="🛡️ Bio Link Protection", callback_data="mod:bio_link_protection")
     b.adjust(2,2,2,2,2,2,2,1); return b.as_markup()
+def bio_link_protection_kb(enabled=False):
+    b = InlineKeyboardBuilder()
+    status = "🟢 ON" if enabled else "🔴 OFF"
+    b.button(text=f"Bio Link Protection: {status}", callback_data="mod:bio_link_status")
+    if enabled:
+        b.button(text="🔴 Turn OFF", callback_data="mod:bio_link_off")
+    else:
+        b.button(text="🟢 Turn ON", callback_data="mod:bio_link_on")
+    b.button(text="◀️ Back to Moderation", callback_data="mod:menu")
+    b.adjust(1)
+    return b.as_markup()
+
 def mute_duration_kb(_, user_id=0):
     b=InlineKeyboardBuilder()
     for label,d in [("15m","15m"),("1h","1h"),("6h","6h"),("1d","1d"),("7d","7d"),("Forever","forever")]: b.button(text=label,callback_data=f"mute_duration:{user_id}:{d}")
