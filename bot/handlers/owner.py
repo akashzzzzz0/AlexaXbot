@@ -722,7 +722,12 @@ async def owner_unban_user_id_input(message: Message, state: FSMContext, db_sess
             await state.clear(); await message.answer("ALEXA needs admin + Restrict Members permission in that group."); return
         await message.bot.unban_chat_member(chat_id=group_id, user_id=user_id, only_if_banned=True)
         record = await db_session.scalar(
-            select(GroupMember).where(GroupMember.group_id == group_id, GroupMember.user_id == user_id)
+            select(GroupMember)
+            .join(User, GroupMember.user_id == User.id)
+            .where(
+                GroupMember.group_id == group_id,
+                (User.telegram_id == user_id) | (User.id == user_id),
+            )
         )
         if record:
             record.is_banned = False
@@ -760,14 +765,36 @@ async def owner_unban_known_member(callback: CallbackQuery, db_session: AsyncSes
             await callback.answer("ALEXA needs admin + Restrict Members permission.", show_alert=True); return
         await callback.bot.unban_chat_member(chat_id=group_id, user_id=user_id, only_if_banned=True)
         record = await db_session.scalar(
-            select(GroupMember).where(GroupMember.group_id == group_id, GroupMember.user_id == user_id)
+            select(GroupMember)
+            .join(User, GroupMember.user_id == User.id)
+            .where(
+                GroupMember.group_id == group_id,
+                (User.telegram_id == user_id) | (User.id == user_id),
+            )
         )
         if record:
             record.is_banned = False
             record.ban_reason = None
         await db_session.commit()
         await callback.answer("Member unbanned successfully.", show_alert=True)
-        await owner_known_bans(callback, db_session)
+        result = await db_session.execute(
+            select(GroupMember).where(
+                GroupMember.group_id == group_id,
+                GroupMember.is_banned.is_(True),
+            ).order_by(desc(GroupMember.last_activity)).limit(30)
+        )
+        members = result.scalars().all()
+        await callback.message.edit_text(
+            f"🔓 <b>Known Bans — {escape(group.title)}</b>\\n\\n"
+            + (
+                f"Showing up to {len(members)} member(s) recorded as banned by ALEXA.\\n"
+                "For bans not in this database, use Unban by User ID."
+                if members else
+                "No members marked as banned in ALEXA's database. Use Unban by User ID for other bans."
+            ),
+            parse_mode="HTML",
+            reply_markup=_known_bans_kb(group_id, members),
+        )
     except TelegramBadRequest as exc:
         await callback.answer(f"Telegram unban failed: {str(exc)[:180]}", show_alert=True)
     except TelegramForbiddenError:
