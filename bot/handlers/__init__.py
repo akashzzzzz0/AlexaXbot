@@ -1,11 +1,11 @@
 from aiogram import Router
 from bot.handlers import start, security, moderation, economy, games, duels, statistics, settings, help, owner, welcome, tournaments, alexa_games, group_tools
-from bot.handlers.auto_delete_middleware import AutoDeleteCommandMiddleware, StartMenuAutoDeleteCallbackMiddleware
+from bot.handlers.auto_delete_middleware import StartMenuAutoDeleteMessageMiddleware, StartMenuAutoDeleteCallbackMiddleware
 
 
 def get_main_router() -> Router:
     router = Router()
-    router.message.outer_middleware(AutoDeleteCommandMiddleware())
+    router.message.outer_middleware(StartMenuAutoDeleteMessageMiddleware())
     router.callback_query.outer_middleware(StartMenuAutoDeleteCallbackMiddleware())
     router.include_router(start.router)
     router.include_router(security.router)
