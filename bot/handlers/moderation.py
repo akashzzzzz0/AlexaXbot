@@ -3,8 +3,8 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.filters import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, delete, func
-from bot.database.models import User, GroupMember, GroupSettings, Warning, SecuritySettings, BioLinkProtectionSetting
-from bot.keyboards.moderation import moderation_menu_kb, bio_link_protection_kb, mute_duration_kb, warn_actions_kb
+from bot.database.models import User, GroupMember, GroupSettings, Warning, SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig
+from bot.keyboards.moderation import moderation_menu_kb, bio_link_protection_kb, bio_link_action_kb, mute_duration_kb, warn_actions_kb
 from bot.keyboards.main_menu import back_button_kb
 from bot.services.moderation_service import (
     ban_user, unban_user, kick_user, mute_user, unmute_user,
@@ -17,6 +17,8 @@ from bot.middlewares.admin_actions import AdminActionMiddleware
 
 logger = structlog.get_logger()
 router = Router()
+
+_bio_link_settings_drafts = {}
 router.message.outer_middleware(AdminActionMiddleware(
     commands={"ban", "unban", "kick", "mute", "unmute", "warn", "unwarn", "warns", "warnings", "history", "note", "del", "pin", "unpin", "ro", "setrole", "clearrole", "role", "resetwarns", "promote", "demote", "warnings", "del", "pin", "unpin"}
 ))
@@ -116,6 +118,108 @@ async def open_bio_link_protection(callback: CallbackQuery, db_session: AsyncSes
         reply_markup=bio_link_protection_kb(enabled),
     )
     await callback.answer()
+
+
+@router.callback_query(F.data == "mod:bio_link_settings")
+async def open_bio_link_settings(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    chat = callback.message.chat
+    if chat.type not in ("group", "supergroup"):
+        await callback.answer("Open this menu inside the group you want to configure.", show_alert=True)
+        return
+    try:
+        actor = await callback.bot.get_chat_member(chat.id, callback.from_user.id)
+        if actor.status not in ("administrator", "creator"):
+            await callback.answer("Only group admins can change these settings.", show_alert=True)
+            return
+    except Exception:
+        await callback.answer("Could not verify your group-admin permissions.", show_alert=True)
+        return
+    config = await db_session.scalar(select(BioLinkProtectionConfig).where(BioLinkProtectionConfig.group_id == chat.id))
+    action = config.action if config else "mute"
+    duration = config.mute_duration if config else 3600
+    _bio_link_settings_drafts[(chat.id, callback.from_user.id)] = {"action": action, "duration": duration}
+    await callback.message.edit_text(
+        "⚙️ <b>Bio Link Protection Settings</b>\\n\\n"
+        "Choose what ALEXA should do when a member's bio contains a link. "
+        "Select an action and, if using mute, a duration. Then press Save Settings.\\n\\n"
+        f"Selected action: <b>{action.upper()}</b>\\n"
+        f"Mute duration: <b>{duration // 60} minutes</b>",
+        parse_mode="HTML",
+        reply_markup=bio_link_action_kb(action, duration),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("mod:bio_action:"))
+async def select_bio_link_action(callback: CallbackQuery, **kwargs):
+    action = callback.data.rsplit(":", 1)[-1]
+    if action not in ("warn", "mute", "ban"):
+        await callback.answer("Invalid action.", show_alert=True)
+        return
+    key = (callback.message.chat.id, callback.from_user.id)
+    draft = _bio_link_settings_drafts.setdefault(key, {"action": "mute", "duration": 3600})
+    draft["action"] = action
+    await callback.message.edit_reply_markup(reply_markup=bio_link_action_kb(draft["action"], draft["duration"]))
+    await callback.answer(f"Action selected: {action.upper()}. Save to apply.")
+
+
+@router.callback_query(F.data.startswith("mod:bio_duration:"))
+async def select_bio_link_duration(callback: CallbackQuery, **kwargs):
+    try:
+        duration = int(callback.data.rsplit(":", 1)[-1])
+    except ValueError:
+        await callback.answer("Invalid duration.", show_alert=True)
+        return
+    if duration not in (900, 1800, 3600, 21600, 43200, 86400):
+        await callback.answer("Invalid duration.", show_alert=True)
+        return
+    key = (callback.message.chat.id, callback.from_user.id)
+    draft = _bio_link_settings_drafts.setdefault(key, {"action": "mute", "duration": 3600})
+    draft["duration"] = duration
+    await callback.message.edit_reply_markup(reply_markup=bio_link_action_kb(draft["action"], duration))
+    await callback.answer("Mute duration selected. Save to apply.")
+
+
+@router.callback_query(F.data == "mod:bio_settings_save")
+async def save_bio_link_settings(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    chat = callback.message.chat
+    if chat.type not in ("group", "supergroup"):
+        await callback.answer("Open this menu inside the group you want to configure.", show_alert=True)
+        return
+    try:
+        actor = await callback.bot.get_chat_member(chat.id, callback.from_user.id)
+        if actor.status not in ("administrator", "creator"):
+            await callback.answer("Only group admins can save these settings.", show_alert=True)
+            return
+    except Exception:
+        await callback.answer("Could not verify your group-admin permissions.", show_alert=True)
+        return
+    key = (chat.id, callback.from_user.id)
+    draft = _bio_link_settings_drafts.get(key, {"action": "mute", "duration": 3600})
+    config = await db_session.scalar(select(BioLinkProtectionConfig).where(BioLinkProtectionConfig.group_id == chat.id))
+    if config is None:
+        config = BioLinkProtectionConfig(group_id=chat.id, action=draft["action"], mute_duration=draft["duration"])
+        db_session.add(config)
+    else:
+        config.action = draft["action"]
+        config.mute_duration = draft["duration"]
+    try:
+        await db_session.commit()
+    except Exception as exc:
+        await db_session.rollback()
+        logger.warning("Failed to save bio-link protection configuration", group_id=chat.id, error=str(exc))
+        await callback.answer("Could not save settings. Try again.", show_alert=True)
+        return
+    _bio_link_settings_drafts.pop(key, None)
+    await callback.message.edit_text(
+        "✅ <b>Bio Link Protection settings saved</b>\\n\\n"
+        f"Action: <b>{config.action.upper()}</b>\\n"
+        f"Mute duration: <b>{config.mute_duration // 60} minutes</b>\\n\\n"
+        "These settings apply only to this group.",
+        parse_mode="HTML",
+        reply_markup=bio_link_protection_kb(await _bio_link_protection_enabled(db_session, chat.id)),
+    )
+    await callback.answer("Settings saved.")
 
 
 @router.callback_query(F.data == "mod:bio_link_status")
