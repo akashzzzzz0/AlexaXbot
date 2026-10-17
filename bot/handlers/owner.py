@@ -25,6 +25,7 @@ class OwnerStates(StatesGroup):
     waiting_broadcast = State()
     waiting_group_promotion = State()
     waiting_unban_user_id = State()
+    waiting_purge_range = State()
 
 
 def is_owner(user_id: int) -> bool:
@@ -103,6 +104,7 @@ def _group_detail_kb(group_id: int):
     builder.button(text="🚨 Emergency Lockdown", callback_data=f"owner:emergency_view:{group_id}")
     builder.button(text="📈 Activity", callback_data=f"owner:activity:{group_id}")
     builder.button(text="🔗 Group Link", callback_data=f"owner:link:{group_id}")
+    builder.button(text="🧹 Purge Messages", callback_data=f"owner:purge:{group_id}")
     builder.button(text="🔓 Unban Member", callback_data=f"owner:banlist:{group_id}")
     builder.button(text="🆔 Unban by User ID", callback_data=f"owner:unbanid:{group_id}")
     builder.button(text="🔨 Ban All", callback_data=f"owner:banall:{group_id}")
@@ -803,6 +805,90 @@ async def owner_unban_known_member(callback: CallbackQuery, db_session: AsyncSes
         await db_session.rollback()
         logger.warning("owner_unban_known_member_failed", group_id=group_id, user_id=user_id, error=str(exc))
         await callback.answer("Unban failed. Check permissions.", show_alert=True)
+
+
+
+@router.callback_query(F.data.startswith("owner:purge:"))
+async def owner_purge_start(callback: CallbackQuery, state: FSMContext, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Not available.", show_alert=True); return
+    try: group_id = int(callback.data.rsplit(":", 1)[1])
+    except ValueError:
+        await callback.answer("Invalid group.", show_alert=True); return
+    group = await db_session.get(Group, group_id)
+    if not group or not group.is_active:
+        await callback.answer("Group is not active/registered.", show_alert=True); return
+    try:
+        me = await callback.bot.get_chat_member(group_id, callback.bot.id)
+        status = str(getattr(me.status, "value", me.status))
+        if status not in {"administrator", "creator"} or (status == "administrator" and not getattr(me, "can_delete_messages", False)):
+            await callback.answer("ALEXA needs admin + Delete Messages permission in this group.", show_alert=True); return
+    except Exception:
+        await callback.answer("Could not verify ALEXA's permissions in this group.", show_alert=True); return
+    await state.set_state(OwnerStates.waiting_purge_range)
+    await state.update_data(purge_group_id=group_id, purge_group_title=group.title)
+    await callback.message.answer(
+        f"🧹 <b>Purge Messages — {escape(group.title)}</b>\\n\\n"
+        "Send the message ID range as <code>START-END</code>, for example <code>1200-1250</code>. "
+        "ALEXA will try to delete messages in that range, including commands. Maximum 1000 IDs per request.\\n\\n"
+        "Telegram may reject messages older than 48 hours or messages it cannot delete. Send /cancel to stop.",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(OwnerStates.waiting_purge_range)
+async def owner_purge_range_input(message: Message, state: FSMContext, db_session: AsyncSession, **kwargs):
+    if not is_owner(message.from_user.id) or message.chat.type != "private":
+        await state.clear(); return
+    value = (message.text or "").strip()
+    if value.lower() == "/cancel":
+        await state.clear(); await message.answer("Purge cancelled."); return
+    try:
+        left, right = value.replace(" ", "").split("-", 1)
+        start_id, end_id = int(left), int(right)
+        if start_id <= 0 or end_id < start_id or end_id - start_id + 1 > 1000:
+            raise ValueError
+    except ValueError:
+        await message.answer("Invalid range. Send START-END, e.g. 1200-1250 (maximum 1000 IDs), or /cancel.")
+        return
+    data = await state.get_data()
+    try: group_id = int(data["purge_group_id"])
+    except (KeyError, TypeError, ValueError):
+        await state.clear(); await message.answer("Group selection expired. Open Owner Panel again."); return
+    group = await db_session.get(Group, group_id)
+    if not group or not group.is_active:
+        await state.clear(); await message.answer("Group is not active/registered."); return
+    try:
+        me = await message.bot.get_chat_member(group_id, message.bot.id)
+        status = str(getattr(me.status, "value", me.status))
+        if status not in {"administrator", "creator"} or (status == "administrator" and not getattr(me, "can_delete_messages", False)):
+            await state.clear(); await message.answer("ALEXA needs admin + Delete Messages permission in that group."); return
+        deleted = failed = 0
+        ids = list(range(start_id, end_id + 1))
+        for offset in range(0, len(ids), 100):
+            batch = ids[offset:offset + 100]
+            try:
+                await message.bot.delete_messages(chat_id=group_id, message_ids=batch)
+                deleted += len(batch)
+            except Exception:
+                for message_id in batch:
+                    try:
+                        await message.bot.delete_message(chat_id=group_id, message_id=message_id)
+                        deleted += 1
+                    except Exception:
+                        failed += 1
+        await message.answer(
+            f"🧹 <b>Purge finished</b>\\n\\nGroup: <b>{escape(group.title)}</b>\\n"
+            f"Range: <code>{start_id}-{end_id}</code>\\n"
+            f"Deleted: <b>{deleted}</b>\\nCould not delete: <b>{failed}</b>",
+            parse_mode="HTML",
+        )
+    except Exception as exc:
+        logger.warning("owner_purge_range_failed", group_id=group_id, error=str(exc))
+        await message.answer("Purge failed. Check the group permissions and message ID range.")
+    finally:
+        await state.clear()
 
 
 @router.callback_query(F.data == "owner:banall")
