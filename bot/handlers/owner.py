@@ -601,7 +601,7 @@ async def owner_global_set(callback: CallbackQuery, _: callable, db_session: Asy
         await db_session.rollback()
         logger.warning("owner_global_setting_failed", field=field, error=str(exc))
         await callback.answer("Could not apply global setting.", show_alert=True); return
-    await callback.answer(f"{field.replace('_', ' ').title()} {'ON' if enabled else 'OFF'} in {changed} groups.", show_alert=True)
+    # Refresh the global dashboard; it will acknowledge this callback once.
     await owner_global_controls(callback, _, db_session)
 
 
