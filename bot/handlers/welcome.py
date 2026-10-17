@@ -459,6 +459,31 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
             await db_session.rollback()
             logger.exception("Could not initialize group security settings", group_id=message.chat.id)
             return
+    # Emergency lockdown is enforced for every incoming group message.
+    # Group admins/creator are exempt; all other messages are deleted while ON.
+    if group_security.emergency_mode and message.from_user:
+        try:
+            sender = await message.bot.get_chat_member(message.chat.id, message.from_user.id)
+            sender_status = str(getattr(sender.status, "value", sender.status))
+            if sender_status not in ("administrator", "creator", "owner"):
+                await message.delete()
+                logger.info(
+                    "Emergency lockdown deleted non-admin message",
+                    chat_id=message.chat.id,
+                    user_id=message.from_user.id,
+                )
+                return
+        except Exception as exc:
+            # If Telegram cannot verify the sender role, avoid accidentally
+            # deleting an administrator's message; log so permissions can be checked.
+            logger.warning(
+                "Emergency lockdown could not verify sender permissions",
+                chat_id=message.chat.id,
+                user_id=message.from_user.id,
+                error=str(exc),
+            )
+            return
+
     # Bot accounts are not persisted as regular users by DatabaseMiddleware.
     # Still enforce the explicit bot-message lock before returning.
     if message.from_user and message.from_user.is_bot:
