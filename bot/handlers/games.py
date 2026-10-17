@@ -506,6 +506,12 @@ async def game_wheel(callback: CallbackQuery, _: callable, db_session=None, db_u
     if db_user is None or db_session is None:
         await callback.answer(_('error_generic'), show_alert=True)
         return
+    wager = 20
+    from bot.services.economy_service import deduct_coins, get_balance
+    ok, balance = await deduct_coins(db_session, db_user.id, wager, 'wheel_bet', 'Wheel spin wager')
+    if not ok:
+        await callback.answer(f"Wheel spin costs {wager} coins. Pocket balance: {format_number(balance)}.", show_alert=True)
+        return
     segments = [('💀', 0), ('🟡 0.5×', 0.5), ('🟢 1.5×', 1.5), ('🔵 2×', 2), ('🟣 3×', 3), ('🌟 5×', 5), ('💎 10×', 10)]
     probs = [0.30, 0.05, 0.20, 0.25, 0.15, 0.03, 0.02]
     rand = random.random()
@@ -517,16 +523,19 @@ async def game_wheel(callback: CallbackQuery, _: callable, db_session=None, db_u
             chosen_label, chosen_mult = segments[i]
             break
     spin_animation = '🎡 ' + ' → '.join([s[0] for s in random.sample(segments, 4)]) + f' → <b>{chosen_label}</b>'
-    if chosen_label == '💀':
-        outcome = _('game_lost').format(amount=0)
+    if chosen_mult <= 0:
+        outcome = _('game_lost').format(amount=format_number(wager))
     else:
-        # Free spin: no wager is taken. Convert the displayed multiplier into
-        # a small virtual-coin reward so the result matches the wallet change.
-        reward = max(1, int(chosen_mult * 10))
-        if db_session is not None and db_user is not None:
-            from bot.services.economy_service import add_coins
-            await add_coins(db_session, db_user.id, reward, 'game_win', 'Free wheel spin reward')
-        outcome = _('game_won').format(amount=format_number(reward))
+        payout = int(wager * chosen_mult)
+        from bot.services.economy_service import add_coins
+        await add_coins(db_session, db_user.id, payout, 'wheel_payout', f'Wheel payout at {chosen_mult}x')
+        net = payout - wager
+        if net > 0:
+            outcome = _('game_won').format(amount=format_number(net))
+        elif net < 0:
+            outcome = _('game_lost').format(amount=format_number(abs(net)))
+        else:
+            outcome = _('game_draw')
     text = (
         f"🎡 <b>{_('btn_game_wheel')}</b>\n"
         f"\n\n"
