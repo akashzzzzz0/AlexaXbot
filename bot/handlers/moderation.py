@@ -4,7 +4,7 @@ from aiogram.filters import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, delete, func
 from bot.database.models import User, GroupMember, GroupSettings, Warning, SecuritySettings, BioLinkProtectionSetting
-from bot.keyboards.moderation import moderation_menu_kb, mute_duration_kb, warn_actions_kb
+from bot.keyboards.moderation import moderation_menu_kb, bio_link_protection_kb, mute_duration_kb, warn_actions_kb
 from bot.keyboards.main_menu import back_button_kb
 from bot.services.moderation_service import (
     ban_user, unban_user, kick_user, mute_user, unmute_user,
@@ -93,10 +93,41 @@ async def moderation_menu_back(callback: CallbackQuery, _: callable, db_session:
 
 
 @router.callback_query(F.data == "mod:bio_link_protection")
-async def toggle_bio_link_protection(callback: CallbackQuery, _: callable, db_session: AsyncSession, **kwargs):
+async def open_bio_link_protection(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
     chat = callback.message.chat
     if chat.type not in ("group", "supergroup"):
-        await callback.answer("Open Moderation inside a group to change this setting.", show_alert=True)
+        await callback.answer("Open Moderation inside the group you want to configure.", show_alert=True)
+        return
+    try:
+        actor = await callback.bot.get_chat_member(chat.id, callback.from_user.id)
+        if actor.status not in ("administrator", "creator"):
+            await callback.answer("Only group admins can change this protection.", show_alert=True)
+            return
+    except Exception:
+        await callback.answer("Could not verify your group-admin permissions.", show_alert=True)
+        return
+    enabled = await _bio_link_protection_enabled(db_session, chat.id)
+    await callback.message.edit_text(
+        "🛡️ <b>Bio Link Protection</b>\\n\\n"
+        "When enabled, ALEXA checks for links in member bios where Telegram makes the bio available, "
+        "and applies the group's configured protection.\\n\\n"
+        f"Current status: <b>{'🟢 ON' if enabled else '🔴 OFF'}</b>",
+        parse_mode="HTML",
+        reply_markup=bio_link_protection_kb(enabled),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "mod:bio_link_status")
+async def bio_link_status(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    enabled = await _bio_link_protection_enabled(db_session, callback.message.chat.id)
+    await callback.answer("Bio Link Protection is " + ("ON." if enabled else "OFF."), show_alert=True)
+
+
+async def _set_bio_link_protection(callback: CallbackQuery, db_session: AsyncSession, enabled: bool):
+    chat = callback.message.chat
+    if chat.type not in ("group", "supergroup"):
+        await callback.answer("Open Moderation inside the group you want to configure.", show_alert=True)
         return
     try:
         actor = await callback.bot.get_chat_member(chat.id, callback.from_user.id)
@@ -111,12 +142,10 @@ async def toggle_bio_link_protection(callback: CallbackQuery, _: callable, db_se
         select(BioLinkProtectionSetting).where(BioLinkProtectionSetting.group_id == chat.id)
     )
     if setting is None:
-        # First click flips the currently effective value, including legacy anti-link state.
-        current = await _bio_link_protection_enabled(db_session, chat.id)
-        setting = BioLinkProtectionSetting(group_id=chat.id, enabled=not current)
+        setting = BioLinkProtectionSetting(group_id=chat.id, enabled=enabled)
         db_session.add(setting)
     else:
-        setting.enabled = not setting.enabled
+        setting.enabled = enabled
     try:
         await db_session.commit()
     except Exception as exc:
@@ -125,11 +154,25 @@ async def toggle_bio_link_protection(callback: CallbackQuery, _: callable, db_se
         await callback.answer("Could not save this setting. Try again.", show_alert=True)
         return
 
-    enabled = await _bio_link_protection_enabled(db_session, chat.id)
-    await callback.answer("Bio Link Protection " + ("enabled." if enabled else "disabled."))
-    await callback.message.edit_reply_markup(
-        reply_markup=moderation_menu_kb(_, bio_link_enabled=enabled)
+    await callback.message.edit_text(
+        "🛡️ <b>Bio Link Protection</b>\\n\\n"
+        "When enabled, ALEXA checks for links in member bios where Telegram makes the bio available, "
+        "and applies the group's configured protection.\\n\\n"
+        f"Current status: <b>{'🟢 ON' if enabled else '🔴 OFF'}</b>",
+        parse_mode="HTML",
+        reply_markup=bio_link_protection_kb(enabled),
     )
+    await callback.answer("Bio Link Protection " + ("enabled." if enabled else "disabled."))
+
+
+@router.callback_query(F.data == "mod:bio_link_on")
+async def enable_bio_link_protection(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    await _set_bio_link_protection(callback, db_session, True)
+
+
+@router.callback_query(F.data == "mod:bio_link_off")
+async def disable_bio_link_protection(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    await _set_bio_link_protection(callback, db_session, False)
 
 
 @router.message(Command("ban"))
