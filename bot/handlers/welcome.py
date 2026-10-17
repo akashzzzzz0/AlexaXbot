@@ -500,6 +500,76 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                         pass
                 return
 
+
+    # Bio-link scan for existing members on each message, similar to the standalone
+    # BioLink Protector flow. Telegram Bot API may not expose every user's bio,
+    # so failures are logged and must never block normal group messages.
+    if message.from_user and not message.from_user.is_bot:
+        bio_setting = await db_session.scalar(
+            select(BioLinkProtectionSetting).where(
+                BioLinkProtectionSetting.group_id == message.chat.id
+            )
+        )
+        bio_protection_enabled = (
+            bool(bio_setting.enabled) if bio_setting is not None
+            else bool(group_security.anti_link)
+        )
+        if bio_protection_enabled:
+            try:
+                member_status = await message.bot.get_chat_member(
+                    message.chat.id, message.from_user.id
+                )
+                is_admin = member_status.status in ("administrator", "creator", "owner")
+                if not is_admin:
+                    member_row = await db_session.scalar(
+                        select(GroupMember).where(
+                            GroupMember.group_id == db_group.id,
+                            GroupMember.user_id == message.from_user.id,
+                        )
+                    )
+                    if not (member_row and member_row.is_whitelisted):
+                        profile = await message.bot.get_chat(message.from_user.id)
+                        bio = getattr(profile, "bio", None) or ""
+                        if bio and contains_link(bio):
+                            try:
+                                await message.delete()
+                            except Exception:
+                                pass
+                            if db_user:
+                                count, reached = await warn_user(
+                                    db_session, db_group.id, db_user.id, message.bot.id,
+                                    "Link found in profile bio (Bio Link Protection)", max_warns=3
+                                )
+                                if reached:
+                                    muted = await mute_user(
+                                        message.bot, db_session, db_group.id, db_user.id,
+                                        message.bot.id, 3600, "3 bio-link warnings reached"
+                                    )
+                                    notice = (
+                                        f"🚫 Message removed. {message.from_user.first_name or 'Member'} "
+                                        "reached 3/3 bio-link warnings and has been muted for 1 hour."
+                                        if muted else
+                                        f"⚠️ Message removed. Bio-link warning {count}/3; mute failed. "
+                                        "Please check ALEXA's Restrict Members permission."
+                                    )
+                                else:
+                                    notice = (
+                                        f"⚠️ Message removed because a link was found in the member's bio. "
+                                        f"Warning {count}/3; at 3 warnings, mute for 1 hour."
+                                    )
+                                try:
+                                    await message.bot.send_message(message.chat.id, notice)
+                                except Exception:
+                                    pass
+                            return
+            except Exception as exc:
+                logger.debug(
+                    "Bio-link scan unavailable for message sender",
+                    chat_id=message.chat.id,
+                    user_id=message.from_user.id,
+                    error=str(exc),
+                )
+
     # Persistent keyword blocklist and auto-reply filters configured by group admins.
     text_content = (message.text or message.caption or "").lower()
     if text_content:
