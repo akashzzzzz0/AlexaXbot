@@ -1,6 +1,6 @@
 import asyncio
 from aiogram import Router, F
-from aiogram.types import Message, ChatMemberUpdated, ChatPermissions
+from aiogram.types import Message, ChatMemberUpdated, ChatPermissions, CallbackQuery
 from aiogram.filters import ChatMemberUpdatedFilter, JOIN_TRANSITION, LEAVE_TRANSITION
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
