@@ -150,7 +150,7 @@ async def wordseek_buttons(callback: CallbackQuery, db_session: AsyncSession, **
         await callback.answer("This button belongs to another group.", show_alert=True)
 
 
-@router.message(F.text)
+@router.message(F.text.regexp(r"^[A-Za-z]{5}$"))
 async def wordseek_guess(message: Message, db_session: AsyncSession, db_user, **kwargs):
     if not message.chat or message.chat.type == "private" or not message.from_user:
         return
