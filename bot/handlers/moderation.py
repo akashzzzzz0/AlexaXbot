@@ -355,16 +355,27 @@ async def cmd_mute(message: Message, bot: Bot, _: callable, db_session: AsyncSes
 @router.message(Command("unmute"))
 async def cmd_unmute(message: Message, bot: Bot, _: callable, db_session: AsyncSession, **kwargs):
     if message.chat.type == "private":
+        await message.answer("This command only works in groups.")
         return
-    target, _ = await get_target_user(message, db_session)
+    target, _reason = await get_target_user(message, db_session)
     if not target:
-        await message.reply(_("provide_user"))
+        await message.answer(
+            "Reply to the muted member's message with /unmute, or use /unmute <user ID>."
+        )
         return
     success = await unmute_user(bot, db_session, message.chat.id, target.id, message.from_user.id)
     if success:
-        await message.reply(_("user_unmuted").format(name=safe_username(target)))
+        # Use a literal response so a missing translation key cannot suppress feedback.
+        response = f"✅ {escape(safe_username(target))} has been unmuted."
     else:
-        await message.reply("❌ I couldn't unmute this user. Make sure ALEXA is an admin with Restrict Members permission and the target is in this group.")
+        response = (
+            "❌ I couldn't unmute this user. Check that ALEXA has Restrict Members permission "
+            "and that the target is still in the group."
+        )
+    try:
+        await message.answer(response, parse_mode="HTML")
+    except Exception as exc:
+        logger.warning("Could not send /unmute result", chat_id=message.chat.id, user_id=target.id, error=str(exc))
 
 
 @router.message(Command("warn"))
