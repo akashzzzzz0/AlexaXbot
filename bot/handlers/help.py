@@ -34,6 +34,7 @@ def build_help_text(_: callable) -> str:
         f"/roulette — {_('help_cmd_roulette')}\n\n"
         f"🛡️ <b>{_('help_section_security')}</b>\n"
         f"/security — {_('help_cmd_security')}\n"
+        "/biolink — configure Bio Link Protection\\n"
         f"/lock — {_('help_cmd_lock')}\n"
         f"/unlock — {_('help_cmd_unlock')}\n"
         "/locks /locktypes — list content locks\n"
@@ -103,6 +104,7 @@ HELP_GUIDES = {
         "/lock and /unlock — lock or unlock supported content types\n"
         "/locks /locktypes — view lock types\n"
         "/setflood /flood /setfloodmode /clearflood — configure flood protection\n"
+        "/biolink — configure Bio Link Protection (3 warnings then mute/ban, where supported)\\n"
         "Bio Link Protection is a separate group setting where available. "
         "ALEXA needs administrator rights and permission to delete messages for enforcement."
     ),
