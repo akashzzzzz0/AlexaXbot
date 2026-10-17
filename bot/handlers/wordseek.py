@@ -4,7 +4,7 @@ from html import escape
 
 from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import Economy
@@ -30,13 +30,6 @@ WIN_XP = 10
 
 # Active round state is per chat. Scores/rewards are stored in the existing economy DB.
 games = {}
-
-
-def join_keyboard(chat_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🎮 Join Game", callback_data=f"ws:join:{chat_id}"),
-        InlineKeyboardButton(text="📊 Players", callback_data=f"ws:players:{chat_id}"),
-    ]])
 
 
 def render_guess(guess: str, target: str) -> str:
@@ -70,11 +63,10 @@ async def wordseek_help(message: Message, **kwargs):
     await message.reply(
         "🔤 <b>Alexa WordSeek</b>\n"
         "/new — start a group round\n"
-        "/join — join the current round\n"
         "/wscores — see this group's WordSeek leaderboard\n\n"
         "Guess a five-letter English word. 🟩 correct letter and position, "
         "🟨 letter exists but is in another position, 🟥 letter is not needed. "
-        "Only joined players' guesses count.",
+        "Everyone in the group can guess directly — no joining needed.",
         parse_mode="HTML",
     )
 
@@ -87,67 +79,18 @@ async def wordseek_new(message: Message, **kwargs):
     chat_id = message.chat.id
     games[chat_id] = {
         "target": random.choice(WORDS),
-        "joined": {},
         "attempts": 0,
-        "solved": set(),
-        "winner": None,
         "round_over": False,
         "scores": {},
+        "names": {},
     }
     await message.reply(
         "🔤 <b>WordSeek started!</b>\n"
-        "Guess the 5-letter word. Join first, then send your guesses as normal messages.\n"
+        "Everyone can play immediately — just send any 5-letter English word as a message.\n"
         f"Attempts available: {MAX_ATTEMPTS}\n"
         "🟩 right place · 🟨 in the word, wrong place · 🟥 not in the word",
-        reply_markup=join_keyboard(chat_id),
         parse_mode="HTML",
     )
-
-
-@router.message(Command("join"))
-async def wordseek_join_command(message: Message, **kwargs):
-    if not message.chat or message.chat.id not in games or games[message.chat.id]["round_over"]:
-        await message.reply("No active WordSeek round. Use /new to start one.")
-        return
-    if not message.from_user:
-        return
-    games[message.chat.id]["joined"][message.from_user.id] = message.from_user.full_name
-    await message.reply(f"✅ {escape(message.from_user.full_name)} joined WordSeek. Send a 5-letter guess!")
-
-
-@router.callback_query(F.data.startswith("ws:"))
-async def wordseek_buttons(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
-    parts = (callback.data or "").split(":")
-    if len(parts) != 3:
-        await callback.answer("Invalid game button.", show_alert=True)
-        return
-    action, chat_raw = parts[1], parts[2]
-    try:
-        chat_id = int(chat_raw)
-    except ValueError:
-        await callback.answer("Invalid game.", show_alert=True)
-        return
-    game = games.get(chat_id)
-    if not game or game["round_over"]:
-        await callback.answer("This round has ended. Start another with /new.", show_alert=True)
-        return
-    user = callback.from_user
-    if action == "join":
-        game["joined"][user.id] = user.full_name
-        await callback.answer("You joined WordSeek!")
-        if callback.message:
-            await callback.message.reply(f"🎮 {escape(user.full_name)} joined! Total players: {len(game['joined'])}")
-    elif action == "players":
-        names = list(game["joined"].values())
-        listing = "\n".join(f"• {escape(name)}" for name in names) if names else "No players yet. Tap Join Game."
-        await callback.answer(f"Players: {len(names)}")
-        if callback.message:
-            await callback.message.reply(f"👥 <b>WordSeek players ({len(names)})</b>\n{listing}", parse_mode="HTML")
-    else:
-        await callback.answer("Unknown action.")
-        return
-    if callback.message and callback.message.chat.id != chat_id:
-        await callback.answer("This button belongs to another group.", show_alert=True)
 
 
 @router.message(F.text.regexp(r"^[A-Za-z]{5}$"))
@@ -161,46 +104,29 @@ async def wordseek_guess(message: Message, db_session: AsyncSession, db_user, **
     if len(guess) != 5 or not guess.isalpha() or not guess.isascii():
         return
     uid = message.from_user.id
-    if uid not in game["joined"]:
-        return
-    if uid in game["solved"]:
-        await message.reply("✅ You already solved this round. Wait for the next /new.")
-        return
     if game["attempts"] >= MAX_ATTEMPTS:
         return
 
     game["attempts"] += 1
+    game["names"][uid] = message.from_user.full_name
     target = game["target"]
     marks = render_guess(guess, target)
     if guess == target:
-        game["solved"].add(uid)
-        first = game["winner"] is None
-        if first:
-            game["winner"] = uid
-        reward = WIN_COINS + (FIRST_BONUS if first else 0)
+        reward = WIN_COINS + FIRST_BONUS
         await add_coins(db_session, db_user.id, reward, "wordseek_win", "WordSeek correct word")
         await add_xp(db_session, db_user.id, WIN_XP)
         game["scores"][uid] = game["scores"].get(uid, 0) + reward
         await message.reply(
             f"{marks} <b>{guess}</b>\n🎉 <b>{escape(message.from_user.full_name)}</b> guessed it!\n"
             f"🪙 +{reward} coins · ⭐ +{WIN_XP} XP" +
-            ("\n🥇 First correct guess bonus included!" if first else ""),
+            "\n🥇 First correct guess bonus included!",
             parse_mode="HTML",
         )
-        # Keep the shared round open so other joined members can solve it too.
-        all_joined_solved = bool(game["joined"]) and set(game["joined"]).issubset(game["solved"])
-        if all_joined_solved or game["attempts"] >= MAX_ATTEMPTS:
-            game["round_over"] = True
-            await message.answer(
-                f"🏁 WordSeek over! The word was <b>{target}</b>. Use /new for another round.",
-                parse_mode="HTML",
-            )
-        else:
-            await message.answer(
-                "🔤 Round is still open! Other joined players can keep guessing. "
-                "Solved players are finished for this round.",
-                parse_mode="HTML",
-            )
+        game["round_over"] = True
+        await message.answer(
+            f"🏁 WordSeek over! The word was <b>{target}</b>. Use /new to play again.",
+            parse_mode="HTML",
+        )
         return
 
     await add_xp(db_session, db_user.id, PARTICIPATION_XP)
@@ -226,6 +152,6 @@ async def wordseek_scores(message: Message, db_session: AsyncSession, **kwargs):
     ranked = sorted(game["scores"].items(), key=lambda item: item[1], reverse=True)
     lines = []
     for rank, (uid, coins) in enumerate(ranked[:10], 1):
-        name = game["joined"].get(uid, f"Player {uid}")
+        name = game["names"].get(uid, f"Player {uid}")
         lines.append(f"{rank}. {escape(name)} — {coins} coins")
     await message.reply("🏆 <b>WordSeek round scores</b>\n" + "\n".join(lines), parse_mode="HTML")
