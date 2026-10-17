@@ -213,3 +213,51 @@ async def hack(message: Message, db_session: AsyncSession, db_user, **kwargs):
         await message.reply(f"💻 Simulation solved! You won {reward} virtual coins.")
     else:
         await message.reply("💻 Simulation failed. You lost 25 virtual coins.")
+
+
+@router.message(Command("bomb"))
+async def bomb_game(message: Message, db_session: AsyncSession, db_user, **kwargs):
+    """Simple virtual-coin bomb game."""
+    wager = 20
+    ok, balance = await deduct_coins(
+        db_session, db_user.id, wager, "bomb_bet", "Virtual bomb game entry"
+    )
+    if not ok:
+        await message.reply(f"💣 Bomb game costs {wager} coins. Your balance: {balance}.")
+        return
+    if random.random() < 0.55:
+        reward = wager * 2
+        await add_coins(db_session, db_user.id, reward, "bomb_win", "Virtual bomb game win")
+        await message.reply(f"💣 You found the safe path! Reward: {reward} coins.")
+    else:
+        await message.reply(f"💥 Boom! You lost {wager} virtual coins. Try again later.")
+
+
+@router.message(Command("card"))
+async def card_game(message: Message, db_session: AsyncSession, db_user, **kwargs):
+    """Draw a virtual card against the bot; no real-money value."""
+    wager = 25
+    ok, balance = await deduct_coins(
+        db_session, db_user.id, wager, "card_bet", "Virtual card game entry"
+    )
+    if not ok:
+        await message.reply(f"🃏 Card game costs {wager} coins. Your balance: {balance}.")
+        return
+    player_card = random.randint(1, 13)
+    bot_card = random.randint(1, 13)
+    if player_card > bot_card:
+        reward = wager * 2
+        await add_coins(db_session, db_user.id, reward, "card_win", "Virtual card game win")
+        result = f"🏆 You win! Reward: {reward} coins."
+    elif player_card == bot_card:
+        await add_coins(db_session, db_user.id, wager, "card_draw", "Virtual card game refund")
+        result = f"🤝 Draw — your {wager} coins were returned."
+    else:
+        result = f"❌ Bot wins. You lost {wager} virtual coins."
+    ranks = {1: "A", 11: "J", 12: "Q", 13: "K"}
+    player_label = ranks.get(player_card, str(player_card))
+    bot_label = ranks.get(bot_card, str(bot_card))
+    await message.reply(
+        f"🃏 <b>Card Duel</b>\\nYour card: <b>{player_label}</b> · Bot card: <b>{bot_label}</b>\\n\\n{result}",
+        parse_mode="HTML",
+    )
