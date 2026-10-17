@@ -105,7 +105,7 @@ async def configure_command_visibility(bot) -> None:
         ("save", "Save a replied text message"), ("get", "Get a saved message"), ("clear", "Clear a saved message"),
         ("blocklist", "Show blocked keywords"), ("addblocklist", "Block a keyword"), ("rmblocklist", "Unblock a keyword"),
         ("disablecmd", "Disable a group command"), ("enablecmd", "Enable a group command"), ("disabledcmds", "List disabled commands"),
-        ("id", "Show user and chat IDs"), ("info", "Show user information"), ("admins", "List group admins"), ("report", "Report a member"),
+        ("id", "Show user and chat IDs"), ("info", "Show user information"), ("admins", "List group admins"), ("report", "Report a member"), ("autodelete", "Auto-delete group commands"),
     ]
     commands = [BotCommand(command=name, description=description) for name, description in public_commands]
     try:
