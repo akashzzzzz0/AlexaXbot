@@ -11,6 +11,7 @@ from bot.services.moderation_service import (
     warn_user, unwarn_user, get_user_warnings, get_user_history, add_note, get_notes
 )
 from bot.utils.helpers import format_duration, mention_user, safe_username
+import asyncio
 import structlog
 from html import escape
 from bot.middlewares.admin_actions import AdminActionMiddleware
@@ -18,9 +19,75 @@ from bot.middlewares.admin_actions import AdminActionMiddleware
 logger = structlog.get_logger()
 router = Router()
 router.message.outer_middleware(AdminActionMiddleware(
-    commands={"ban", "unban", "kick", "mute", "unmute", "warn", "unwarn", "warns", "warnings", "history", "note", "del", "pin", "unpin", "ro", "setrole", "clearrole", "role", "resetwarns", "promote", "demote", "warnings", "del", "pin", "unpin"}
+    commands={"ban", "unban", "kick", "mute", "unmute", "warn", "unwarn", "warns", "warnings", "history", "note", "del", "pin", "unpin", "ro", "setrole", "clearrole", "role", "resetwarns", "promote", "demote", "warnings", "del", "pin", "unpin", "autodelete"}
 ))
 router.callback_query.outer_middleware(AdminActionMiddleware(prefixes=("mod:", "mute_duration:", "ban_duration:", "warn_action:", "ban_confirm:")))
+
+
+@router.message(Command("autodelete"))
+async def cmd_autodelete(message: Message, db_session: AsyncSession, **kwargs):
+    """Configure automatic deletion of group command messages."""
+    if message.chat.type not in ("group", "supergroup"):
+        await message.reply("Use /autodelete inside a group. Example: /autodelete 10 or /autodelete off")
+        return
+
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) < 2:
+        current = await db_session.scalar(
+            select(GroupSettings).where(GroupSettings.group_id == message.chat.id)
+        )
+        delay = int(current.auto_delete_seconds or 0) if current else 0
+        await message.reply(
+            f"🧹 Command auto-delete: <b>{'OFF' if delay <= 0 else f'{delay} seconds'}</b>\n\n"
+            "Enable: <code>/autodelete 10</code> (5–300 seconds)\n"
+            "Disable: <code>/autodelete off</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    value = parts[1].strip().lower()
+    if value in {"off", "disable", "0"}:
+        delay = 0
+    else:
+        try:
+            delay = int(value)
+        except ValueError:
+            await message.reply("Use <code>/autodelete 10</code> or <code>/autodelete off</code>.", parse_mode="HTML")
+            return
+        if not 5 <= delay <= 300:
+            await message.reply("Delay must be 5–300 seconds, or use <code>/autodelete off</code>.", parse_mode="HTML")
+            return
+
+    row = await db_session.scalar(
+        select(GroupSettings).where(GroupSettings.group_id == message.chat.id)
+    )
+    if row is None:
+        row = GroupSettings(group_id=message.chat.id, auto_delete_seconds=delay)
+        db_session.add(row)
+    else:
+        row.auto_delete_seconds = delay
+    try:
+        await db_session.commit()
+    except Exception as exc:
+        await db_session.rollback()
+        logger.warning("Could not save auto-delete setting", chat_id=message.chat.id, error=str(exc))
+        await message.reply("❌ Could not save auto-delete setting. Please try again.")
+        return
+
+    if delay > 0:
+        response = await message.reply(
+            f"🧹 Auto-delete enabled. Group command messages will be deleted after {delay} seconds."
+        )
+        async def cleanup():
+            await asyncio.sleep(delay)
+            for target in (message, response):
+                try:
+                    await target.delete()
+                except Exception:
+                    pass
+        asyncio.create_task(cleanup())
+    else:
+        await message.reply("🧹 Auto-delete disabled. Command messages will no longer be auto-deleted.")
 
 
 async def get_target_user(message: Message, session: AsyncSession) -> tuple:
