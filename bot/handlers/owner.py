@@ -478,14 +478,34 @@ async def owner_addgroups(callback: CallbackQuery, _: callable, bot: Bot, **kwar
 
 
 @router.callback_query(F.data == "owner:users")
+@router.callback_query(F.data.startswith("owner:users:"))
 async def owner_users(callback: CallbackQuery, _: callable, db_session: AsyncSession, **kwargs):
     if not is_owner(callback.from_user.id):
         await callback.answer("Not available.", show_alert=True)
         return
+
+    # Show every recorded DM starter through pages so the full list remains
+    # usable even when the database contains hundreds or thousands of users.
+    page = 0
+    if callback.data.startswith("owner:users:"):
+        try:
+            page = max(0, int(callback.data.rsplit(":", 1)[1]))
+        except (TypeError, ValueError):
+            page = 0
+    page_size = 25
+    user_filter = (User.dm_started.is_(True), User.is_banned.is_(False))
+    total = await db_session.scalar(
+        select(func.count()).select_from(User).where(*user_filter)
+    ) or 0
+    max_page = max(0, (total - 1) // page_size)
+    page = min(page, max_page)
     result = await db_session.execute(
-        select(User).where(User.dm_started.is_(True), User.is_banned.is_(False)).order_by(desc(User.last_seen), desc(User.created_at)).limit(25)
+        select(User).where(*user_filter)
+        .order_by(desc(User.last_seen), desc(User.created_at))
+        .offset(page * page_size).limit(page_size)
     )
     users = result.scalars().all()
+
     if not users:
         body = "No active DM starters have been recorded yet."
     else:
@@ -494,10 +514,22 @@ async def owner_users(callback: CallbackQuery, _: callable, db_session: AsyncSes
             name = escape((user.first_name or "User") + (f" {user.last_name}" if user.last_name else ""))
             username = f" (@{escape(user.username)})" if user.username else ""
             lines.append(f'• <a href="tg://user?id={user.id}">{name}</a>{username} — <code>{user.id}</code>')
-        body = "\n".join(lines)
+        body = "\\n".join(lines)
+
+    builder = InlineKeyboardBuilder()
+    if page > 0:
+        builder.button(text="⬅️ Previous", callback_data=f"owner:users:{page - 1}")
+    if page < max_page:
+        builder.button(text="Next ➡️", callback_data=f"owner:users:{page + 1}")
+    builder.button(text="◀️ Owner Panel", callback_data="owner:menu")
+    builder.adjust(2, 1)
+
+    page_label = f"Page {page + 1}/{max_page + 1}" if total else "Page 0/0"
     await callback.message.edit_text(
-        "👤 <b>Recent DM Starters (up to 25)</b>\n\n" + body,
-        parse_mode="HTML", reply_markup=back_button_kb(_, "owner:menu")
+        "👤 <b>Active DM Users</b>\\n"
+        f"👥 Total: <b>{format_number(total)}</b>\\n"
+        f"📄 {page_label} (25 per page)\\n\\n" + body,
+        parse_mode="HTML", reply_markup=builder.as_markup()
     )
     await callback.answer()
 
