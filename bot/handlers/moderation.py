@@ -3,7 +3,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.filters import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, delete, func
-from bot.database.models import User, GroupMember, GroupSettings, Warning
+from bot.database.models import User, GroupMember, GroupSettings, Warning, SecuritySettings, BioLinkProtectionSetting
 from bot.keyboards.moderation import moderation_menu_kb, mute_duration_kb, warn_actions_kb
 from bot.keyboards.main_menu import back_button_kb
 from bot.services.moderation_service import (
@@ -57,24 +57,79 @@ async def get_target_user(message: Message, session: AsyncSession) -> tuple:
     return target, reason
 
 
+async def _bio_link_protection_enabled(db_session: AsyncSession, chat_id: int) -> bool:
+    setting = await db_session.scalar(
+        select(BioLinkProtectionSetting).where(BioLinkProtectionSetting.group_id == chat_id)
+    )
+    if setting is not None:
+        return bool(setting.enabled)
+    # Keep the previous behavior until an admin makes an explicit choice.
+    security = await db_session.scalar(
+        select(SecuritySettings).where(SecuritySettings.group_id == chat_id)
+    )
+    return bool(security and security.anti_link)
+
+
 @router.callback_query(F.data == "menu:moderation")
-async def moderation_menu(callback: CallbackQuery, _: callable, **kwargs):
+async def moderation_menu(callback: CallbackQuery, _: callable, db_session: AsyncSession, **kwargs):
+    enabled = await _bio_link_protection_enabled(db_session, callback.message.chat.id)
     await callback.message.edit_text(
         _("moderation_menu"),
-        reply_markup=moderation_menu_kb(_),
+        reply_markup=moderation_menu_kb(_, bio_link_enabled=enabled),
         parse_mode="HTML",
     )
     await callback.answer()
 
 
 @router.callback_query(F.data == "mod:menu")
-async def moderation_menu_back(callback: CallbackQuery, _: callable, **kwargs):
+async def moderation_menu_back(callback: CallbackQuery, _: callable, db_session: AsyncSession, **kwargs):
+    enabled = await _bio_link_protection_enabled(db_session, callback.message.chat.id)
     await callback.message.edit_text(
         _("moderation_menu"),
-        reply_markup=moderation_menu_kb(_),
+        reply_markup=moderation_menu_kb(_, bio_link_enabled=enabled),
         parse_mode="HTML",
     )
     await callback.answer()
+
+
+@router.callback_query(F.data == "mod:bio_link_protection")
+async def toggle_bio_link_protection(callback: CallbackQuery, _: callable, db_session: AsyncSession, **kwargs):
+    chat = callback.message.chat
+    if chat.type not in ("group", "supergroup"):
+        await callback.answer("Open Moderation inside a group to change this setting.", show_alert=True)
+        return
+    try:
+        actor = await callback.bot.get_chat_member(chat.id, callback.from_user.id)
+        if actor.status not in ("administrator", "creator"):
+            await callback.answer("Only group admins can change this protection.", show_alert=True)
+            return
+    except Exception:
+        await callback.answer("Could not verify your group-admin permissions.", show_alert=True)
+        return
+
+    setting = await db_session.scalar(
+        select(BioLinkProtectionSetting).where(BioLinkProtectionSetting.group_id == chat.id)
+    )
+    if setting is None:
+        # First click flips the currently effective value, including legacy anti-link state.
+        current = await _bio_link_protection_enabled(db_session, chat.id)
+        setting = BioLinkProtectionSetting(group_id=chat.id, enabled=not current)
+        db_session.add(setting)
+    else:
+        setting.enabled = not setting.enabled
+    try:
+        await db_session.commit()
+    except Exception as exc:
+        await db_session.rollback()
+        logger.warning("Failed to save bio-link protection setting", group_id=chat.id, error=str(exc))
+        await callback.answer("Could not save this setting. Try again.", show_alert=True)
+        return
+
+    enabled = await _bio_link_protection_enabled(db_session, chat.id)
+    await callback.answer("Bio Link Protection " + ("enabled." if enabled else "disabled."))
+    await callback.message.edit_reply_markup(
+        reply_markup=moderation_menu_kb(_, bio_link_enabled=enabled)
+    )
 
 
 @router.message(Command("ban"))
