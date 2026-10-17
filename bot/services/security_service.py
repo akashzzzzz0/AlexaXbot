@@ -23,7 +23,10 @@ SCAM_PATTERNS = [
 ]
 
 INVITE_PATTERN = re.compile(r"(?:https?://)?(?:t\.me|telegram\.me)/(?:joinchat/|\+)[a-zA-Z0-9_-]+")
-LINK_PATTERN = re.compile(r"https?://[^\s]+|www\.[^\s]+|(?<![\w])@[A-Za-z][A-Za-z0-9_]{4,31}\b", re.IGNORECASE)
+LINK_PATTERN = re.compile(
+    r"(?:https?://|www\\.)[^\\s]+|(?<![\\w])(?:t\\.me|telegram\\.me)/[^\\s]+|(?<![\\w])@[A-Za-z0-9_]{1,32}\\b|(?<![\\w])[A-Za-z0-9_-]{5,}\\.t\\.me\\b",
+    re.IGNORECASE,
+)
 PHONE_PATTERN = re.compile(r"(?:\+?\d[\d\s\-]{7,}\d)")
 NSFW_WORDS = {"nsfw", "porn", "xxx", "sex", "nude", "naked"}
 AD_WORDS = {"subscribe", "follow my channel", "join my channel", "promo", "promotion", "advertisement", "buy now", "limited offer", "dm me", "earn money fast"}
