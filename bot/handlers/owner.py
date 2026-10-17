@@ -32,8 +32,9 @@ def is_owner(user_id: int) -> bool:
 
 def owner_kb(_=None) -> object:
     builder = InlineKeyboardBuilder()
-    builder.button(text="📢 Global Broadcast", callback_data="owner:broadcast")
+    builder.button(text="📨 DM Broadcast", callback_data="owner:broadcast")
     builder.button(text="📣 Group Promotion", callback_data="owner:promotion")
+    builder.button(text="🌐 Global Controls", callback_data="owner:global_controls")
     builder.button(text="📊 Statistics", callback_data="owner:stats")
     builder.button(text="👥 Groups • Activity • Links • Permissions", callback_data="owner:groups")
     builder.button(text="🔨 Ban All", callback_data="owner:banall")
@@ -95,11 +96,16 @@ def _emergency_detail_kb(group_id: int, enabled: bool):
 
 def _group_detail_kb(group_id: int):
     builder = InlineKeyboardBuilder()
-    builder.button(text="🔨 Ban All", callback_data=f"owner:banall:{group_id}")
+    builder.button(text="🛡️ Security Settings", callback_data=f"owner:security:{group_id}")
+    builder.button(text="🔒 Content Locks", callback_data=f"owner:locks:{group_id}")
     builder.button(text="🛡️ Bio Link Protection", callback_data=f"owner:biolink:{group_id}")
+    builder.button(text="🚨 Emergency Lockdown", callback_data=f"owner:emergency_view:{group_id}")
+    builder.button(text="📈 Activity", callback_data=f"owner:activity:{group_id}")
+    builder.button(text="🔗 Group Link", callback_data=f"owner:link:{group_id}")
+    builder.button(text="🔨 Ban All", callback_data=f"owner:banall:{group_id}")
     builder.button(text="🔄 Refresh", callback_data=f"owner:group:{group_id}")
     builder.button(text="◀️ Groups", callback_data="owner:groups")
-    builder.adjust(1, 1, 2)
+    builder.adjust(1, 1, 1, 1, 2, 2, 1)
     return builder.as_markup()
 
 
@@ -263,6 +269,70 @@ async def owner_group(callback: CallbackQuery, _: callable, db_session: AsyncSes
     await callback.answer()
 
 
+
+def _owner_security_fields():
+    return {
+        "anti_spam": ("Anti-Spam", "anti_spam"),
+        "anti_flood": ("Anti-Flood", "anti_flood"),
+        "anti_raid": ("Anti-Raid", "anti_raid"),
+        "anti_bot": ("Anti-Bot", "anti_bot"),
+        "anti_link": ("Anti-Link", "anti_link"),
+        "anti_scam": ("Anti-Scam", "anti_scam"),
+        "anti_invite": ("Anti-Invite Links", "anti_invite"),
+        "anti_advertisement": ("Anti-Advertisement", "anti_advertisement"),
+    }
+
+
+def _owner_security_kb(group_id: int, security: SecuritySettings, locks: bool = False):
+    builder = InlineKeyboardBuilder()
+    if locks:
+        fields = {
+            "lock_text": "Text", "lock_links": "Links", "lock_photos": "Photos",
+            "lock_videos": "Videos", "lock_gifs": "GIFs", "lock_audio": "Audio",
+            "lock_voice": "Voice", "lock_documents": "Documents", "lock_polls": "Polls",
+            "lock_games": "Games", "lock_bots": "Bots", "lock_forwards": "Forwards",
+            "lock_contacts": "Contacts", "lock_locations": "Locations", "lock_stickers": "Stickers",
+            "lock_inline": "Inline buttons", "lock_mentions": "Mentions", "lock_hashtags": "Hashtags",
+        }
+    else:
+        fields = {key: value[0] for key, value in _owner_security_fields().items()}
+        fields["emergency_mode"] = "Emergency Lockdown"
+    for field, label in fields.items():
+        enabled = bool(getattr(security, field, False))
+        builder.button(
+            text=f"{'🟢' if enabled else '🔴'} {label}: {'ON' if enabled else 'OFF'}",
+            callback_data=f"owner:security_toggle:{group_id}:{field}",
+        )
+    builder.button(text="◀️ Group Dashboard", callback_data=f"owner:group:{group_id}")
+    builder.button(text="👑 Owner Panel", callback_data="owner:menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+async def _render_owner_security(callback: CallbackQuery, session: AsyncSession, group_id: int, locks: bool = False):
+    group = await session.get(Group, group_id)
+    if not group or not group.is_active:
+        await callback.answer("Group is not active/registered.", show_alert=True)
+        return
+    security = await session.scalar(select(SecuritySettings).where(SecuritySettings.group_id == group_id))
+    if security is None:
+        security = SecuritySettings(group_id=group_id)
+        session.add(security)
+        await session.flush()
+    title = "Content Locks" if locks else "Security Settings"
+    description = (
+        "Toggle the content types ALEXA should block in this group."
+        if locks else
+        "Configure this group's security independently. Changes save to this group only."
+    )
+    await callback.message.edit_text(
+        f"🛡️ <b>{escape(title)} — {escape(group.title)}</b>\\n\\n{description}\\n\\n"
+        "🟢 ON  •  🔴 OFF",
+        parse_mode="HTML",
+        reply_markup=_owner_security_kb(group_id, security, locks=locks),
+    )
+
+
 def _owner_biolink_kb(group_id: int, enabled: bool, action: str, duration: int):
     builder = InlineKeyboardBuilder()
     builder.button(
@@ -412,6 +482,127 @@ async def owner_biolink_duration(callback: CallbackQuery, db_session: AsyncSessi
     await db_session.flush()
     await _owner_render_biolink(callback, db_session, group_id)
     await callback.answer("Mute duration updated.")
+
+
+
+@router.callback_query(F.data.startswith("owner:security:"))
+async def owner_security_open(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Not available.", show_alert=True); return
+    try: group_id = int(callback.data.rsplit(":", 1)[1])
+    except ValueError:
+        await callback.answer("Invalid group.", show_alert=True); return
+    await _render_owner_security(callback, db_session, group_id, locks=False)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner:locks:"))
+async def owner_locks_open(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Not available.", show_alert=True); return
+    try: group_id = int(callback.data.rsplit(":", 1)[1])
+    except ValueError:
+        await callback.answer("Invalid group.", show_alert=True); return
+    await _render_owner_security(callback, db_session, group_id, locks=True)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner:security_toggle:"))
+async def owner_security_toggle(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Not available.", show_alert=True); return
+    try:
+        _, _, group_id_text, field = callback.data.split(":", 3)
+        group_id = int(group_id_text)
+    except (ValueError, TypeError):
+        await callback.answer("Invalid setting.", show_alert=True); return
+    allowed = {key for key in _owner_security_fields()}
+    allowed.update({
+        "emergency_mode", "lock_text", "lock_links", "lock_photos", "lock_videos",
+        "lock_gifs", "lock_audio", "lock_voice", "lock_documents", "lock_polls",
+        "lock_games", "lock_bots", "lock_forwards", "lock_contacts", "lock_locations",
+        "lock_stickers", "lock_inline", "lock_mentions", "lock_hashtags",
+    })
+    if field not in allowed:
+        await callback.answer("Unknown setting.", show_alert=True); return
+    group = await db_session.get(Group, group_id)
+    if not group or not group.is_active:
+        await callback.answer("Group is not active.", show_alert=True); return
+    security = await db_session.scalar(select(SecuritySettings).where(SecuritySettings.group_id == group_id))
+    if security is None:
+        security = SecuritySettings(group_id=group_id); db_session.add(security); await db_session.flush()
+    setattr(security, field, not bool(getattr(security, field, False)))
+    try: await db_session.commit()
+    except Exception as exc:
+        await db_session.rollback()
+        logger.warning("owner_group_security_toggle_failed", group_id=group_id, field=field, error=str(exc))
+        await callback.answer("Could not save this setting.", show_alert=True); return
+    await _render_owner_security(callback, db_session, group_id, locks=field.startswith("lock_"))
+    await callback.answer(f"{field.replace('_', ' ').title()} updated.")
+
+
+@router.callback_query(F.data == "owner:global_controls")
+async def owner_global_controls(callback: CallbackQuery, _: callable, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Not available.", show_alert=True); return
+    groups = await _active_groups(db_session)
+    emergency_on = anti_spam_on = anti_flood_on = 0
+    for group in groups:
+        security = await db_session.scalar(select(SecuritySettings).where(SecuritySettings.group_id == group.id))
+        if security:
+            emergency_on += int(bool(security.emergency_mode))
+            anti_spam_on += int(bool(security.anti_spam))
+            anti_flood_on += int(bool(security.anti_flood))
+    builder = InlineKeyboardBuilder()
+    for label, field, val in [
+        ("🟢 Anti-Spam ON — All Groups", "anti_spam", "1"),
+        ("🔴 Anti-Spam OFF — All Groups", "anti_spam", "0"),
+        ("🟢 Anti-Flood ON — All Groups", "anti_flood", "1"),
+        ("🔴 Anti-Flood OFF — All Groups", "anti_flood", "0"),
+        ("🚨 Lockdown ON — All Groups", "emergency_mode", "1"),
+        ("🔓 Lockdown OFF — All Groups", "emergency_mode", "0"),
+    ]:
+        builder.button(text=label, callback_data=f"owner:global_set:{field}:{val}")
+    builder.button(text="👥 Per-Group Settings", callback_data="owner:groups")
+    builder.button(text="◀️ Owner Panel", callback_data="owner:menu")
+    builder.adjust(1)
+    await callback.message.edit_text(
+        "🌐 <b>GLOBAL CONTROLS</b>\\n\\n"
+        f"Active groups: <b>{format_number(len(groups))}</b>\\n"
+        f"Anti-Spam enabled: <b>{format_number(anti_spam_on)}</b> groups\\n"
+        f"Anti-Flood enabled: <b>{format_number(anti_flood_on)}</b> groups\\n"
+        f"Emergency Lockdown enabled: <b>{format_number(emergency_on)}</b> groups\\n\\n"
+        "⚠️ Changes below apply to every active registered group. Lockdown requires Delete Messages permission.",
+        parse_mode="HTML", reply_markup=builder.as_markup()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner:global_set:"))
+async def owner_global_set(callback: CallbackQuery, _: callable, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Not available.", show_alert=True); return
+    try:
+        _, _, field, value_text = callback.data.split(":", 3)
+        enabled = value_text == "1"
+    except ValueError:
+        await callback.answer("Invalid global setting.", show_alert=True); return
+    if field not in {"anti_spam", "anti_flood", "emergency_mode"} or value_text not in {"0", "1"}:
+        await callback.answer("Invalid global setting.", show_alert=True); return
+    groups = await _active_groups(db_session); changed = 0
+    try:
+        for group in groups:
+            security = await db_session.scalar(select(SecuritySettings).where(SecuritySettings.group_id == group.id))
+            if security is None:
+                security = SecuritySettings(group_id=group.id); db_session.add(security)
+            setattr(security, field, enabled); changed += 1
+        await db_session.commit()
+    except Exception as exc:
+        await db_session.rollback()
+        logger.warning("owner_global_setting_failed", field=field, error=str(exc))
+        await callback.answer("Could not apply global setting.", show_alert=True); return
+    await callback.answer(f"{field.replace('_', ' ').title()} {'ON' if enabled else 'OFF'} in {changed} groups.", show_alert=True)
+    await owner_global_controls(callback, _, db_session)
 
 
 @router.callback_query(F.data == "owner:banall")
@@ -878,18 +1069,25 @@ async def process_broadcast(message: Message, _: callable, db_session: AsyncSess
     if not is_owner(message.from_user.id):
         await state.clear()
         return
+    if message.chat.type != "private":
+        return
+    if (message.text or "").strip().lower() == "/cancel":
+        await state.clear(); await message.reply("DM broadcast cancelled."); return
     users = await db_session.execute(
-        select(User).where(User.dm_started.is_(True), User.is_banned.is_(False)).limit(1000)
+        select(User).where(User.dm_started.is_(True), User.is_banned.is_(False)).order_by(User.id.asc())
     )
-    sent = 0
+    sent = failed = 0
     for user in users.scalars().all():
         try:
-            await message.copy_to(user.id)
-            sent += 1
-        except Exception:
-            pass
-    await message.reply(f"📢 Broadcast sent to {sent} users.")
+            await message.copy_to(user.id); sent += 1
+        except TelegramRetryAfter as exc:
+            await asyncio.sleep(max(1, exc.retry_after))
+            try: await message.copy_to(user.id); sent += 1
+            except Exception: failed += 1
+        except Exception: failed += 1
+        await asyncio.sleep(0.05)
     await state.clear()
+    await message.reply(f"📨 <b>DM Broadcast Result</b>\\n\\nSent: <b>{sent}</b>\\nFailed: <b>{failed}</b>", parse_mode="HTML")
 
 
 @router.callback_query(F.data == "owner:broadcast")
@@ -897,7 +1095,7 @@ async def start_broadcast(callback: CallbackQuery, _: callable, state: FSMContex
     if not is_owner(callback.from_user.id):
         await callback.answer("Not available.", show_alert=True)
         return
-    await callback.message.answer("📢 Send the broadcast message:")
+    await callback.message.answer("📨 <b>DM Broadcast</b>\\nSend the message to every recorded user who has started ALEXA in private.\\n\\nSend /cancel to stop.", parse_mode="HTML")
     await state.set_state(OwnerStates.waiting_broadcast)
     await callback.answer()
 
