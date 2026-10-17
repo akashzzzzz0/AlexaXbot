@@ -72,7 +72,7 @@ async def play_dice(callback: CallbackQuery, _: callable, db_session=None, db_us
     await callback.answer()
 
 
-@router.message(GameStates.waiting_dice_bet)
+@router.message(GameStates.waiting_dice_bet, F.text & ~F.text.startswith('/'))
 async def process_dice_bet(message: Message, _: callable, db_session=None, db_user=None, state: FSMContext = None, **kwargs):
     try:
         wager = int(message.text.strip())
