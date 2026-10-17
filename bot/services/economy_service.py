@@ -24,8 +24,10 @@ async def add_coins(
     reference_id: Optional[str] = None,
 ) -> int:
     wallet = await get_or_create_wallet(session, user_id)
+    if amount <= 0:
+        return wallet.balance or 0
     wallet.balance = (wallet.balance or 0) + amount
-    wallet.total_earned = (wallet.total_earned or 0) + max(0, amount)
+    wallet.total_earned = (wallet.total_earned or 0) + amount
     tx = Transaction(
         wallet_id=wallet.id,
         amount=amount,
@@ -45,7 +47,7 @@ async def deduct_coins(
     description: str = "",
 ) -> Tuple[bool, int]:
     wallet = await get_or_create_wallet(session, user_id)
-    if (wallet.balance or 0) < amount:
+    if amount <= 0 or (wallet.balance or 0) < amount:
         return False, wallet.balance or 0
     wallet.balance -= amount
     wallet.total_spent = (wallet.total_spent or 0) + amount
@@ -61,7 +63,7 @@ async def deduct_coins(
 
 async def deposit_to_bank(session: AsyncSession, user_id: int, amount: int) -> Tuple[bool, int, int]:
     wallet = await get_or_create_wallet(session, user_id)
-    if (wallet.balance or 0) < amount:
+    if amount <= 0 or (wallet.balance or 0) < amount:
         return False, wallet.balance or 0, wallet.bank_balance or 0
     wallet.balance -= amount
     wallet.bank_balance = (wallet.bank_balance or 0) + amount
@@ -70,7 +72,7 @@ async def deposit_to_bank(session: AsyncSession, user_id: int, amount: int) -> T
 
 async def withdraw_from_bank(session: AsyncSession, user_id: int, amount: int) -> Tuple[bool, int, int]:
     wallet = await get_or_create_wallet(session, user_id)
-    if (wallet.bank_balance or 0) < amount:
+    if amount <= 0 or (wallet.bank_balance or 0) < amount:
         return False, wallet.balance or 0, wallet.bank_balance or 0
     wallet.bank_balance -= amount
     wallet.balance = (wallet.balance or 0) + amount
@@ -84,6 +86,9 @@ async def transfer_coins(
     amount: int,
 ) -> Tuple[bool, int, int]:
     """Returns (success, sender_balance, recipient_balance)."""
+    if amount <= 0 or from_user_id == to_user_id:
+        wallet = await get_or_create_wallet(session, from_user_id)
+        return False, wallet.balance or 0, 0
     success, remaining = await deduct_coins(session, from_user_id, amount, "transfer_out", f"Transfer to {to_user_id}")
     if not success:
         return False, remaining, 0
