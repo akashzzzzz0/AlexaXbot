@@ -34,7 +34,6 @@ def build_help_text(_: callable) -> str:
         f"/roulette — {_('help_cmd_roulette')}\n\n"
         f"🛡️ <b>{_('help_section_security')}</b>\n"
         f"/security — {_('help_cmd_security')}\n"
-        "/biolink — configure Bio Link Protection\\n"
         f"/lock — {_('help_cmd_lock')}\n"
         f"/unlock — {_('help_cmd_unlock')}\n"
         "/locks /locktypes — list content locks\n"
@@ -71,13 +70,43 @@ def build_help_text(_: callable) -> str:
         f"<i>{_('help_hint')}</i>"
     )
 
+ 
+def build_public_help_text(_: callable) -> str:
+    """Command list safe to show to ordinary group members."""
+    return (
+        "❓ <b>ALEXA Help Center</b>\\n\\n"
+        "💰 <b>Economy</b>\\n"
+        "/wallet — View wallet\\n/daily — Claim daily reward\\n"
+        "/weekly — Claim weekly reward\\n/monthly — Claim monthly reward\\n"
+        "/referral — Get referral link\\n/achievements — View achievements\\n\\n"
+        "🎮 <b>Games</b>\\n"
+        "/dice — Play dice\\n/rps — Rock Paper Scissors\\n/quiz — Play quiz\\n"
+        "/wheel — Spin the wheel\\n/numwar — Number War\\n/cards — Card game\\n"
+        "/treasure — Treasure hunt\\n/mines — Mines game\\n/roulette — Roulette\\n"
+        "/bal — View game balance\\n/rank — View your rank\\n/leaders — Top players\\n"
+        "/items — View game items\\n/pfp — View profile picture\\n\\n"
+        "ℹ️ <b>Other</b>\\n/language — Change language\\n/stats — View statistics\\n/help — Show help"
+    )
 
-def help_menu_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
+
+async def _is_group_admin(bot, chat, user_id: int) -> bool:
+    if chat.type not in ("group", "supergroup"):
+        return False
+    try:
+        member = await bot.get_chat_member(chat.id, user_id)
+        return member.status in ("administrator", "creator")
+    except Exception:
+        return False
+
+
+def help_menu_kb(is_admin: bool = False) -> InlineKeyboardMarkup:
+    rows = []
+    if is_admin:
+        rows.append([
             InlineKeyboardButton(text="🛡️ Moderation", callback_data="help:moderation"),
             InlineKeyboardButton(text="🔒 Security", callback_data="help:security"),
-        ],
+        ])
+    rows.extend([
         [
             InlineKeyboardButton(text="🎮 Games", callback_data="help:games"),
             InlineKeyboardButton(text="💰 Economy", callback_data="help:economy"),
@@ -85,6 +114,7 @@ def help_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📋 All Commands", callback_data="help:commands")],
         [InlineKeyboardButton(text="🏠 Main Menu", callback_data="menu:main")],
     ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 HELP_GUIDES = {
@@ -130,9 +160,10 @@ HELP_GUIDES = {
 
 @router.message(Command('help'))
 async def cmd_help(message: Message, _: callable, **kwargs):
-    # /help shows the complete command list immediately.
+    is_admin = await _is_group_admin(message.bot, message.chat, message.from_user.id)
+    text = build_help_text(_) if is_admin else build_public_help_text(_)
     await message.answer(
-        build_help_text(_),
+        text,
         parse_mode='HTML',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🧭 Help Sections", callback_data="menu:help")],
@@ -143,7 +174,8 @@ async def cmd_help(message: Message, _: callable, **kwargs):
 
 @router.callback_query(F.data == "menu:help")
 async def menu_help(callback: CallbackQuery, **kwargs):
-    # Remove the temporary /start welcome/menu and show the dedicated help UI.
+    is_admin = await _is_group_admin(callback.bot, callback.message.chat, callback.from_user.id)
+    # Remove the temporary /start welcome/menu and show role-appropriate help.
     try:
         await callback.message.delete()
     except Exception as exc:
@@ -151,7 +183,7 @@ async def menu_help(callback: CallbackQuery, **kwargs):
     await callback.message.answer(
         "❓ <b>ALEXA Help Center</b>\nChoose a section below. Tap <b>All Commands</b> for the full command list.",
         parse_mode='HTML',
-        reply_markup=help_menu_kb(),
+        reply_markup=help_menu_kb(is_admin=is_admin),
     )
     await callback.answer()
 
@@ -159,8 +191,12 @@ async def menu_help(callback: CallbackQuery, **kwargs):
 @router.callback_query(F.data.startswith("help:"))
 async def help_section(callback: CallbackQuery, _: callable, **kwargs):
     section = callback.data
+    is_admin = await _is_group_admin(callback.bot, callback.message.chat, callback.from_user.id)
+    if section in ("help:moderation", "help:security") and not is_admin:
+        await callback.answer("Admin help is visible only to group admins.", show_alert=True)
+        return
     if section == "help:commands":
-        text = build_help_text(_)
+        text = build_help_text(_) if is_admin else build_public_help_text(_)
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="◀️ Back to Help", callback_data="menu:help")],
             [InlineKeyboardButton(text="🏠 Main Menu", callback_data="menu:main")],
