@@ -828,9 +828,9 @@ async def owner_purge_start(callback: CallbackQuery, state: FSMContext, db_sessi
     await state.set_state(OwnerStates.waiting_purge_range)
     await state.update_data(purge_group_id=group_id, purge_group_title=group.title)
     await callback.message.answer(
-        f"🧹 <b>Purge Messages — {escape(group.title)}</b>\\n\\n"
+        f"🧹 <b>Purge Messages — {escape(group.title)}</b>\n\n"
         "Send the message ID range as <code>START-END</code>, for example <code>1200-1250</code>. "
-        "ALEXA will try to delete messages in that range, including commands. Maximum 1000 IDs per request.\\n\\n"
+        "ALEXA will try to delete messages in that range, including commands. Maximum 1000 IDs per request.\n\n"
         "Telegram may reject messages older than 48 hours or messages it cannot delete. Send /cancel to stop.",
         parse_mode="HTML",
     )
@@ -879,9 +879,9 @@ async def owner_purge_range_input(message: Message, state: FSMContext, db_sessio
                     except Exception:
                         failed += 1
         await message.answer(
-            f"🧹 <b>Purge finished</b>\\n\\nGroup: <b>{escape(group.title)}</b>\\n"
-            f"Range: <code>{start_id}-{end_id}</code>\\n"
-            f"Deleted: <b>{deleted}</b>\\nCould not delete: <b>{failed}</b>",
+            f"🧹 <b>Purge finished</b>\n\nGroup: <b>{escape(group.title)}</b>\n"
+            f"Range: <code>{start_id}-{end_id}</code>\n"
+            f"Deleted: <b>{deleted}</b>\nCould not delete: <b>{failed}</b>",
             parse_mode="HTML",
         )
     except Exception as exc:
