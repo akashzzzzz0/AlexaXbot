@@ -426,6 +426,63 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
     # Do not return early when a regular user record is missing: content locks
     # must still be enforced for every incoming group message.
 
+    # When Bio Link Protection is enabled, also moderate links posted by existing
+    # members: delete each link message, issue persistent warnings, and mute on 3.
+    message_text = message.text or message.caption or ""
+    if message.from_user and message_text and contains_link(message_text):
+        bio_setting = await db_session.scalar(
+            select(BioLinkProtectionSetting).where(
+                BioLinkProtectionSetting.group_id == message.chat.id
+            )
+        )
+        bio_protection_enabled = (
+            bool(bio_setting.enabled) if bio_setting is not None
+            else bool(group_security.anti_link)
+        )
+        if bio_protection_enabled:
+            is_admin = False
+            try:
+                member = await message.bot.get_chat_member(message.chat.id, message.from_user.id)
+                is_admin = member.status in ("administrator", "creator", "owner")
+            except Exception as exc:
+                logger.debug("Could not verify link sender role", error=str(exc), user_id=message.from_user.id)
+            if not is_admin:
+                try:
+                    await message.delete()
+                except Exception as exc:
+                    logger.warning("Could not delete link message", error=str(exc), group_id=message.chat.id)
+                if db_user:
+                    count, reached = await warn_user(
+                        db_session, db_group.id, db_user.id, message.bot.id,
+                        "Posting links (Bio Link Protection)", max_warns=3
+                    )
+                    try:
+                        await db_session.flush()
+                    except Exception:
+                        pass
+                    if reached:
+                        muted = await mute_user(
+                            message.bot, db_session, db_group.id, db_user.id,
+                            message.bot.id, 3600, "3 link warnings reached"
+                        )
+                        notice = (
+                            f"🚫 Link removed. {message.from_user.first_name or 'Member'} reached "
+                            f"3/3 warnings and has been muted for 1 hour."
+                            if muted else
+                            f"⚠️ Link removed. Member reached {count}/3 warnings, but I couldn't apply the mute. "
+                            "Please check ALEXA's Restrict Members permission."
+                        )
+                    else:
+                        notice = (
+                            f"⚠️ Link removed. Warning {count}/3. "
+                            "At 3 warnings, the member will be muted for 1 hour."
+                        )
+                    try:
+                        await message.bot.send_message(message.chat.id, notice)
+                    except Exception:
+                        pass
+                return
+
     # Persistent keyword blocklist and auto-reply filters configured by group admins.
     text_content = (message.text or message.caption or "").lower()
     if text_content:
