@@ -125,45 +125,6 @@ async def configure_command_visibility(bot) -> None:
 
 
 
-async def notify_group_admins_restart(bot) -> None:
-    """Notify admins in every tracked active group whenever the bot starts."""
-    from html import escape
-    from sqlalchemy import select
-    from bot.database.models import Group
-    from bot.database.connection import async_session_maker
-
-    try:
-        async with async_session_maker() as session:
-            groups = (await session.scalars(
-                select(Group).where(Group.is_active.is_(True), Group.type.in_(["group", "supergroup"]))
-            )).all()
-            # Copy ids/titles out of the session before making Telegram network calls.
-            group_rows = [(g.id, g.title or "this group") for g in groups]
-    except Exception as exc:
-        logger.warning("Could not load groups for restart notice", error=str(exc))
-        return
-
-    for group_id, title in group_rows:
-        try:
-            admins = await bot.get_chat_administrators(group_id)
-            human_admins = [a.user for a in admins if not a.user.is_bot]
-            if not human_admins:
-                continue
-            mentions = []
-            for user in human_admins:
-                display = escape((user.first_name or user.username or "Group admin").strip())
-                mentions.append(f'<a href="tg://user?id={user.id}">{display}</a>')
-            text = (
-                "🔄 <b>ALEXA has restarted and is back online.</b>\n"
-                f"Group: <b>{escape(title)}</b>\n"
-                "Admin notice: " + ", ".join(mentions) + "\n"
-                "Please report any issues with moderation, buttons, or content locks."
-            )
-            await bot.send_message(group_id, text, parse_mode="HTML", disable_web_page_preview=True)
-        except Exception as exc:
-            logger.warning("Restart notice failed for group", group_id=group_id, error=str(exc))
-
-
 async def on_startup(bot) -> None:
     from bot.config import settings
     logger.info('Bot starting up', environment=settings.ENVIRONMENT)
@@ -199,8 +160,6 @@ async def on_startup(bot) -> None:
     except Exception as e:
         logger.error('Failed to clear webhook', error=str(e))
 
-    if db_ok:
-        await notify_group_admins_restart(bot)
 
     logger.info('Bot startup complete', db_ready=db_ok)
 
