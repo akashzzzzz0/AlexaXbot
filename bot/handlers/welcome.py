@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from bot.database.models import (
     Group, GroupMember, GroupSettings, WelcomeSettings, GoodbyeSettings,
-    SecuritySettings, BioLinkProtectionSetting, CaptchaChallenge, GroupStats, User, GroupFilter, GroupBlocklist
+    SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig, CaptchaChallenge, GroupStats, User, GroupFilter, GroupBlocklist
 )
 from bot.services.security_service import (
     check_message_violations, is_raid_detected, create_captcha_challenge, contains_link
@@ -196,22 +196,33 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
             profile = await event.bot.get_chat(user.id)
             bio = getattr(profile, "bio", None) or ""
             if bio and contains_link(bio):
-                await event.bot.ban_chat_member(chat.id, user.id)
-                await event.bot.unban_chat_member(chat.id, user.id)
-                try:
-                    await event.bot.send_message(
-                        chat.id,
-                        f"🚫 A member was removed because their profile bio contains a link, Telegram username, bot link, or channel link. "
-                        f"Bio-link protection is controlled separately in Moderation.",
-                    )
-                except Exception:
-                    pass
-                logger.info(
-                    "Member removed for profile bio link",
-                    chat_id=chat.id,
-                    user_id=user.id,
+                config = await db_session.scalar(
+                    select(BioLinkProtectionConfig).where(BioLinkProtectionConfig.group_id == chat.id)
                 )
-                return
+                action = config.action if config else "mute"
+                duration = config.mute_duration if config else 3600
+                try:
+                    if action == "ban":
+                        await event.bot.ban_chat_member(chat.id, user.id)
+                        await event.bot.unban_chat_member(chat.id, user.id)
+                        notice = "🚫 Member removed: profile bio contains a link."
+                    elif action == "mute":
+                        from datetime import timedelta
+                        from aiogram.types import ChatPermissions
+                        until = datetime.now(timezone.utc) + timedelta(seconds=max(60, duration))
+                        await event.bot.restrict_chat_member(
+                            chat.id, user.id, permissions=ChatPermissions(can_send_messages=False),
+                            until_date=until,
+                        )
+                        notice = f"🔇 Member muted for {max(1, duration // 60)} minutes because their profile bio contains a link."
+                    else:
+                        notice = "⚠️ Warning: profile bio contains a link. Please remove it to avoid moderation."
+                    await event.bot.send_message(chat.id, notice)
+                except Exception as action_exc:
+                    logger.warning("Bio-link action failed", chat_id=chat.id, user_id=user.id, action=action, error=str(action_exc))
+                logger.info("Member bio contains a link", chat_id=chat.id, user_id=user.id, action=action)
+                if action in ("ban", "mute"):
+                    return
         except Exception as exc:
             # Do not block normal joins when Telegram does not expose the bio.
             logger.debug(
