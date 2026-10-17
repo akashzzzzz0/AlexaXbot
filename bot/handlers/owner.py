@@ -8,7 +8,7 @@ from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from bot.database.models import User, Group, GroupMember, ActionLog, SecuritySettings
+from bot.database.models import User, Group, GroupMember, ActionLog, SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig
 from bot.keyboards.main_menu import back_button_kb
 from bot.config import settings
 from bot.utils.helpers import format_number
@@ -66,9 +66,10 @@ def _group_list_kb(groups, action: str):
 def _group_detail_kb(group_id: int):
     builder = InlineKeyboardBuilder()
     builder.button(text="🔨 Ban All", callback_data=f"owner:banall:{group_id}")
+    builder.button(text="🛡️ Bio Link Protection", callback_data=f"owner:biolink:{group_id}")
     builder.button(text="🔄 Refresh", callback_data=f"owner:group:{group_id}")
     builder.button(text="◀️ Groups", callback_data="owner:groups")
-    builder.adjust(1, 2)
+    builder.adjust(1, 1, 2)
     return builder.as_markup()
 
 
@@ -230,6 +231,157 @@ async def owner_group(callback: CallbackQuery, _: callable, db_session: AsyncSes
         return
     await _render_group(callback, db_session, group_id)
     await callback.answer()
+
+
+def _owner_biolink_kb(group_id: int, enabled: bool, action: str, duration: int):
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=("🟢 Protection ON" if enabled else "🔴 Protection OFF"),
+        callback_data=f"owner:biolink_toggle:{group_id}",
+    )
+    for value, label in (
+        ("warn_mute", "⚠️ 3 warnings → Mute"),
+        ("warn_ban", "⚠️ 3 warnings → Ban"),
+        ("mute", "Immediate Mute"),
+        ("ban", "Immediate Ban"),
+    ):
+        prefix = "✅ " if action == value else ""
+        builder.button(text=prefix + label, callback_data=f"owner:biolink_action:{group_id}:{value}")
+    for seconds, label in ((900, "15m"), (1800, "30m"), (3600, "1h"), (21600, "6h"), (86400, "24h")):
+        prefix = "✅ " if duration == seconds else ""
+        builder.button(
+            text=f"{prefix}Mute duration: {label}",
+            callback_data=f"owner:biolink_duration:{group_id}:{seconds}",
+        )
+    builder.button(text="◀️ Back to Group", callback_data=f"owner:group:{group_id}")
+    builder.adjust(1, 2, 2, 2, 2, 1)
+    return builder.as_markup()
+
+
+async def _owner_render_biolink(callback: CallbackQuery, session: AsyncSession, group_id: int):
+    group = await session.get(Group, group_id)
+    if not group or not group.is_active:
+        await callback.answer("Group is not active.", show_alert=True)
+        return
+    setting = await session.scalar(
+        select(BioLinkProtectionSetting).where(BioLinkProtectionSetting.group_id == group_id)
+    )
+    config = await session.scalar(
+        select(BioLinkProtectionConfig).where(BioLinkProtectionConfig.group_id == group_id)
+    )
+    if setting is None:
+        setting = BioLinkProtectionSetting(group_id=group_id, enabled=False)
+        session.add(setting)
+    if config is None:
+        config = BioLinkProtectionConfig(group_id=group_id, action="warn_mute", mute_duration=3600)
+        session.add(config)
+    await session.flush()
+    labels = {
+        "warn_mute": "3 warnings then mute",
+        "warn_ban": "3 warnings then ban",
+        "mute": "immediate mute",
+        "ban": "immediate ban",
+        "warn": "warnings only",
+    }
+    await callback.message.edit_text(
+        f"🛡️ <b>Bio Link Protection — {escape(group.title)}</b>\\n\\n"
+        f"Status: <b>{'ON' if setting.enabled else 'OFF'}</b>\\n"
+        f"Action: <b>{escape(labels.get(config.action, config.action))}</b>\\n"
+        f"Mute duration: <b>{max(1, config.mute_duration // 60)} minutes</b>\\n\\n"
+        "Manage this group's Bio Link Protection from the Owner Panel.",
+        parse_mode="HTML",
+        reply_markup=_owner_biolink_kb(group_id, bool(setting.enabled), config.action, config.mute_duration),
+    )
+
+
+@router.callback_query(F.data.startswith("owner:biolink:"))
+async def owner_biolink_open(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Not available.", show_alert=True)
+        return
+    try:
+        group_id = int(callback.data.rsplit(":", 1)[1])
+    except ValueError:
+        await callback.answer("Invalid group.", show_alert=True)
+        return
+    await _owner_render_biolink(callback, db_session, group_id)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner:biolink_toggle:"))
+async def owner_biolink_toggle(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Not available.", show_alert=True)
+        return
+    try:
+        group_id = int(callback.data.rsplit(":", 1)[1])
+    except ValueError:
+        await callback.answer("Invalid group.", show_alert=True)
+        return
+    setting = await db_session.scalar(
+        select(BioLinkProtectionSetting).where(BioLinkProtectionSetting.group_id == group_id)
+    )
+    if setting is None:
+        setting = BioLinkProtectionSetting(group_id=group_id, enabled=False)
+        db_session.add(setting)
+    setting.enabled = not bool(setting.enabled)
+    await db_session.flush()
+    await _owner_render_biolink(callback, db_session, group_id)
+    await callback.answer("Bio Link Protection updated.")
+
+
+@router.callback_query(F.data.startswith("owner:biolink_action:"))
+async def owner_biolink_action(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Not available.", show_alert=True)
+        return
+    try:
+        _, _, _, group_id_text, action = callback.data.split(":", 4)
+        group_id = int(group_id_text)
+    except (ValueError, TypeError):
+        await callback.answer("Invalid setting.", show_alert=True)
+        return
+    if action not in {"warn_mute", "warn_ban", "mute", "ban"}:
+        await callback.answer("Invalid action.", show_alert=True)
+        return
+    config = await db_session.scalar(
+        select(BioLinkProtectionConfig).where(BioLinkProtectionConfig.group_id == group_id)
+    )
+    if config is None:
+        config = BioLinkProtectionConfig(group_id=group_id, action=action, mute_duration=3600)
+        db_session.add(config)
+    else:
+        config.action = action
+    await db_session.flush()
+    await _owner_render_biolink(callback, db_session, group_id)
+    await callback.answer("Bio Link action updated.")
+
+
+@router.callback_query(F.data.startswith("owner:biolink_duration:"))
+async def owner_biolink_duration(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Not available.", show_alert=True)
+        return
+    try:
+        _, _, _, group_id_text, duration_text = callback.data.split(":", 4)
+        group_id, duration = int(group_id_text), int(duration_text)
+    except (ValueError, TypeError):
+        await callback.answer("Invalid duration.", show_alert=True)
+        return
+    if duration not in {900, 1800, 3600, 21600, 86400}:
+        await callback.answer("Invalid duration.", show_alert=True)
+        return
+    config = await db_session.scalar(
+        select(BioLinkProtectionConfig).where(BioLinkProtectionConfig.group_id == group_id)
+    )
+    if config is None:
+        config = BioLinkProtectionConfig(group_id=group_id, action="warn_mute", mute_duration=duration)
+        db_session.add(config)
+    else:
+        config.mute_duration = duration
+    await db_session.flush()
+    await _owner_render_biolink(callback, db_session, group_id)
+    await callback.answer("Mute duration updated.")
 
 
 @router.callback_query(F.data == "owner:banall")
