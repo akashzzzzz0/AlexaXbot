@@ -106,9 +106,8 @@ async def rob(message: Message, db_session: AsyncSession, db_user, **kwargs):
         await message.reply("Rob cooldown: try again in an hour.")
         return
     robber.last_rob_at = now
-    if random.random() >= 0.5:
-        await message.reply("🚨 Rob attempt failed. No coins were transferred.")
-        return
+    # A valid rob attempt succeeds when the target is unprotected and has coins.
+    # The one-hour cooldown limits repeated stealing.
     victim_wallet = await get_or_create_wallet(db_session, target.id)
     amount = min(max(0, victim_wallet.balance or 0), settings.MAX_ROB_AMOUNT, max(1, (victim_wallet.balance or 0) // 5))
     if amount <= 0:
