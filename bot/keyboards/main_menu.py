@@ -14,10 +14,10 @@ def language_selection_kb(_=None):
 
 def main_menu_kb(_, is_owner=False):
     b = InlineKeyboardBuilder()
-    for text, cb in [("🔒 Security","menu:security"),("⚖️ Moderation","menu:moderation"),("💰 Economy","menu:economy"),("🎮 Games","menu:games"),("⚔️ Duels","menu:duels"),("🏅 Achievements","menu:achievements"),("🎁 Referral Program — Get Stars Plus Premium","affiliate:open"),("📊 Statistics","menu:statistics"),("⚙️ Settings","menu:settings"),("❓ Help","menu:help")]: _btn(b,text,cb)
+    for text, cb in [("🔒 Security","menu:security"),("⚖️ Moderation","menu:moderation"),("💰 Economy","menu:economy"),("🎮 Games","menu:games"),("⚔️ Duels","menu:duels"),("🏅 Achievements","menu:achievements"),("📊 Statistics","menu:statistics"),("⚙️ Settings","menu:settings"),("🎁 Referral Program — Get Stars Plus Premium","affiliate:open")]: _btn(b,text,cb)
     if is_owner:
         _btn(b, "👑 Owner Panel", "owner:menu")
-    b.adjust(2,2,1,2,1,1)
+    b.adjust(2,2,2,2,1)
     return b.as_markup()
 
 def group_main_menu_kb(_):
