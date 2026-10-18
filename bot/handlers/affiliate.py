@@ -369,15 +369,6 @@ async def affiliate_premium_request(callback: CallbackQuery, db_session: AsyncSe
         await callback.answer("Open ALEXA in a private chat to request Premium.", show_alert=True)
         return
 
-    valid = await _valid_count(db_session, db_user.id)
-    balance = await _stars_balance(db_session, db_user.id, valid)
-    if balance < PREMIUM_3_MONTHS_STARS:
-        await callback.answer(
-            f"You have {balance} Stars. You need {PREMIUM_3_MONTHS_STARS - balance} more from referrals.",
-            show_alert=True,
-        )
-        return
-
     pending = await db_session.scalar(select(AffiliateRequest.id).where(
         AffiliateRequest.user_id == db_user.id,
         AffiliateRequest.request_type == "premium",
@@ -385,6 +376,15 @@ async def affiliate_premium_request(callback: CallbackQuery, db_session: AsyncSe
     ))
     if pending:
         await callback.answer("You already have an open Premium request.", show_alert=True)
+        return
+
+    valid = await _valid_count(db_session, db_user.id)
+    balance = await _stars_balance(db_session, db_user.id, valid)
+    if balance < PREMIUM_3_MONTHS_STARS:
+        await callback.answer(
+            f"You have {balance} Stars. You need {PREMIUM_3_MONTHS_STARS - balance} more from referrals.",
+            show_alert=True,
+        )
         return
 
     req = AffiliateRequest(
