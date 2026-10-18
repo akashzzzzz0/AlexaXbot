@@ -328,6 +328,8 @@ async def cmd_ban(message: Message, bot: Bot, _: callable, db_session: AsyncSess
     if success:
         name = mention_user(target.id, safe_username(target))
         await message.reply(_("user_banned").format(name=name, reason=reason or _("no_reason")), parse_mode="HTML")
+    else:
+        await message.reply("❌ Ban failed. Check ALEXA's Ban Users permission and the target's admin status.")
 
 
 @router.message(Command("unban"))
@@ -341,6 +343,8 @@ async def cmd_unban(message: Message, bot: Bot, _: callable, db_session: AsyncSe
     success = await unban_user(bot, db_session, message.chat.id, target.id, message.from_user.id)
     if success:
         await message.reply(_("user_unbanned").format(name=safe_username(target)))
+    else:
+        await message.reply("❌ Unban failed. Check ALEXA's Ban Users permission and the target ID.")
 
 
 @router.message(Command("kick"))
@@ -355,6 +359,8 @@ async def cmd_kick(message: Message, bot: Bot, _: callable, db_session: AsyncSes
     if success:
         name = mention_user(target.id, safe_username(target))
         await message.reply(_("user_kicked").format(name=name, reason=reason or _("no_reason")), parse_mode="HTML")
+    else:
+        await message.reply("❌ Kick failed. Check ALEXA's Ban Users permission and the target's admin status.")
 
 
 @router.message(Command("mute"))
@@ -458,6 +464,8 @@ async def cmd_unwarn(message: Message, _: callable, db_session: AsyncSession, **
     success = await unwarn_user(db_session, message.chat.id, target.id)
     if success:
         await message.reply(_("user_unwarned").format(name=safe_username(target)))
+    else:
+        await message.reply("No warning found for this member.")
 
 
 @router.message(Command("warns", "warnings"))
@@ -744,13 +752,13 @@ async def cmd_role(message: Message, _: callable, db_session: AsyncSession, **kw
     await message.reply(f"Custom label: <b>{escape(role)}</b>", parse_mode="HTML")
 
 
-@router.message(Command("resetwarns"))
+@router.message(Command("resetwarn", "resetwarns"))
 async def cmd_resetwarns(message: Message, _: callable, db_session: AsyncSession, **kwargs):
     if message.chat.type == "private":
         await message.reply("Groups only."); return
     target, _reason = await get_target_user(message, db_session)
     if not target:
-        await message.reply("Reply to a member or use /resetwarns <user ID>."); return
+        await message.reply("Reply to a member or use /resetwarn <user ID>."); return
     await db_session.execute(delete(Warning).where(Warning.group_id == message.chat.id, Warning.user_id == target.id))
     member = await db_session.scalar(select(GroupMember).where(GroupMember.group_id == message.chat.id, GroupMember.user_id == target.id))
     if member: member.warn_count = 0
