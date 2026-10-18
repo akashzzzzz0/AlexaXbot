@@ -178,24 +178,14 @@ async def unmute_user(
     admin_id: int,
 ) -> bool:
     try:
-        # Explicitly restore the message permissions that a mute removes.
-        # Omitting permissions can leave users restricted on newer Telegram clients.
+        # Restore the group's own default permissions, rather than granting
+        # permissions that the group has intentionally disabled.
+        chat = await bot.get_chat(group_id)
+        permissions = chat.permissions or FULL_PERMISSIONS
         await bot.restrict_chat_member(
             chat_id=group_id,
             user_id=user_id,
-            permissions=ChatPermissions(
-                can_send_messages=True,
-                can_send_audios=True,
-                can_send_documents=True,
-                can_send_photos=True,
-                can_send_videos=True,
-                can_send_video_notes=True,
-                can_send_voice_notes=True,
-                can_send_polls=True,
-                can_send_other_messages=True,
-                can_add_web_page_previews=True,
-                can_invite_users=True,
-            ),
+            permissions=permissions,
         )
         member = await session.scalar(
             select(GroupMember).where(
