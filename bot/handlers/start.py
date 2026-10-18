@@ -53,17 +53,17 @@ async def _send_add_group_prompt(message: Message):
             InlineKeyboardButton(text="💬 Discussion", url="https://t.me/alexa_Bot_discussion"),
         ],
         [
-            InlineKeyboardButton(text="👑 Get Telegram Premium", callback_data="affiliate:premium"),
+            InlineKeyboardButton(text="⭐ Get Telegram Premium + Stars", callback_data="affiliate:premium"),
             InlineKeyboardButton(text="🚀 Start", callback_data="start:open"),
         ],
     ])
     caption = (
-        "✨ <b>Welcome to ALEXA!</b> ✨\\n\\n"
-        "Your all-in-one Telegram group assistant.\\n"
-        "🛡️ Moderation & protection • 🎮 Games • 💰 Economy\\n\\n"
-        "<b>Quick Start</b>\\n"
-        "• Add ALEXA to your group and grant the required admin permissions\\n"
-        "• Use /help to see available commands\\n\\n"
+        "✨ <b>Welcome to ALEXA!</b> ✨\n\n"
+        "Your all-in-one Telegram group assistant.\n"
+        "🛡️ Moderation & protection • 🎮 Games • 💰 Economy\n\n"
+        "<b>Quick Start</b>\n"
+        "• Add ALEXA to your group and grant the required admin permissions\n"
+        "• Use /help to see available commands\n\n"
         "Ready to make your group safer and more fun? Let's go!"
     )
     try:
@@ -108,9 +108,10 @@ async def cmd_start(message: Message, _: callable, db_session: AsyncSession = No
         except Exception as exc:
             logger.warning("Could not process referral start payload", error=str(exc))
             raise
-    if db_user and not db_user.has_added_bot_to_group:
-        await _send_add_group_prompt(message)
-        return
+    # Always show the requested Alexa welcome screen on private /start.
+    # The Start button opens the command menu for users who want to continue.
+    await _send_add_group_prompt(message)
+    return
     if db_user and db_user.language != "en":
         db_user.language = "en"
         if db_session:
