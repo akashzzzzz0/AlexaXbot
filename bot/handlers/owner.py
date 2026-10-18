@@ -833,11 +833,14 @@ async def owner_toggle_silent_service_messages(callback: CallbackQuery, db_sessi
     else:
         settings_row.silent_service_messages = not bool(settings_row.silent_service_messages)
         enabled = bool(settings_row.silent_service_messages)
-    await db_session.flush()
-    await _render_group(callback, db_session, group_id)
+    await db_session.commit()
+    try:
+        await _render_group(callback, db_session, group_id)
+    except Exception as exc:
+        logger.warning("owner_silent_service_refresh_failed", group_id=group_id, error=str(exc))
     await callback.answer(
-        "Join/leave/ban service messages will be deleted." if enabled
-        else "Join/leave/ban service messages are allowed again."
+        "ON: join/leave/ban service messages will be deleted." if enabled
+        else "OFF: join/leave/ban service messages are allowed again."
     )
 
 
