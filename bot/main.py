@@ -82,7 +82,7 @@ async def configure_command_visibility(bot) -> None:
         ("start", "Start ALEXA"), ("menu", "Open main menu"), ("help", "Show commands"),
         ("language", "Choose language"), ("wallet", "View wallet"), ("bal", "View balance"),
         ("daily", "Claim daily coins"), ("weekly", "Claim weekly coins"), ("monthly", "Claim monthly coins"),
-        ("referral", "Get referral link"), ("achievements", "View achievements"),
+        ("terms", "Premium Stars payment terms"), ("referral", "Get referral link"), ("achievements", "View achievements"),
         ("games", "Open games"), ("dice", "Play dice"), ("rps", "Rock paper scissors"),
         ("quiz", "Play quiz"), ("wheel", "Spin the wheel"), ("roulette", "Play roulette"),
         ("cards", "Play cards"), ("mines", "Play mines"), ("treasure", "Treasure hunt"),
