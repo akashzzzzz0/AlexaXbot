@@ -293,16 +293,10 @@ async def owner_referrals(callback: CallbackQuery, db_session: AsyncSession, **k
             text=f"👤 {label[:20]} · {tracked}/{valid}",
             callback_data=f"owner:affiliate:member:{user.id}:0",
         )])
-    requests = (await db_session.execute(select(AffiliateRequest).where(
-        AffiliateRequest.status.in_(("pending", "approved"))
-    ).order_by(AffiliateRequest.created_at.asc(), AffiliateRequest.id.asc()).limit(10))).scalars().all()
-    for req in requests:
-        user = await db_session.get(User, req.user_id)
-        label = (user.username or user.first_name) if user else str(req.user_id)
-        rows.append([InlineKeyboardButton(
-            text=f"⏳ #{req.id} {label[:16]} · {req.request_type}",
-            callback_data=f"owner:affiliate:view:{req.id}",
-        )])
+    rows.append([InlineKeyboardButton(
+        text=f"📥 Review Requests ({pending_count})",
+        callback_data="owner:affiliate:requests:page:0",
+    )])
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton(text="⬅️ Previous", callback_data=f"owner:referrals:page:{page - 1}"))
@@ -360,6 +354,57 @@ async def owner_member_detail(callback: CallbackQuery, db_session: AsyncSession,
     if page + 1 < total_pages:
         nav.append(InlineKeyboardButton(text="Next ➡️", callback_data=f"owner:affiliate:member:{user_id}:{page + 1}"))
     rows = [nav] if nav else []
+    rows += [
+        [InlineKeyboardButton(text="◀️ Referral Board", callback_data="owner:referrals:page:0")],
+        [InlineKeyboardButton(text="👑 Owner Panel", callback_data="owner:menu")],
+    ]
+    await _edit(callback, "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows))
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner:affiliate:requests")
+@router.callback_query(F.data.startswith("owner:affiliate:requests:page:"))
+async def owner_request_queue(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not _owner(callback.from_user.id):
+        await callback.answer("Owner only.", show_alert=True)
+        return
+    try:
+        page = int(callback.data.rsplit(":", 1)[1]) if callback.data != "owner:affiliate:requests" else 0
+    except ValueError:
+        page = 0
+    page = max(0, page)
+    query = select(AffiliateRequest).where(AffiliateRequest.status.in_(("pending", "approved"))).order_by(
+        AffiliateRequest.created_at.asc(), AffiliateRequest.id.asc()
+    )
+    total = int(await db_session.scalar(select(func.count(AffiliateRequest.id)).where(
+        AffiliateRequest.status.in_(("pending", "approved"))
+    )) or 0)
+    total_pages = max(1, (total + USER_PAGE_SIZE - 1) // USER_PAGE_SIZE)
+    page = min(page, total_pages - 1)
+    requests = (await db_session.execute(query.offset(page * USER_PAGE_SIZE).limit(USER_PAGE_SIZE))).scalars().all()
+    lines = [
+        "📥 <b>Affiliate Requests — Owner Only</b>",
+        f"Open requests: <b>{total}</b>",
+        f"Page: <b>{page + 1}/{total_pages}</b>",
+        "",
+    ]
+    rows = []
+    for req in requests:
+        user = await db_session.get(User, req.user_id)
+        label = (user.username or user.first_name) if user else str(req.user_id)
+        reward = f"{req.requested_stars} Stars" if req.request_type == "stars" else "Premium"
+        lines.append(f"• #{req.id} · {escape(label)} · {reward} · <b>{req.status.upper()}</b>")
+        rows.append([InlineKeyboardButton(
+            text=f"#{req.id} {label[:16]} · {req.status}",
+            callback_data=f"owner:affiliate:view:{req.id}",
+        )])
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️ Previous", callback_data=f"owner:affiliate:requests:page:{page - 1}"))
+    if page + 1 < total_pages:
+        nav.append(InlineKeyboardButton(text="Next ➡️", callback_data=f"owner:affiliate:requests:page:{page + 1}"))
+    if nav:
+        rows.append(nav)
     rows += [
         [InlineKeyboardButton(text="◀️ Referral Board", callback_data="owner:referrals:page:0")],
         [InlineKeyboardButton(text="👑 Owner Panel", callback_data="owner:menu")],
