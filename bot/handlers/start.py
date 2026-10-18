@@ -4,7 +4,6 @@ from aiogram.filters import CommandStart, Command
 from sqlalchemy.ext.asyncio import AsyncSession
 from bot.config import settings
 from bot.keyboards.main_menu import main_menu_kb, back_button_kb
-from bot.handlers.auto_delete_middleware import schedule_start_menu_delete
 import structlog
 
 logger = structlog.get_logger()
@@ -52,7 +51,10 @@ async def _send_add_group_prompt(message: Message):
             InlineKeyboardButton(text="🔔 Updates", url="https://t.me/alexa_bot_updats"),
             InlineKeyboardButton(text="💬 Discussion", url="https://t.me/alexa_Bot_discussion"),
         ],
-        [InlineKeyboardButton(text="🎁 Referral Program — Get Stars Plus Premium", callback_data="affiliate:open")],
+        [
+            InlineKeyboardButton(text="👑 Get Telegram Premium", callback_data="affiliate:premium"),
+            InlineKeyboardButton(text="🚀 Start", callback_data="start:open"),
+        ],
     ])
     caption = (
         "✨ <b>WELCOME TO ALEXA!</b> ✨\n\n"
@@ -61,20 +63,18 @@ async def _send_add_group_prompt(message: Message):
         "🚀 <b>QUICK START</b>\n"
         "• Add ALEXA to your group\n"
         "• Promote ALEXA to administrator and grant required permissions\n"
-        "• Return here and use /start to explore the menu\n\n"
+        "• Tap Start to explore the menu\n\n"
         "💫 Let’s make your group safer and more fun!"
     )
     try:
         photos = await message.bot.get_user_profile_photos(me.id, limit=1)
         if photos.total_count and photos.photos and photos.photos[0]:
             photo = photos.photos[0][-1]
-            sent = await message.answer_photo(photo.file_id, caption=caption, reply_markup=kb, parse_mode="HTML")
-            schedule_start_menu_delete(sent, 10)
+            await message.answer_photo(photo.file_id, caption=caption, reply_markup=kb, parse_mode="HTML")
             return
     except Exception as exc:
         logger.warning("Could not load ALEXA profile photo for /start", error=str(exc))
-    sent = await message.answer(caption, reply_markup=kb, parse_mode="HTML")
-    schedule_start_menu_delete(sent, 10)
+    await message.answer(caption, reply_markup=kb, parse_mode="HTML")
 
 
 @router.message(CommandStart())
@@ -85,8 +85,6 @@ async def cmd_start(message: Message, _: callable, db_session: AsyncSession = No
     args = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else ""
     if db_user:
         db_user.dm_started = True
-    # Track a referral only when the inviter is a known, non-bot user.
-    # The database middleware has already created the new user and marked this DM start.
     if args.startswith("ref_") and db_session and db_user:
         try:
             raw_referrer_id = args[4:]
@@ -109,7 +107,6 @@ async def cmd_start(message: Message, _: callable, db_session: AsyncSession = No
         except (TypeError, ValueError):
             logger.info("Referral ignored: invalid start payload")
         except Exception as exc:
-            # Do not swallow a failed SQL transaction; let middleware roll it back.
             logger.warning("Could not process referral start payload", error=str(exc))
             raise
     if db_user and not db_user.has_added_bot_to_group:
@@ -123,11 +120,27 @@ async def cmd_start(message: Message, _: callable, db_session: AsyncSession = No
             except Exception:
                 pass
     name = message.from_user.first_name or "User"
-    sent = await message.answer(
+    await message.answer(
         _get_commands("en", name),
         reply_markup=main_menu_kb(_, is_owner=(message.from_user.id == settings.effective_owner_id)),
     )
-    schedule_start_menu_delete(sent, 10)
+
+
+@router.callback_query(F.data == "start:open")
+async def start_open_menu(callback: CallbackQuery, _: callable, **kwargs):
+    if callback.message:
+        chat_id = callback.message.chat.id
+        try:
+            await callback.message.delete()
+        except Exception as exc:
+            logger.info("Could not delete previous start screen", error=str(exc))
+        name = callback.from_user.first_name or "User"
+        await callback.bot.send_message(
+            chat_id,
+            _get_commands("en", name),
+            reply_markup=main_menu_kb(_, is_owner=(callback.from_user.id == settings.effective_owner_id)),
+        )
+    await callback.answer()
 
 
 @router.message(Command("menu"))
