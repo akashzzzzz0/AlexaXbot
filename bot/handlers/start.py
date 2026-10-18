@@ -53,7 +53,6 @@ async def _send_add_group_prompt(message: Message):
             InlineKeyboardButton(text="💬 Discussion", url="https://t.me/alexa_Bot_discussion"),
         ],
         [InlineKeyboardButton(text="🎁 Referral Program — Get Stars Plus Premium", callback_data="affiliate:open")],
-        [InlineKeyboardButton(text="❓ Help", callback_data="menu:help")],
     ])
     caption = (
         "✨ <b>WELCOME TO ALEXA!</b> ✨\n\n"
