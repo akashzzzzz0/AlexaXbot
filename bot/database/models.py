@@ -738,3 +738,19 @@ class CaptchaChallenge(Base):
     is_solved = Column(Boolean, default=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AffiliatePayment(Base):
+    """Verified Telegram Stars payment order for a 3-month Premium gift request."""
+    __tablename__ = "affiliate_payments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    invoice_payload = Column(String(128), nullable=False, unique=True, index=True)
+    amount = Column(Integer, nullable=False)
+    currency = Column(String(8), nullable=False, default="XTR")
+    status = Column(String(16), nullable=False, default="pending", index=True)
+    telegram_payment_charge_id = Column(String(128), nullable=True, unique=True)
+    request_id = Column(Integer, ForeignKey("affiliate_requests.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    paid_at = Column(DateTime(timezone=True), nullable=True)
