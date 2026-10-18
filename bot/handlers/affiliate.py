@@ -42,6 +42,13 @@ def _user_kb():
     ])
 
 
+def _promo_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👑 Get Telegram Premium · 3 Months", callback_data="affiliate:premium")],
+        [InlineKeyboardButton(text="⭐ Stars & Referral Program", callback_data="affiliate:open")],
+    ])
+
+
 def _owner_request_kb(req: AffiliateRequest):
     rows = []
     if req.status == "pending":
@@ -144,6 +151,23 @@ async def _notify_owner_bot(bot, session: AsyncSession, req: AffiliateRequest):
 
 async def _notify_owner(callback: CallbackQuery, session: AsyncSession, req: AffiliateRequest):
     await _notify_owner_bot(callback.bot, session, req)
+
+
+@router.callback_query(F.data == "affiliate:promo")
+async def affiliate_promo(callback: CallbackQuery, **kwargs):
+    # This entry screen does not depend on referral counters or a database
+    # lookup, so the Start-screen button always gives the user a clear response.
+    await _edit(
+        callback,
+        "⭐ <b>Telegram Premium + Stars</b>\n\n"
+        "Choose what you want to explore:\n"
+        "👑 <b>Telegram Premium:</b> request a 3-month gift through ALEXA. "
+        "Payment and delivery terms are shown before checkout.\n"
+        "⭐ <b>Stars & Referrals:</b> view your invite link, referral rewards, "
+        "and eligible Stars requests.",
+        _promo_kb(),
+    )
+    await callback.answer()
 
 
 @router.callback_query(F.data == "affiliate:open")

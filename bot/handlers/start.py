@@ -53,7 +53,7 @@ async def _send_add_group_prompt(message: Message):
             InlineKeyboardButton(text="💬 Discussion", url="https://t.me/alexa_Bot_discussion"),
         ],
         [
-            InlineKeyboardButton(text="⭐ Telegram Premium + Stars", callback_data="affiliate:open"),
+            InlineKeyboardButton(text="⭐ Telegram Premium + Stars", callback_data="affiliate:promo"),
         ],
     ])
     caption = (
