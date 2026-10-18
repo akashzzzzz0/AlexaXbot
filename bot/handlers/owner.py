@@ -956,13 +956,17 @@ async def owner_purge_recent_confirm(callback: CallbackQuery, db_session: AsyncS
                         deleted += 1
                     except Exception:
                         failed += 1
+        result_kb = InlineKeyboardBuilder()
+        result_kb.button(text="◀️ Back to Group", callback_data=f"owner:group:{group_id}")
+        result_kb.button(text="👑 Owner Panel", callback_data="owner:menu")
+        result_kb.adjust(1)
         await callback.message.edit_text(
             f"🧹 <b>Purge finished</b>\n\nGroup: <b>{escape(group.title)}</b>\n"
             f"Attempted IDs: <code>{start_id}-{end_id}</code>\n"
             f"Deleted: <b>{deleted}</b>\nCould not delete: <b>{failed}</b>\n\n"
             "Note: this covers recent IDs only; Telegram bots cannot retrieve all historical chat messages.",
             parse_mode="HTML",
-            reply_markup=back_button_kb(None, f"owner:group:{group_id}"),
+            reply_markup=result_kb.as_markup(),
         )
         await callback.answer("Purge finished.")
     except Exception as exc:
