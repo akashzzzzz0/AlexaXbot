@@ -6,11 +6,11 @@ from bot.database.models import SecuritySettings
 from bot.services.security_service import check_message_violations
 
 
-def fake_message(text="hello", *, is_bot=False, markup=None):
-    return SimpleNamespace(
+def fake_message(text="hello", *, is_bot=False, markup=None, sender_id=123, bot_id=None):
+    message = SimpleNamespace(
         text=text,
         caption=None,
-        from_user=SimpleNamespace(id=123, is_bot=is_bot, username=None),
+        from_user=SimpleNamespace(id=sender_id, is_bot=is_bot, username=None),
         chat=SimpleNamespace(id=-100123),
         forward_origin=None,
         reply_markup=markup,
@@ -28,6 +28,9 @@ def fake_message(text="hello", *, is_bot=False, markup=None):
         location=None,
         contact=None,
     )
+    if bot_id is not None:
+        message.bot = SimpleNamespace(id=bot_id)
+    return message
 
 
 class ContentLockTests(unittest.IsolatedAsyncioTestCase):
@@ -61,6 +64,18 @@ class ContentLockTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_bot_messages_are_locked(self):
         self.assertIn("locked_bot", await check_message_violations(fake_message(is_bot=True), self.security))
+
+    async def test_alexas_own_link_is_not_moderated(self):
+        self.security.anti_link = True
+        own_message = fake_message("https://t.me/alexa_bot_updats", is_bot=True, sender_id=999, bot_id=999)
+        self.assertEqual(await check_message_violations(own_message, self.security), [])
+
+    async def test_other_bots_still_follow_group_locks(self):
+        self.security.anti_link = True
+        other_bot_message = fake_message("https://t.me/example", is_bot=True, sender_id=456, bot_id=999)
+        violations = await check_message_violations(other_bot_message, self.security)
+        self.assertIn("link", violations)
+        self.assertIn("locked_bot", violations)
 
 
 if __name__ == "__main__":
