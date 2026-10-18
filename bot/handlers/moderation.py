@@ -835,7 +835,8 @@ async def cmd_promote(message: Message, bot: Bot, db_session: AsyncSession, **kw
     if not target:
         await message.reply("Reply to a member or use /promote <user ID>."); return
     try:
-        bot_member = await bot.get_chat_member(message.chat.id, bot.id)
+        bot_identity = await bot.get_me()
+        bot_member = await bot.get_chat_member(message.chat.id, bot_identity.id)
         if bot_member.status != "administrator" or not getattr(bot_member, "can_promote_members", False):
             await message.reply("❌ Alexa needs to be a group admin with the 'Add New Admins' permission to promote members.")
             return
