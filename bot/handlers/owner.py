@@ -8,7 +8,7 @@ from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from bot.database.models import User, Group, GroupMember, ActionLog, SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig
+from bot.database.models import User, Group, GroupMember, GroupSettings, ActionLog, SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig
 from bot.keyboards.main_menu import back_button_kb
 from bot.config import settings
 from bot.utils.helpers import format_number
