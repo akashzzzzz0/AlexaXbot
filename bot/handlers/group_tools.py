@@ -1,4 +1,4 @@
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -45,20 +45,51 @@ async def list_admins(message: Message, **kwargs):
     except Exception:
         await message.reply("Could not fetch the admin list.")
 
-@router.message(Command("report"))
-async def report_member(message: Message, **kwargs):
+async def _send_admin_report(message: Message, reason: str):
     if message.chat.type not in ("group", "supergroup"):
-        await message.reply("Use /report in a group and reply to the message you want to report."); return
-    if not message.reply_to_message or not message.reply_to_message.from_user:
-        await message.reply("Reply to a message with /report [reason]."); return
-    target = message.reply_to_message.from_user
-    parts = (message.text or "").split(None, 1)
-    reason = parts[1] if len(parts) > 1 else "No reason provided"
+        await message.reply("Use /report or @admin in a group.")
+        return
+    replied = message.reply_to_message
+    if not replied or not replied.from_user:
+        await message.reply("Reply to the message you want to report, then use /report [reason] or @admin [reason].")
+        return
+    try:
+        admins = await message.bot.get_chat_administrators(message.chat.id)
+    except Exception:
+        await message.reply("Could not notify group admins. Check the bot's group permissions.")
+        return
+    mentions = []
+    for item in admins:
+        user = item.user
+        if user.is_bot:
+            continue
+        label = user.full_name or user.first_name or str(user.id)
+        mentions.append(f'<a href="tg://user?id={user.id}">{escape(label)}</a>')
+    admin_line = " ".join(mentions) if mentions else "No mentionable admins found."
+    target = replied.from_user
     reporter = message.from_user
     await message.reply(
-        f"🚩 <b>Member Report</b>\nReported: <a href=\"tg://user?id={target.id}\">{escape(target.full_name or target.first_name or str(target.id))}</a> (<code>{target.id}</code>)\nReported by: {escape(reporter.full_name or reporter.first_name or str(reporter.id))} (<code>{reporter.id}</code>)\nReason: {escape(reason)}",
+        f"🚩 <b>Member Report</b>\n"
+        f"Reported: <a href="tg://user?id={target.id}">{escape(target.full_name or target.first_name or str(target.id))}</a> (<code>{target.id}</code>)\n"
+        f"Reported by: <a href="tg://user?id={reporter.id}">{escape(reporter.full_name or reporter.first_name or str(reporter.id))}</a> (<code>{reporter.id}</code>)\n"
+        f"Reason: {escape(reason or 'No reason provided')}\n"
+        f"📣 <b>Group admins:</b> {admin_line}",
         parse_mode="HTML",
     )
+
+
+@router.message(Command("report"))
+async def report_member(message: Message, **kwargs):
+    parts = (message.text or "").split(None, 1)
+    reason = parts[1] if len(parts) > 1 else "No reason provided"
+    await _send_admin_report(message, reason)
+
+
+@router.message(F.text.regexp(r"(?i)^@admin(?:\s|$)"))
+async def report_to_admins_mention(message: Message, **kwargs):
+    parts = (message.text or "").split(None, 1)
+    reason = parts[1] if len(parts) > 1 else "No reason provided"
+    await _send_admin_report(message, reason)
 
 
 
