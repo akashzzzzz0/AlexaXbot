@@ -24,6 +24,7 @@ class User(Base):
     is_bot = Column(Boolean, default=False)
     is_banned = Column(Boolean, default=False)
     dm_started = Column(Boolean, default=False, nullable=False)
+    referral_link_requested = Column(Boolean, default=False, nullable=False)
     has_added_bot_to_group = Column(Boolean, default=False, nullable=False)
     is_premium = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

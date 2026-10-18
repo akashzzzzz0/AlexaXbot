@@ -53,8 +53,7 @@ async def _send_add_group_prompt(message: Message):
             InlineKeyboardButton(text="💬 Discussion", url="https://t.me/alexa_Bot_discussion"),
         ],
         [
-            InlineKeyboardButton(text="⭐ Get Telegram Premium + Stars", callback_data="affiliate:premium"),
-            InlineKeyboardButton(text="🚀 Start", callback_data="start:open"),
+            InlineKeyboardButton(text="⭐ Telegram Premium + Stars", callback_data="affiliate:open"),
         ],
     ])
     caption = (
@@ -108,8 +107,7 @@ async def cmd_start(message: Message, _: callable, db_session: AsyncSession = No
         except Exception as exc:
             logger.warning("Could not process referral start payload", error=str(exc))
             raise
-    # Always show the requested Alexa welcome screen on private /start.
-    # The Start button opens the command menu for users who want to continue.
+    # Always show the Alexa welcome screen on private /start.
     await _send_add_group_prompt(message)
     return
 

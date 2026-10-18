@@ -79,6 +79,14 @@ async def check_message_violations(
     violations = []
     text = message.text or message.caption or ""
 
+    # ALEXA must not moderate its own outbound messages (for example, its
+    # official referral/promotion links). Other bots remain subject to the
+    # configured group bot/content locks.
+    sender = getattr(message, "from_user", None)
+    bot = getattr(message, "bot", None)
+    if sender is not None and bot is not None and sender.id == getattr(bot, "id", None):
+        return []
+
     now = time.monotonic()
     key = (message.chat.id, message.from_user.id)
     if security.anti_spam and text.strip():

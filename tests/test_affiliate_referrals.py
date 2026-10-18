@@ -16,6 +16,7 @@ from bot.handlers.affiliate import (
     _earned_stars,
     _tracked_count,
     _valid_count,
+    _referral_link_users,
     owner_approve,
     owner_mark_paid,
     owner_referrals,
@@ -57,6 +58,25 @@ class AffiliateRewardTierTests(unittest.IsolatedAsyncioTestCase):
                 await session.flush()
                 self.assertEqual(await _tracked_count(session, 100001), 3)
                 self.assertEqual(await _valid_count(session, 100001), 1)
+        finally:
+            await engine.dispose()
+
+    async def test_owner_referral_list_only_includes_users_who_requested_a_link(self):
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with factory() as session:
+                session.add_all([
+                    User(id=200001, first_name="ReferralLinkUser", dm_started=True, referral_link_requested=True),
+                    User(id=200002, first_name="NormalStartUser", dm_started=True, referral_link_requested=False),
+                    User(id=200003, first_name="NotStartedUser", dm_started=False, referral_link_requested=True),
+                    User(id=200004, first_name="BotLinkUser", is_bot=True, dm_started=True, referral_link_requested=True),
+                ])
+                await session.flush()
+                users = await _referral_link_users(session)
+                self.assertEqual([user.id for user in users], [200001])
         finally:
             await engine.dispose()
 

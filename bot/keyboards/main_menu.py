@@ -14,7 +14,7 @@ def language_selection_kb(_=None):
 
 def main_menu_kb(_, is_owner=False):
     b = InlineKeyboardBuilder()
-    for text, cb in [("🔒 Security","menu:security"),("⚖️ Moderation","menu:moderation"),("💰 Economy","menu:economy"),("🎮 Games","menu:games"),("⚔️ Duels","menu:duels"),("🏅 Achievements","menu:achievements"),("📊 Statistics","menu:statistics"),("⚙️ Settings","menu:settings"),("⭐ Get Telegram Premium + Stars","affiliate:open")]: _btn(b,text,cb)
+    for text, cb in [("🔒 Security","menu:security"),("⚖️ Moderation","menu:moderation"),("💰 Economy","menu:economy"),("🎮 Games","menu:games"),("⚔️ Duels","menu:duels"),("🏅 Achievements","menu:achievements"),("📊 Statistics","menu:statistics"),("⚙️ Settings","menu:settings")]: _btn(b,text,cb)
     if is_owner:
         _btn(b, "👑 Owner Panel", "owner:menu")
     b.adjust(2,2,2,2,1)

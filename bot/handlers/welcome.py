@@ -554,9 +554,11 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
             return
 
     # Bot accounts are not persisted as regular users by DatabaseMiddleware.
-    # Still enforce the explicit bot-message lock before returning.
+    # Keep locking other bots when configured, but never delete ALEXA's own
+    # outbound messages (including its official links/promotions).
     if message.from_user and message.from_user.is_bot:
-        if group_security.lock_bots:
+        is_own_bot_message = message.from_user.id == message.bot.id
+        if group_security.lock_bots and not is_own_bot_message:
             try:
                 await message.delete()
             except Exception as exc:
