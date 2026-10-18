@@ -52,6 +52,7 @@ async def _send_add_group_prompt(message: Message):
             InlineKeyboardButton(text="🔔 Updates", url="https://t.me/alexa_bot_updats"),
             InlineKeyboardButton(text="💬 Discussion", url="https://t.me/alexa_Bot_discussion"),
         ],
+        [InlineKeyboardButton(text="🎁 Referral Program — Get Stars Plus Premium", callback_data="affiliate:open")],
         [InlineKeyboardButton(text="❓ Help", callback_data="menu:help")],
     ])
     caption = (
@@ -85,17 +86,18 @@ async def cmd_start(message: Message, _: callable, db_session: AsyncSession = No
     args = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else ""
     if db_user:
         db_user.dm_started = True
-    if db_user and not db_user.has_added_bot_to_group:
-        await _send_add_group_prompt(message)
-        return
+    # Track referrals before the group onboarding prompt so DM-only users can participate.
     if args.startswith("ref_") and db_session and db_user:
         try:
             referrer_id = int(args[4:])
-            if referrer_id != message.from_user.id:
+            if referrer_id != db_user.id:
                 from bot.services.economy_service import process_referral
                 await process_referral(db_session, referrer_id=referrer_id, new_user_id=db_user.id)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Could not process referral start payload", error=str(exc))
+    if db_user and not db_user.has_added_bot_to_group:
+        await _send_add_group_prompt(message)
+        return
     if db_user and db_user.language != "en":
         db_user.language = "en"
         if db_session:
