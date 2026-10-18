@@ -105,6 +105,7 @@ def _group_detail_kb(group_id: int):
     builder.button(text="📈 Activity", callback_data=f"owner:activity:{group_id}")
     builder.button(text="🔗 Group Link", callback_data=f"owner:link:{group_id}")
     builder.button(text="🧹 Purge Messages", callback_data=f"owner:purge:{group_id}")
+    builder.button(text="🔕 Join/Leave/Ban Messages: Toggle", callback_data=f"owner:silent_service:{group_id}")
     builder.button(text="🔓 Unban Member", callback_data=f"owner:banlist:{group_id}")
     builder.button(text="🆔 Unban by User ID", callback_data=f"owner:unbanid:{group_id}")
     builder.button(text="🔨 Ban All", callback_data=f"owner:banall:{group_id}")
@@ -806,6 +807,38 @@ async def owner_unban_known_member(callback: CallbackQuery, db_session: AsyncSes
         logger.warning("owner_unban_known_member_failed", group_id=group_id, user_id=user_id, error=str(exc))
         await callback.answer("Unban failed. Check permissions.", show_alert=True)
 
+
+
+@router.callback_query(F.data.startswith("owner:silent_service:"))
+async def owner_toggle_silent_service_messages(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Not available.", show_alert=True)
+        return
+    try:
+        group_id = int(callback.data.rsplit(":", 1)[1])
+    except ValueError:
+        await callback.answer("Invalid group.", show_alert=True)
+        return
+    group = await db_session.get(Group, group_id)
+    if not group or not group.is_active:
+        await callback.answer("Group is not active/registered.", show_alert=True)
+        return
+    settings_row = await db_session.scalar(
+        select(GroupSettings).where(GroupSettings.group_id == group_id)
+    )
+    if not settings_row:
+        settings_row = GroupSettings(group_id=group_id, silent_service_messages=True)
+        db_session.add(settings_row)
+        enabled = True
+    else:
+        settings_row.silent_service_messages = not bool(settings_row.silent_service_messages)
+        enabled = bool(settings_row.silent_service_messages)
+    await db_session.flush()
+    await _render_group(callback, db_session, group_id)
+    await callback.answer(
+        "Join/leave/ban service messages will be deleted." if enabled
+        else "Join/leave/ban service messages are allowed again."
+    )
 
 
 @router.callback_query(F.data.startswith("owner:purge:"))
