@@ -68,14 +68,14 @@ async def _send_admin_report(message: Message, reason: str):
     admin_line = " ".join(mentions) if mentions else "No mentionable admins found."
     target = replied.from_user
     reporter = message.from_user
-    await message.reply(
-        f"🚩 <b>Member Report</b>\n"
-        f'Reported: <a href="tg://user?id={target.id}">{escape(target.full_name or target.first_name or str(target.id))}</a> (<code>{target.id}</code>)\n'
-        f'Reported by: <a href="tg://user?id={reporter.id}">{escape(reporter.full_name or reporter.first_name or str(reporter.id))}</a> (<code>{reporter.id}</code>)\n'
-        f"Reason: {escape(reason or 'No reason provided')}\n"
-        f"📣 <b>Group admins:</b> {admin_line}",
-        parse_mode="HTML",
+    report_text = (
+        "🚩 <b>Member Report</b>\n"
+        + f'Reported: <a href="tg://user?id={target.id}">{escape(target.full_name or target.first_name or str(target.id))}</a> (<code>{target.id}</code>)\n'
+        + f'Reported by: <a href="tg://user?id={reporter.id}">{escape(reporter.full_name or reporter.first_name or str(reporter.id))}</a> (<code>{reporter.id}</code>)\n'
+        + "Reason: " + escape(reason or "No reason provided") + "\n"
+        + "📣 <b>Group admins:</b> " + admin_line
     )
+    await message.reply(report_text, parse_mode="HTML")
 
 
 @router.message(Command("report"))
