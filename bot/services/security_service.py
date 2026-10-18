@@ -45,6 +45,12 @@ def contains_link(text: str) -> bool:
     return bool(LINK_PATTERN.search(text))
 
 
+def contains_non_invite_link(text: str) -> bool:
+    """Detect ordinary links without making the Anti-Link switch duplicate Anti-Invite."""
+    without_invites = INVITE_PATTERN.sub("", text)
+    return contains_link(without_invites)
+
+
 def contains_phone_number(text: str) -> bool:
     return bool(PHONE_PATTERN.search(text))
 
@@ -105,9 +111,12 @@ async def check_message_violations(
         q.append(now)
         if len(q) > max(1, security.flood_limit or 5):
             violations.append("flood")
+    # Keep these controls independent: Anti-Invite handles Telegram group invite
+    # links, while Anti-Link handles other URLs/user links. A message containing
+    # both kinds is still caught by both relevant controls.
     if security.anti_invite and contains_invite_link(text):
         violations.append("invite_link")
-    if security.anti_link and contains_link(text):
+    if security.anti_link and contains_non_invite_link(text):
         violations.append("link")
     if security.anti_phone and contains_phone_number(text):
         violations.append("phone_number")
@@ -117,7 +126,9 @@ async def check_message_violations(
         violations.append("crypto_scam")
     if security.anti_advertisement and any(word in text.lower() for word in AD_WORDS):
         violations.append("advertisement")
-    if security.anti_channel_promo and (contains_invite_link(text) or ("@" in text and any(word in text.lower() for word in ("subscribe", "join channel", "follow channel")))):
+    # Invite links belong to Anti-Invite; this switch targets promotional
+    # channel mentions/text and must not duplicate Anti-Invite's responsibility.
+    if security.anti_channel_promo and ("@" in text and any(word in text.lower() for word in ("subscribe", "join channel", "follow channel"))):
         violations.append("channel_promotion")
     if security.anti_forward_spam and getattr(message, "forward_origin", None):
         violations.append("forward_spam")
