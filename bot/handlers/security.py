@@ -3,7 +3,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from bot.database.models import Group, SecuritySettings
+from bot.database.models import Group, SecuritySettings, GroupMember, User
 from bot.keyboards.security import security_menu_kb, locks_menu_kb, captcha_menu_kb
 import structlog
 from bot.middlewares.admin_actions import AdminActionMiddleware
@@ -319,6 +319,27 @@ async def cmd_sticker_approval(message: Message, db_session: AsyncSession = None
     if target is None or target.is_bot:
         await message.reply("Reply to a member's message with /approve or /unapprove, or provide a numeric user ID.")
         return
+
+    # GroupMember.user_id references users.id, so ensure the target exists
+    # before creating or updating the sticker approval record.
+    db_target = await db_session.get(User, target.id)
+    if db_target is None:
+        db_target = User(
+            id=target.id,
+            telegram_id=target.id,
+            first_name=target.first_name or "User",
+            last_name=target.last_name,
+            username=target.username,
+            is_bot=False,
+        )
+        db_session.add(db_target)
+        try:
+            await db_session.flush()
+        except Exception as exc:
+            await db_session.rollback()
+            logger.exception("Could not create sticker-approval user", group_id=message.chat.id, user_id=target.id, error=str(exc))
+            await message.reply("Couldn't save this approval because the member record could not be created.")
+            return
 
     member = await db_session.scalar(
         select(GroupMember).where(
