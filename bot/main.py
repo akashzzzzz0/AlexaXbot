@@ -220,7 +220,7 @@ async def run_bot(bot, dp, runner):
     try:
         await dp.start_polling(
             bot,
-            allowed_updates=['message', 'callback_query', 'chat_member', 'my_chat_member'],
+            allowed_updates=['message', 'callback_query', 'pre_checkout_query', 'chat_member', 'my_chat_member'],
         )
     except asyncio.CancelledError:
         pass
