@@ -112,18 +112,7 @@ async def cmd_start(message: Message, _: callable, db_session: AsyncSession = No
     # The Start button opens the command menu for users who want to continue.
     await _send_add_group_prompt(message)
     return
-    if db_user and db_user.language != "en":
-        db_user.language = "en"
-        if db_session:
-            try:
-                await db_session.flush()
-            except Exception:
-                pass
-    name = message.from_user.first_name or "User"
-    await message.answer(
-        _get_commands("en", name),
-        reply_markup=main_menu_kb(_, is_owner=(message.from_user.id == settings.effective_owner_id)),
-    )
+
 
 
 @router.callback_query(F.data == "start:help")
