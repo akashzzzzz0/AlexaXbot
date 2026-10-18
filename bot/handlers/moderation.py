@@ -53,6 +53,22 @@ async def get_target_user(message: Message, session: AsyncSession) -> tuple:
             await session.flush()
         return target, reason
 
+    # Telegram clickable text mentions contain the actual user ID.
+    for entity in (message.entities or []):
+        if entity.type == "text_mention" and entity.user:
+            mentioned = entity.user
+            target = await session.get(User, mentioned.id)
+            if target is None:
+                target = User(
+                    id=mentioned.id, telegram_id=mentioned.id,
+                    first_name=mentioned.first_name or "User",
+                    last_name=mentioned.last_name, username=mentioned.username,
+                    is_bot=mentioned.is_bot,
+                )
+                session.add(target)
+                await session.flush()
+            return target, reason
+
     if not identifier:
         return None, reason
     if identifier.startswith("@"):
