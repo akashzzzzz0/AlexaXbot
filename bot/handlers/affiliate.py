@@ -84,6 +84,21 @@ async def _valid_count(session: AsyncSession, user_id: int) -> int:
     return int(value or 0)
 
 
+async def _referral_link_users(session: AsyncSession, offset: int = 0, limit: int = USER_PAGE_SIZE):
+    """Users who explicitly opened the referral dashboard/link, not all DM starters."""
+    return (await session.execute(
+        select(User)
+        .where(
+            User.is_bot.is_(False),
+            User.dm_started.is_(True),
+            User.referral_link_requested.is_(True),
+        )
+        .order_by(User.id.desc())
+        .offset(max(0, offset))
+        .limit(max(1, limit))
+    )).scalars().all()
+
+
 def _earned_stars(valid_count: int) -> int:
     # 200 referrals means 100 Stars total, not an additional 100.
     return 100 if valid_count >= 200 else 50 if valid_count >= 100 else 0
@@ -136,6 +151,8 @@ async def affiliate_open(callback: CallbackQuery, db_session: AsyncSession, db_u
     if not db_user:
         await callback.answer("Please send /start first.", show_alert=True)
         return
+    if callback.message.chat.type == "private" and db_user.dm_started:
+        db_user.referral_link_requested = True
     tracked = await _tracked_count(db_session, db_user.id)
     valid = await _valid_count(db_session, db_user.id)
     balance = await _stars_balance(db_session, db_user.id, valid)
@@ -164,6 +181,8 @@ async def affiliate_link(callback: CallbackQuery, db_user=None, **kwargs):
     if not db_user:
         await callback.answer("Please send /start first.", show_alert=True)
         return
+    if callback.message.chat.type == "private" and db_user.dm_started:
+        db_user.referral_link_requested = True
     me = await callback.bot.get_me()
     if not me.username:
         await callback.answer("Invite link unavailable.", show_alert=True)
@@ -448,20 +467,27 @@ async def owner_referrals(callback: CallbackQuery, db_session: AsyncSession, **k
     except ValueError:
         page = 0
     page = max(0, page)
-    total_users = int(await db_session.scalar(select(func.count(User.id)).where(User.is_bot.is_(False))) or 0)
+    referral_filter = (
+        User.is_bot.is_(False),
+        User.dm_started.is_(True),
+        User.referral_link_requested.is_(True),
+    )
+    total_users = int(await db_session.scalar(
+        select(func.count(User.id)).where(*referral_filter)
+    ) or 0)
     total_pages = max(1, (total_users + USER_PAGE_SIZE - 1) // USER_PAGE_SIZE)
     page = min(page, total_pages - 1)
-    users = (await db_session.execute(
-        select(User).where(User.is_bot.is_(False)).order_by(User.id.desc())
-        .offset(page * USER_PAGE_SIZE).limit(USER_PAGE_SIZE)
-    )).scalars().all()
+    users = await _referral_link_users(
+        db_session, offset=page * USER_PAGE_SIZE, limit=USER_PAGE_SIZE
+    )
     pending_count = int(await db_session.scalar(select(func.count(AffiliateRequest.id)).where(AffiliateRequest.status == "pending")) or 0)
     lines = [
         "🎁 <b>Affiliate / Referral — Owner Only</b>",
         f"Pending requests: <b>{pending_count}</b>",
-        f"Member page: <b>{page + 1}/{total_pages}</b>",
+        f"Referral-link users: <b>{total_users}</b>",
+        f"Page: <b>{page + 1}/{total_pages}</b>",
         "",
-        "<b>Members: tracked / valid referrals</b>",
+        "<b>Users who opened their referral link</b>",
     ]
     rows = []
     for user in users:
