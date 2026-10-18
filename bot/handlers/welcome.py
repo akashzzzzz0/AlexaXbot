@@ -267,7 +267,11 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
                 logger.warning("Raid member removal failed", chat_id=chat.id, user_id=user.id, error=str(exc))
             return
 
-    await _send_welcome_message(event.bot, db_session, chat, user)
+    group_settings = await db_session.scalar(
+        select(GroupSettings).where(GroupSettings.group_id == chat.id)
+    )
+    if not (group_settings and group_settings.silent_service_messages):
+        await _send_welcome_message(event.bot, db_session, chat, user)
 
     if security and security.captcha_enabled:
         await _handle_captcha(event, db_session, security, user, chat, _)
@@ -392,8 +396,12 @@ async def on_member_left(event: ChatMemberUpdated, db_session: AsyncSession, **k
     if gs:
         gs.total_leaves = (gs.total_leaves or 0) + 1
 
+    group_settings = await db_session.scalar(
+        select(GroupSettings).where(GroupSettings.group_id == chat.id)
+    )
+    silent_service_messages = bool(group_settings and group_settings.silent_service_messages)
     goodbye = await db_session.scalar(select(GoodbyeSettings).where(GoodbyeSettings.group_id == chat.id))
-    if goodbye and goodbye.enabled and goodbye.message:
+    if not silent_service_messages and goodbye and goodbye.enabled and goodbye.message:
         goodbye_text = goodbye.message
         replacements = {
             "{name}": user.first_name or "User",
@@ -432,6 +440,15 @@ async def on_member_left(event: ChatMemberUpdated, db_session: AsyncSession, **k
 @router.message(F.chat.type.in_({"group", "supergroup"}), F.new_chat_members)
 async def group_service_message_welcome(message: Message, db_session: AsyncSession, **kwargs):
     """Fallback for Telegram service messages when chat_member updates are absent."""
+    settings_row = await db_session.scalar(
+        select(GroupSettings).where(GroupSettings.group_id == message.chat.id)
+    )
+    if settings_row and settings_row.silent_service_messages:
+        try:
+            await message.delete()
+        except Exception as exc:
+            logger.debug("Could not delete join service message", chat_id=message.chat.id, error=str(exc))
+        return
     for joined_user in message.new_chat_members or []:
         if joined_user.is_bot:
             continue
@@ -446,6 +463,21 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
         db_group = await db_session.get(Group, message.chat.id)
     if not db_group:
         return
+    if message.new_chat_members or message.left_chat_member:
+        settings_row = await db_session.scalar(
+            select(GroupSettings).where(GroupSettings.group_id == message.chat.id)
+        )
+        if settings_row and settings_row.silent_service_messages:
+            try:
+                await message.delete()
+            except Exception as exc:
+                logger.debug(
+                    "Could not delete join/leave/ban service message",
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    error=str(exc),
+                )
+            return
     if not group_security:
         group_security = await db_session.scalar(
             select(SecuritySettings).where(SecuritySettings.group_id == message.chat.id)
