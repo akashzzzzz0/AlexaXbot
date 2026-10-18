@@ -72,10 +72,13 @@ async def get_target_user(message: Message, session: AsyncSession) -> tuple:
     if not identifier:
         return None, reason
     if identifier.startswith("@"):
-        username = identifier[1:].lstrip("@").lower()
+        username = identifier.lstrip("@").strip().lower()
         if username:
+            # Older rows may store usernames with a leading @; normalize both forms.
             target = await session.scalar(
-                select(User).where(func.lower(User.username) == username)
+                select(User).where(
+                    func.lower(func.replace(User.username, "@", "")) == username
+                )
             )
     else:
         try:
@@ -336,7 +339,13 @@ async def cmd_approvebio(message: Message, db_session: AsyncSession, **kwargs):
         db_session.add(member)
     else:
         member.is_whitelisted = True
-    await db_session.flush()
+    try:
+        await db_session.commit()
+    except Exception as exc:
+        await db_session.rollback()
+        logger.exception("Failed to approve bio-link exemption", group_id=message.chat.id, user_id=target.id, error=str(exc))
+        await message.reply("❌ Could not save this approval. Please check the database logs.")
+        return
     await message.reply(
         f"✅ {escape(safe_username(target))} is approved for Bio Link Protection and can keep links in their bio.",
         parse_mode="HTML",
@@ -793,11 +802,29 @@ async def cmd_resetwarns(message: Message, _: callable, db_session: AsyncSession
     target, _reason = await get_target_user(message, db_session)
     if not target:
         await message.reply("Reply to a member or use /resetwarn <user ID>."); return
-    await db_session.execute(delete(Warning).where(Warning.group_id == message.chat.id, Warning.user_id == target.id))
-    member = await db_session.scalar(select(GroupMember).where(GroupMember.group_id == message.chat.id, GroupMember.user_id == target.id))
-    if member: member.warn_count = 0
-    await db_session.flush()
-    await message.reply(f"✅ Warnings reset for {escape(safe_username(target))}.", parse_mode="HTML")
+    try:
+        # Clear both the warning records and the cached counter for this group/member.
+        await db_session.execute(
+            delete(Warning).where(
+                Warning.group_id == message.chat.id,
+                Warning.user_id == target.id,
+            )
+        )
+        member = await db_session.scalar(
+            select(GroupMember).where(
+                GroupMember.group_id == message.chat.id,
+                GroupMember.user_id == target.id,
+            )
+        )
+        if member is not None:
+            member.warn_count = 0
+        await db_session.commit()
+    except Exception as exc:
+        await db_session.rollback()
+        logger.exception("Failed to reset warnings", group_id=message.chat.id, user_id=target.id, error=str(exc))
+        await message.reply("❌ Could not reset warnings. Please check the database logs.")
+        return
+    await message.reply(f"✅ All warnings reset for {escape(safe_username(target))}.", parse_mode="HTML")
 
 
 @router.message(Command("promote"))
@@ -808,10 +835,37 @@ async def cmd_promote(message: Message, bot: Bot, db_session: AsyncSession, **kw
     if not target:
         await message.reply("Reply to a member or use /promote <user ID>."); return
     try:
-        await bot.promote_chat_member(message.chat.id, target.id, can_manage_chat=True, can_delete_messages=True, can_manage_video_chats=True, can_restrict_members=True, can_promote_members=False, can_change_info=False, can_invite_users=True, can_pin_messages=True, can_post_messages=False, can_edit_messages=False, can_manage_topics=True)
+        bot_member = await bot.get_chat_member(message.chat.id, bot.id)
+        if bot_member.status != "administrator" or not getattr(bot_member, "can_promote_members", False):
+            await message.reply("❌ Alexa needs to be a group admin with the 'Add New Admins' permission to promote members.")
+            return
+        target_member = await bot.get_chat_member(message.chat.id, target.id)
+        if target_member.status in ("administrator", "creator"):
+            await message.reply("ℹ️ This member is already an admin. Use /demote first if you need to change their role.")
+            return
+        await bot.promote_chat_member(
+            chat_id=message.chat.id,
+            user_id=target.id,
+            can_manage_chat=True,
+            can_delete_messages=True,
+            can_manage_video_chats=True,
+            can_restrict_members=True,
+            can_promote_members=False,
+            can_change_info=False,
+            can_invite_users=True,
+            can_pin_messages=True,
+            can_post_messages=False,
+            can_edit_messages=False,
+            can_manage_topics=True,
+        )
+        verified = await bot.get_chat_member(message.chat.id, target.id)
+        if verified.status != "administrator":
+            await message.reply("❌ Telegram did not apply the promotion. Check Alexa's admin rights and try again.")
+            return
         await message.reply(f"✅ Promoted {escape(safe_username(target))} with moderation permissions.", parse_mode="HTML")
     except Exception as exc:
-        await message.reply(f"❌ Promotion failed. Check the bot's admin rights. ({escape(str(exc)[:180])})", parse_mode="HTML")
+        logger.exception("Promotion failed", group_id=message.chat.id, user_id=target.id, error=str(exc))
+        await message.reply(f"❌ Promotion failed: {escape(str(exc)[:220])}", parse_mode="HTML")
 
 
 @router.message(Command("demote"))
