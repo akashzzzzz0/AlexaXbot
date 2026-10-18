@@ -20,7 +20,7 @@ router = Router()
 
 _bio_link_settings_drafts = {}
 router.message.outer_middleware(AdminActionMiddleware(
-    commands={"ban", "unban", "kick", "mute", "unmute", "warn", "unwarn", "warns", "warnings", "history", "note", "del", "purg", "pin", "unpin", "ro", "setrole", "clearrole", "role", "resetwarn", "resetwarns", "promote", "demote"}
+    commands={"ban", "unban", "kick", "mute", "unmute", "warn", "unwarn", "warns", "warnings", "history", "note", "del", "purg", "pin", "unpin", "ro", "setrole", "clearrole", "role", "resetwarn", "resetwarns", "approvebio", "promote", "demote"}
 ))
 router.callback_query.outer_middleware(AdminActionMiddleware(prefixes=("mod:", "mute_duration:", "ban_duration:", "warn_action:", "ban_confirm:")))
 
@@ -313,6 +313,34 @@ async def enable_bio_link_protection(callback: CallbackQuery, db_session: AsyncS
 @router.callback_query(F.data == "mod:bio_link_off")
 async def disable_bio_link_protection(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
     await _set_bio_link_protection(callback, db_session, False)
+
+
+@router.message(Command("approvebio"))
+async def cmd_approvebio(message: Message, db_session: AsyncSession, **kwargs):
+    """Whitelist a member from bio-link protection; group admins only via AdminActionMiddleware."""
+    if message.chat.type not in ("group", "supergroup"):
+        await message.reply("Use /approvebio in a group.")
+        return
+    target, _ = await get_target_user(message, db_session)
+    if not target:
+        await message.reply("Reply to the member's message or use /approvebio @username (or user ID).")
+        return
+    member = await db_session.scalar(
+        select(GroupMember).where(
+            GroupMember.group_id == message.chat.id,
+            GroupMember.user_id == target.id,
+        )
+    )
+    if member is None:
+        member = GroupMember(group_id=message.chat.id, user_id=target.id, is_whitelisted=True)
+        db_session.add(member)
+    else:
+        member.is_whitelisted = True
+    await db_session.flush()
+    await message.reply(
+        f"✅ {escape(safe_username(target))} is approved for Bio Link Protection and can keep links in their bio.",
+        parse_mode="HTML",
+    )
 
 
 @router.message(Command("ban"))
