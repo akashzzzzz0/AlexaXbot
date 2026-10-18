@@ -587,6 +587,51 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
     # Do not return early when a regular user record is missing: content locks
     # must still be enforced for every incoming group message.
 
+    # Enforce sticker lock before any later handler path can skip moderation.
+    # Only group admins/creator and members explicitly approved for stickers
+    # are exempt; all other members' stickers are deleted while the lock is ON.
+    if message.from_user and message.sticker and group_security.lock_stickers:
+        sender_is_admin = False
+        try:
+            sender_member = await message.bot.get_chat_member(
+                message.chat.id, message.from_user.id
+            )
+            sender_status = str(
+                getattr(sender_member.status, "value", sender_member.status)
+            )
+            sender_is_admin = sender_status in ("administrator", "creator", "owner")
+        except Exception as exc:
+            logger.warning(
+                "Could not verify sticker sender role",
+                chat_id=message.chat.id,
+                user_id=message.from_user.id,
+                error=str(exc),
+            )
+            # Fail closed for sticker locks if role lookup fails.
+        if not sender_is_admin:
+            sticker_approval = await db_session.scalar(
+                select(GroupMember).where(
+                    GroupMember.group_id == db_group.id,
+                    GroupMember.user_id == message.from_user.id,
+                )
+            )
+            if not (sticker_approval and sticker_approval.approved_sticker):
+                try:
+                    await message.delete()
+                    logger.info(
+                        "Sticker lock deleted unapproved sticker",
+                        chat_id=message.chat.id,
+                        user_id=message.from_user.id,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Could not delete unapproved sticker; check bot delete permission",
+                        chat_id=message.chat.id,
+                        user_id=message.from_user.id,
+                        error=str(exc),
+                    )
+                return
+
     # When Bio Link Protection is enabled, also moderate links posted by existing
     # members: delete each link message, issue persistent warnings, and mute on 3.
     message_text = message.text or message.caption or ""
