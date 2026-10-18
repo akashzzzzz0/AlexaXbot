@@ -239,21 +239,33 @@ async def remove_filter(message: Message, db_session: AsyncSession, **kwargs):
     await message.reply("✅ Filter removed (if it existed).")
 
 async def _resolve_member_target(message: Message, db_session: AsyncSession, token: str | None = None):
-    if message.reply_to_message and message.reply_to_message.from_user:
-        target = message.reply_to_message.from_user
-        return target.id, target.username, target.first_name or "User"
+    """Resolve a target from a replied-to user or an explicit ID/known username."""
+    replied = message.reply_to_message
+    replied_user = getattr(replied, "from_user", None) if replied else None
+    if replied_user is not None:
+        return replied_user.id, replied_user.username, replied_user.first_name or "User"
+
     if not token:
         return None, None, None
-    token = token.strip()
+    token = token.strip().split("@", 1)[0] if token.startswith("/") else token.strip()
     if token.startswith("@"):
-        target = await db_session.scalar(select(User).where(User.username == token[1:]))
-        return (target.id, target.username, target.first_name) if target else (None, None, None)
+        username = token[1:].lstrip("@").lower()
+        target = await db_session.scalar(
+            select(User).where(func.lower(User.username) == username)
+        ) if username else None
+        return (target.id, target.username, target.first_name or "User") if target else (None, None, None)
     try:
         uid = int(token)
     except ValueError:
+        username = token.lstrip("@").lower()
+        target = await db_session.scalar(
+            select(User).where(func.lower(User.username) == username)
+        ) if username else None
+        return (target.id, target.username, target.first_name or "User") if target else (None, None, None)
+    if uid <= 0:
         return None, None, None
     target = await db_session.get(User, uid)
-    return uid, target.username if target else None, target.first_name if target else f"User {uid}"
+    return uid, target.username if target else None, (target.first_name if target else f"User {uid}")
 
 
 @router.message(Command("approve"))
