@@ -1,18 +1,24 @@
+from datetime import datetime, timezone
 from html import escape
 from urllib.parse import quote
+from uuid import uuid4
 
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import (
+    CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton,
+    PreCheckoutQuery, LabeledPrice,
+)
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import settings
-from bot.database.models import User, Referral, AffiliateRequest
+from bot.database.models import User, Referral, AffiliateRequest, AffiliatePayment
 
 router = Router()
 MIN_WITHDRAWAL = 100
+PREMIUM_3_MONTHS_STARS = 1000
 USER_PAGE_SIZE = 10
 REFERRAL_PAGE_SIZE = 10
 
@@ -107,18 +113,22 @@ async def _request_text(session: AsyncSession, req: AffiliateRequest) -> str:
     )
 
 
-async def _notify_owner(callback: CallbackQuery, session: AsyncSession, req: AffiliateRequest):
+async def _notify_owner_bot(bot, session: AsyncSession, req: AffiliateRequest):
     owner_id = settings.effective_owner_id
     if not owner_id:
         return
     try:
-        await callback.bot.send_message(
+        await bot.send_message(
             owner_id, await _request_text(session, req),
             parse_mode="HTML", reply_markup=_owner_request_kb(req),
         )
     except Exception:
         # The request remains stored; owner can find it in the owner referral board.
         pass
+
+
+async def _notify_owner(callback: CallbackQuery, session: AsyncSession, req: AffiliateRequest):
+    await _notify_owner_bot(callback.bot, session, req)
 
 
 @router.callback_query(F.data == "affiliate:open")
@@ -221,6 +231,9 @@ async def affiliate_premium(callback: CallbackQuery, db_session: AsyncSession, d
     if not db_user:
         await callback.answer("Please send /start first.", show_alert=True)
         return
+    if callback.message.chat.type != "private":
+        await callback.answer("Open ALEXA in a private chat to request Premium.", show_alert=True)
+        return
     pending = await db_session.scalar(select(AffiliateRequest.id).where(
         AffiliateRequest.user_id == db_user.id,
         AffiliateRequest.request_type == "premium",
@@ -229,12 +242,126 @@ async def affiliate_premium(callback: CallbackQuery, db_session: AsyncSession, d
     if pending:
         await callback.answer("You already have an open Premium request.", show_alert=True)
         return
-    req = AffiliateRequest(user_id=db_user.id, request_type="premium", status="pending")
+
+    # The invoice payload is persisted before sending the invoice so that both
+    # pre-checkout and successful-payment updates can be validated against it.
+    payload = f"premium3:{db_user.id}:{uuid4().hex}"
+    order = AffiliatePayment(
+        user_id=db_user.id,
+        invoice_payload=payload,
+        amount=PREMIUM_3_MONTHS_STARS,
+        currency="XTR",
+        status="pending",
+    )
+    db_session.add(order)
+    await db_session.flush()
+    try:
+        await callback.bot.send_invoice(
+            chat_id=callback.from_user.id,
+            title="Telegram Premium · 3 months",
+            description=(
+                f"Pay {PREMIUM_3_MONTHS_STARS} Telegram Stars to submit a 3-month "
+                "Telegram Premium gift request. After Telegram confirms payment, "
+                "the bot owner will review the request and arrange the gift manually. "
+                "Payment does not activate Premium automatically."
+            ),
+            payload=payload,
+            provider_token="",
+            currency="XTR",
+            prices=[LabeledPrice(
+                label="3-month Telegram Premium gift request",
+                amount=PREMIUM_3_MONTHS_STARS,
+            )],
+        )
+    except Exception:
+        order.status = "failed"
+        await db_session.flush()
+        await callback.answer("Could not create the Stars invoice. Please try again later.", show_alert=True)
+        return
+    await callback.answer("Stars invoice sent.")
+
+
+@router.pre_checkout_query()
+async def premium_pre_checkout(query: PreCheckoutQuery, db_session: AsyncSession, **kwargs):
+    order = await db_session.scalar(select(AffiliatePayment).where(
+        AffiliatePayment.invoice_payload == query.invoice_payload
+    ))
+    valid = bool(
+        order
+        and order.status == "pending"
+        and order.user_id == query.from_user.id
+        and query.currency == "XTR"
+        and query.total_amount == order.amount == PREMIUM_3_MONTHS_STARS
+    )
+    if not valid:
+        await query.answer(
+            ok=False,
+            error_message="This Premium invoice is invalid or expired. Please create a new request.",
+        )
+        return
+    await query.answer(ok=True)
+
+
+@router.message(F.successful_payment)
+async def premium_successful_payment(message: Message, db_session: AsyncSession, **kwargs):
+    payment = message.successful_payment
+    if not payment:
+        return
+    order = await db_session.scalar(select(AffiliatePayment).where(
+        AffiliatePayment.invoice_payload == payment.invoice_payload
+    ))
+    if not order or order.user_id != message.from_user.id:
+        await message.answer("Payment received, but this invoice could not be matched. Please contact the bot owner with your Telegram receipt.")
+        return
+
+    # Telegram may retry updates. A charge can create at most one Premium request.
+    existing_charge = await db_session.scalar(select(AffiliatePayment.id).where(
+        AffiliatePayment.telegram_payment_charge_id == payment.telegram_payment_charge_id
+    ))
+    if existing_charge:
+        await message.answer("This Telegram Stars payment has already been recorded.")
+        return
+    if (
+        order.status != "pending"
+        or payment.currency != "XTR"
+        or payment.total_amount != order.amount
+        or payment.total_amount != PREMIUM_3_MONTHS_STARS
+    ):
+        await message.answer("Payment details could not be verified. Please contact the bot owner and keep your Telegram receipt.")
+        return
+
+    req = AffiliateRequest(
+        user_id=order.user_id,
+        request_type="premium",
+        requested_stars=payment.total_amount,
+        status="pending",
+    )
     db_session.add(req)
     await db_session.flush()
-    await callback.message.answer(f"👑 Telegram Premium reward request #{req.id} submitted. Status: PENDING.")
-    await _notify_owner(callback, db_session, req)
-    await callback.answer("Request submitted.")
+    order.status = "paid"
+    order.telegram_payment_charge_id = payment.telegram_payment_charge_id
+    order.request_id = req.id
+    order.paid_at = datetime.now(timezone.utc)
+    await db_session.flush()
+
+    await message.answer(
+        f"✅ Telegram confirmed your payment of {payment.total_amount} Stars.\n"
+        f"👑 Premium request #{req.id} has been sent to the bot owner.\n\n"
+        "The owner must arrange the 3-month Premium gift manually; it is not activated automatically."
+    )
+    await _notify_owner_bot(message.bot, db_session, req)
+
+
+@router.message(F.text == "/terms")
+async def affiliate_payment_terms(message: Message):
+    await message.answer(
+        "📄 <b>Telegram Premium Gift Request Terms</b>\n\n"
+        f"• Price: {PREMIUM_3_MONTHS_STARS} Telegram Stars for a 3-month Premium gift request.\n"
+        "• A request is created only after Telegram confirms successful payment.\n"
+        "• Payment submits a request; Premium is not activated automatically. The bot owner must review the request and arrange the gift manually.\n"
+        "• If the owner cannot fulfill the request, contact the owner to arrange a resolution. Keep your Telegram payment receipt.\n"
+        "• By paying, you confirm that you understand these conditions."
+    )
 
 
 @router.callback_query(F.data == "affiliate:requests")
