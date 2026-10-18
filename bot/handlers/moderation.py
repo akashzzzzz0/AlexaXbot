@@ -38,6 +38,9 @@ async def get_target_user(message: Message, session: AsyncSession) -> tuple:
     replied = message.reply_to_message
     tg_user = getattr(replied, "from_user", None) if replied else None
     if tg_user is not None:
+        # On reply commands, preserve every argument after the command (for
+        # example, /mute 1h spam) so duration/reason parsing still works.
+        reason = " ".join(text.split()[1:])
         target = await session.get(User, tg_user.id)
         if target is None:
             target = User(
