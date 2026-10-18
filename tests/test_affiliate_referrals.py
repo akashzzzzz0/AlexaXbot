@@ -3,13 +3,16 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from bot.database.models import AffiliateRequest, Base, Referral, User
+from bot.database.models import AffiliatePayment, AffiliateRequest, Base, Referral, User
 from bot.handlers.affiliate import (
     MIN_WITHDRAWAL,
+    PREMIUM_3_MONTHS_STARS,
+    premium_pre_checkout,
+    premium_successful_payment,
     _earned_stars,
     _tracked_count,
     _valid_count,
@@ -80,6 +83,111 @@ class AffiliateRewardTierTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(session.get(AffiliateRequest, request.id))
         finally:
             engine.dispose()
+
+
+class AffiliateStarsPaymentTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async with self.engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        self.factory = async_sessionmaker(self.engine, expire_on_commit=False)
+
+    async def asyncTearDown(self):
+        await self.engine.dispose()
+
+    async def _seed_order(self, session):
+        user_id = 7123456
+        session.add(User(id=user_id, first_name="Premium Test", telegram_id=user_id, dm_started=True))
+        order = AffiliatePayment(
+            user_id=user_id,
+            invoice_payload=f"premium3:{user_id}:testnonce",
+            amount=PREMIUM_3_MONTHS_STARS,
+            currency="XTR",
+            status="pending",
+        )
+        session.add(order)
+        await session.flush()
+        return user_id, order
+
+    async def test_premium_price_and_payment_ledger_schema(self):
+        self.assertEqual(PREMIUM_3_MONTHS_STARS, 1000)
+        async with self.factory() as session:
+            user_id, order = await self._seed_order(session)
+            self.assertEqual(order.status, "pending")
+            self.assertEqual(order.amount, 1000)
+            self.assertIsNone(order.telegram_payment_charge_id)
+            self.assertIsNone(await session.scalar(select(AffiliateRequest.id).where(
+                AffiliateRequest.user_id == user_id,
+                AffiliateRequest.request_type == "premium",
+            )))
+
+    async def test_precheckout_rejects_wrong_amount(self):
+        async with self.factory() as session:
+            user_id, order = await self._seed_order(session)
+            query = SimpleNamespace(
+                invoice_payload=order.invoice_payload,
+                from_user=SimpleNamespace(id=user_id),
+                currency="XTR",
+                total_amount=PREMIUM_3_MONTHS_STARS - 1,
+                answer=AsyncMock(),
+            )
+            await premium_pre_checkout(query, db_session=session)
+            query.answer.assert_awaited_once()
+            self.assertIs(query.answer.await_args.kwargs["ok"], False)
+
+    async def test_verified_successful_payment_creates_one_owner_request(self):
+        async with self.factory() as session:
+            user_id, order = await self._seed_order(session)
+            message = SimpleNamespace(
+                successful_payment=SimpleNamespace(
+                    invoice_payload=order.invoice_payload,
+                    currency="XTR",
+                    total_amount=PREMIUM_3_MONTHS_STARS,
+                    telegram_payment_charge_id="charge-premium-test-001",
+                ),
+                from_user=SimpleNamespace(id=user_id),
+                bot=SimpleNamespace(send_message=AsyncMock()),
+                answer=AsyncMock(),
+            )
+            await premium_successful_payment(message, db_session=session)
+            requests = (await session.scalars(select(AffiliateRequest).where(
+                AffiliateRequest.user_id == user_id,
+                AffiliateRequest.request_type == "premium",
+            ))).all()
+            self.assertEqual(len(requests), 1)
+            self.assertEqual(requests[0].status, "pending")
+            self.assertEqual(requests[0].requested_stars, PREMIUM_3_MONTHS_STARS)
+            self.assertEqual(order.status, "paid")
+            self.assertEqual(order.telegram_payment_charge_id, "charge-premium-test-001")
+
+            # Simulate Telegram redelivering the same successful-payment update.
+            await premium_successful_payment(message, db_session=session)
+            requests = (await session.scalars(select(AffiliateRequest).where(
+                AffiliateRequest.user_id == user_id,
+                AffiliateRequest.request_type == "premium",
+            ))).all()
+            self.assertEqual(len(requests), 1)
+
+    async def test_unverified_payment_amount_does_not_create_request(self):
+        async with self.factory() as session:
+            user_id, order = await self._seed_order(session)
+            message = SimpleNamespace(
+                successful_payment=SimpleNamespace(
+                    invoice_payload=order.invoice_payload,
+                    currency="XTR",
+                    total_amount=PREMIUM_3_MONTHS_STARS - 1,
+                    telegram_payment_charge_id="charge-premium-invalid",
+                ),
+                from_user=SimpleNamespace(id=user_id),
+                bot=SimpleNamespace(send_message=AsyncMock()),
+                answer=AsyncMock(),
+            )
+            await premium_successful_payment(message, db_session=session)
+            self.assertEqual(await session.scalar(select(AffiliateRequest.id).where(
+                AffiliateRequest.user_id == user_id,
+                AffiliateRequest.request_type == "premium",
+            )), None)
+            self.assertEqual(order.status, "pending")
 
 
 class AffiliateOwnerPermissionTests(unittest.IsolatedAsyncioTestCase):
