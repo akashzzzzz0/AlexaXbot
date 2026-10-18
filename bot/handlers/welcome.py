@@ -488,6 +488,12 @@ async def group_service_message_welcome(message: Message, db_session: AsyncSessi
 
 @router.message(F.chat.type.in_({"group", "supergroup"}))
 async def group_message_handler(message: Message, db_session: AsyncSession, db_user=None, db_group=None, group_security=None, _=None, **kwargs):
+    # This broad handler is registered before the command routers. Let slash
+    # commands continue to the actual command handlers instead of consuming
+    # them here; otherwise /start, /help, moderation and game commands never run.
+    if message.text and message.text.lstrip().startswith("/"):
+        raise SkipHandler
+
     # Resolve group/security directly as a fallback if middleware did not inject them.
     # This prevents the link-protection handler from silently skipping messages.
     if not db_group:
