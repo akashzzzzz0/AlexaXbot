@@ -405,15 +405,21 @@ async def cmd_unmute(message: Message, bot: Bot, _: callable, db_session: AsyncS
             "Reply to the muted member's message with /unmute, or use /unmute <user ID>."
         )
         return
-    success = await unmute_user(bot, db_session, message.chat.id, target.id, message.from_user.id)
-    if success:
-        # Use a literal response so a missing translation key cannot suppress feedback.
-        response = f"✅ {escape(safe_username(target))} has been unmuted."
-    else:
-        response = (
-            "❌ I couldn't unmute this user. Check that ALEXA has Restrict Members permission "
-            "and that the target is still in the group."
+    try:
+        success = await unmute_user(
+            bot, db_session, message.chat.id, target.id,
+            message.from_user.id if message.from_user else 0,
         )
+        if success:
+            response = f"✅ {escape(safe_username(target))} has been unmuted."
+        else:
+            response = (
+                "❌ Unmute failed. Check ALEXA's admin status + Restrict Members permission, "
+                "and make sure the target is not an admin and is still in this group."
+            )
+    except Exception as exc:
+        logger.exception("Unexpected /unmute handler failure", chat_id=message.chat.id, user_id=target.id, error=str(exc))
+        response = "❌ Unmute hit an internal error. Please check the bot logs and permissions."
     try:
         await message.answer(response, parse_mode="HTML")
     except Exception as exc:
