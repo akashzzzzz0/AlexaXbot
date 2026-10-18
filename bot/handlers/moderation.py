@@ -86,7 +86,9 @@ async def get_target_user(message: Message, session: AsyncSession) -> tuple:
         except ValueError:
             username = identifier.lstrip("@").lower()
             target = await session.scalar(
-                select(User).where(func.lower(User.username) == username)
+                select(User).where(
+                    func.lower(func.replace(User.username, "@", "")) == username
+                )
             )
         else:
             if uid > 0:
