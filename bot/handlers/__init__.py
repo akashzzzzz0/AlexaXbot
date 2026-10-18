@@ -7,8 +7,9 @@ def get_main_router() -> Router:
     router = Router()
     router.message.outer_middleware(StartMenuAutoDeleteMessageMiddleware())
     router.callback_query.outer_middleware(StartMenuAutoDeleteCallbackMiddleware())
-    # Suppress join/leave/ban service messages before other handlers can consume them.
-    router.include_router(welcome.router)
+    # Register command and feature routers before welcome's broad group-message
+    # fallback. The fallback belongs last so it cannot intercept group commands
+    # or callbacks intended for the other feature routers.
     router.include_router(start.router)
     router.include_router(security.router)
     router.include_router(moderation.router)
@@ -22,4 +23,6 @@ def get_main_router() -> Router:
     router.include_router(owner.router)
     router.include_router(alexa_games.router)
     router.include_router(group_tools.router)
+    # Keep welcome/join-leave/captcha processing, but after feature handlers.
+    router.include_router(welcome.router)
     return router
