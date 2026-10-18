@@ -245,6 +245,11 @@ async def _resolve_member_target(message: Message, db_session: AsyncSession, tok
     if replied_user is not None:
         return replied_user.id, replied_user.username, replied_user.first_name or "User"
 
+    for entity in (message.entities or []):
+        if entity.type == "text_mention" and entity.user:
+            mentioned = entity.user
+            return mentioned.id, mentioned.username, mentioned.first_name or "User"
+
     if not token:
         return None, None, None
     token = token.strip().split("@", 1)[0] if token.startswith("/") else token.strip()
