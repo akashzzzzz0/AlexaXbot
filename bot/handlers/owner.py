@@ -811,30 +811,163 @@ async def owner_unban_known_member(callback: CallbackQuery, db_session: AsyncSes
 @router.callback_query(F.data.startswith("owner:purge:"))
 async def owner_purge_start(callback: CallbackQuery, state: FSMContext, db_session: AsyncSession, **kwargs):
     if not is_owner(callback.from_user.id):
-        await callback.answer("Not available.", show_alert=True); return
-    try: group_id = int(callback.data.rsplit(":", 1)[1])
+        await callback.answer("Not available.", show_alert=True)
+        return
+    try:
+        group_id = int(callback.data.rsplit(":", 1)[1])
     except ValueError:
-        await callback.answer("Invalid group.", show_alert=True); return
+        await callback.answer("Invalid group.", show_alert=True)
+        return
     group = await db_session.get(Group, group_id)
     if not group or not group.is_active:
-        await callback.answer("Group is not active/registered.", show_alert=True); return
+        await callback.answer("Group is not active/registered.", show_alert=True)
+        return
     try:
         me = await callback.bot.get_chat_member(group_id, callback.bot.id)
         status = str(getattr(me.status, "value", me.status))
-        if status not in {"administrator", "creator"} or (status == "administrator" and not getattr(me, "can_delete_messages", False)):
-            await callback.answer("ALEXA needs admin + Delete Messages permission in this group.", show_alert=True); return
+        if status not in {"administrator", "creator"} or (
+            status == "administrator" and not getattr(me, "can_delete_messages", False)
+        ):
+            await callback.answer("ALEXA needs admin + Delete Messages permission in this group.", show_alert=True)
+            return
     except Exception:
-        await callback.answer("Could not verify ALEXA's permissions in this group.", show_alert=True); return
+        await callback.answer("Could not verify ALEXA's permissions in this group.", show_alert=True)
+        return
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🗑️ Purge Recent (up to 1000 IDs)", callback_data=f"owner:purge_recent:{group_id}")
+    builder.button(text="🔢 Purge by Message ID Range", callback_data=f"owner:purge_range:{group_id}")
+    builder.button(text="◀️ Back to Group", callback_data=f"owner:group:{group_id}")
+    builder.adjust(1)
+    await callback.message.edit_text(
+        f"🧹 <b>Purge Messages — {escape(group.title)}</b>\n\n"
+        "Choose how to purge this group.\n\n"
+        "• <b>Purge Recent:</b> attempts the latest up to 1000 message IDs.\n"
+        "• <b>ID Range:</b> enter a START-END range yourself.\n\n"
+        "Telegram does not let bots fetch the entire chat history, and messages older than 48 hours "
+        "generally cannot be deleted.",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner:purge_range:"))
+async def owner_purge_range_start(callback: CallbackQuery, state: FSMContext, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Not available.", show_alert=True)
+        return
+    try:
+        group_id = int(callback.data.rsplit(":", 1)[1])
+    except ValueError:
+        await callback.answer("Invalid group.", show_alert=True)
+        return
+    group = await db_session.get(Group, group_id)
+    if not group or not group.is_active:
+        await callback.answer("Group is not active/registered.", show_alert=True)
+        return
     await state.set_state(OwnerStates.waiting_purge_range)
     await state.update_data(purge_group_id=group_id, purge_group_title=group.title)
     await callback.message.answer(
         f"🧹 <b>Purge Messages — {escape(group.title)}</b>\n\n"
         "Send the message ID range as <code>START-END</code>, for example <code>1200-1250</code>. "
-        "ALEXA will try to delete messages in that range, including commands. Maximum 1000 IDs per request.\n\n"
-        "Telegram may reject messages older than 48 hours or messages it cannot delete. Send /cancel to stop.",
+        "Maximum 1000 IDs per request. Telegram may reject messages older than 48 hours. "
+        "Send /cancel to stop.",
         parse_mode="HTML",
     )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner:purge_recent:"))
+async def owner_purge_recent_start(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Not available.", show_alert=True)
+        return
+    try:
+        group_id = int(callback.data.rsplit(":", 1)[1])
+    except ValueError:
+        await callback.answer("Invalid group.", show_alert=True)
+        return
+    group = await db_session.get(Group, group_id)
+    if not group or not group.is_active:
+        await callback.answer("Group is not active/registered.", show_alert=True)
+        return
+    try:
+        me = await callback.bot.get_chat_member(group_id, callback.bot.id)
+        status = str(getattr(me.status, "value", me.status))
+        if status not in {"administrator", "creator"} or (
+            status == "administrator" and not getattr(me, "can_delete_messages", False)
+        ):
+            await callback.answer("ALEXA needs admin + Delete Messages permission in this group.", show_alert=True)
+            return
+    except Exception:
+        await callback.answer("Could not verify ALEXA's permissions in this group.", show_alert=True)
+        return
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Yes, purge recent messages", callback_data=f"owner:purge_recent_confirm:{group_id}")
+    builder.button(text="❌ Cancel", callback_data=f"owner:purge:{group_id}")
+    builder.adjust(1)
+    await callback.message.edit_text(
+        f"⚠️ <b>Confirm Purge — {escape(group.title)}</b>\n\n"
+        "ALEXA will attempt to delete the latest up to 1000 message IDs in this group, including commands. "
+        "Some IDs may be empty or undeletable; Telegram usually rejects messages older than 48 hours.\n\n"
+        "Continue?",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner:purge_recent_confirm:"))
+async def owner_purge_recent_confirm(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Not available.", show_alert=True)
+        return
+    try:
+        group_id = int(callback.data.rsplit(":", 1)[1])
+    except ValueError:
+        await callback.answer("Invalid group.", show_alert=True)
+        return
+    group = await db_session.get(Group, group_id)
+    if not group or not group.is_active:
+        await callback.answer("Group is not active/registered.", show_alert=True)
+        return
+    try:
+        me = await callback.bot.get_chat_member(group_id, callback.bot.id)
+        status = str(getattr(me.status, "value", me.status))
+        if status not in {"administrator", "creator"} or (
+            status == "administrator" and not getattr(me, "can_delete_messages", False)
+        ):
+            await callback.answer("ALEXA needs admin + Delete Messages permission in this group.", show_alert=True)
+            return
+        marker = await callback.bot.send_message(group_id, "🧹 ALEXA purge started…")
+        end_id = marker.message_id
+        start_id = max(1, end_id - 999)
+        deleted = failed = 0
+        for batch_start in range(start_id, end_id + 1, 100):
+            batch = list(range(batch_start, min(batch_start + 100, end_id + 1)))
+            try:
+                await callback.bot.delete_messages(chat_id=group_id, message_ids=batch)
+                deleted += len(batch)
+            except Exception:
+                for message_id in batch:
+                    try:
+                        await callback.bot.delete_message(chat_id=group_id, message_id=message_id)
+                        deleted += 1
+                    except Exception:
+                        failed += 1
+        await callback.message.edit_text(
+            f"🧹 <b>Purge finished</b>\n\nGroup: <b>{escape(group.title)}</b>\n"
+            f"Attempted IDs: <code>{start_id}-{end_id}</code>\n"
+            f"Deleted: <b>{deleted}</b>\nCould not delete: <b>{failed}</b>\n\n"
+            "Note: this covers recent IDs only; Telegram bots cannot retrieve all historical chat messages.",
+            parse_mode="HTML",
+            reply_markup=back_button_kb(None, f"owner:group:{group_id}"),
+        )
+        await callback.answer("Purge finished.")
+    except Exception as exc:
+        logger.warning("owner_purge_recent_failed", group_id=group_id, error=str(exc))
+        await callback.answer("Purge failed. Check bot permissions.", show_alert=True)
 
 
 @router.message(OwnerStates.waiting_purge_range)
