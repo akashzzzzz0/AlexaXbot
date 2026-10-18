@@ -396,7 +396,7 @@ async def affiliate_premium_request(callback: CallbackQuery, db_session: AsyncSe
     db_session.add(req)
     await db_session.flush()
     await callback.message.answer(
-        f"✅ Your 3-month Telegram Premium request #{req.id} has been sent to the bot owner.\\n\\n"
+        f"✅ Your 3-month Telegram Premium request #{req.id} has been sent to the bot owner.\n\n"
         "Your 1000 referral-earned Stars are reserved while the request is pending. "
         "The owner must arrange the gift manually; Premium is not activated automatically."
     )
@@ -561,12 +561,12 @@ async def affiliate_payment_terms(message: Message):
 async def affiliate_terms_callback(callback: CallbackQuery, **kwargs):
     await callback.answer()
     text = (
-        "📄 <b>Telegram Premium — Referral Terms & Conditions</b>\\n\\n"
+        "📄 <b>Telegram Premium — Referral Terms & Conditions</b>\n\n"
         f"• A 3-month Telegram Premium request requires <b>{PREMIUM_3_MONTHS_STARS} eligible referral-earned Stars</b>. "
-        "This is not a Telegram wallet payment.\\n"
-        "• Share your personal referral link. A referral is valid when a unique, non-bot account starts ALEXA in a private chat.\\n"
-        "• Earn <b>50 Stars for every 100 valid referrals</b>; rewards accumulate. Under this rate, 2000 valid referrals earn 1000 Stars.\\n"
-        "• You may submit a request only when your available balance reaches 1000 Stars. If you have less, use Get More Stars to share your link.\\n"
+        "This is not a Telegram wallet payment.\n"
+        "• Share your personal referral link. A referral is valid when a unique, non-bot account starts ALEXA in a private chat.\n"
+        "• Earn <b>50 Stars for every 100 valid referrals</b>; rewards accumulate. Under this rate, 2000 valid referrals earn 1000 Stars.\n"
+        "• You may submit a request only when your available balance reaches 1000 Stars. If you have less, use Get More Stars to share your link.\n"
         "• The owner reviews requests and arranges the 3-month Premium gift manually. Requesting does not activate Premium automatically."
     )
     try:
