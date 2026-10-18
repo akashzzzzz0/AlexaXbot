@@ -1,5 +1,5 @@
 from aiogram import Router
-from bot.handlers import start, security, moderation, economy, games, duels, statistics, settings, help, owner, welcome, tournaments, alexa_games, group_tools
+from bot.handlers import start, security, moderation, economy, games, duels, statistics, settings, help, affiliate, owner, welcome, tournaments, alexa_games, group_tools
 from bot.handlers.auto_delete_middleware import StartMenuAutoDeleteMessageMiddleware, StartMenuAutoDeleteCallbackMiddleware
 
 
@@ -20,6 +20,7 @@ def get_main_router() -> Router:
     router.include_router(settings.router)
     router.include_router(help.router)
     router.include_router(tournaments.router)
+    router.include_router(affiliate.router)
     router.include_router(owner.router)
     router.include_router(alexa_games.router)
     router.include_router(group_tools.router)

@@ -575,6 +575,22 @@ class Referral(Base):
     referred = relationship("User", foreign_keys=[referred_id])
 
 
+class AffiliateRequest(Base):
+    """Owner-reviewed Stars withdrawal or Telegram Premium reward request."""
+    __tablename__ = "affiliate_requests"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    request_type = Column(String(16), nullable=False)  # stars or premium
+    requested_stars = Column(Integer, nullable=True)
+    status = Column(String(16), nullable=False, default="pending", index=True)
+    admin_reply = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    user = relationship("User")
+
+
 class GroupStats(Base):
     __tablename__ = "group_stats"
 
