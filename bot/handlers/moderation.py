@@ -35,8 +35,17 @@ async def get_target_user(message: Message, session: AsyncSession) -> tuple:
 
     # A real replied-to Telegram user is the most reliable target. Some messages
     # (anonymous admins/channel posts) have no from_user, so fall back to args.
-    replied = message.reply_to_message
+    replied = getattr(message, "reply_to_message", None)
     tg_user = getattr(replied, "from_user", None) if replied else None
+    logger.info(
+        "Moderation target resolution",
+        command=(text.split(None, 1)[0] if text else ""),
+        chat_id=getattr(getattr(message, "chat", None), "id", None),
+        message_id=getattr(message, "message_id", None),
+        has_reply=bool(replied),
+        reply_message_id=getattr(replied, "message_id", None) if replied else None,
+        reply_from_user_id=getattr(tg_user, "id", None) if tg_user else None,
+    )
     if tg_user is not None:
         # On reply commands, preserve every argument after the command (for
         # example, /mute 1h spam) so duration/reason parsing still works.
