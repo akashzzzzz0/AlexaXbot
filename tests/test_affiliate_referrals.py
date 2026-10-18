@@ -1,12 +1,26 @@
 """Referral reward rules and affiliate request schema regression tests."""
 import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from bot.database.models import AffiliateRequest, Base, Referral, User
-from bot.handlers.affiliate import MIN_WITHDRAWAL, _earned_stars, _tracked_count, _valid_count
+from bot.handlers.affiliate import (
+    MIN_WITHDRAWAL,
+    _earned_stars,
+    _tracked_count,
+    _valid_count,
+    owner_approve,
+    owner_mark_paid,
+    owner_referrals,
+    owner_reject,
+    owner_reply_start,
+    owner_request_queue,
+    owner_view_request,
+)
 
 
 class AffiliateRewardTierTests(unittest.IsolatedAsyncioTestCase):
@@ -66,6 +80,52 @@ class AffiliateRewardTierTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(session.get(AffiliateRequest, request.id))
         finally:
             engine.dispose()
+
+
+class AffiliateOwnerPermissionTests(unittest.IsolatedAsyncioTestCase):
+    def make_callback(self, data):
+        message = SimpleNamespace(
+            photo=None,
+            edit_text=AsyncMock(),
+            edit_caption=AsyncMock(),
+            answer=AsyncMock(),
+        )
+        return SimpleNamespace(
+            from_user=SimpleNamespace(id=987654321),
+            data=data,
+            message=message,
+            answer=AsyncMock(),
+            bot=SimpleNamespace(send_message=AsyncMock()),
+        )
+
+    async def assert_owner_only(self, handler, data, **extra):
+        callback = self.make_callback(data)
+        session = AsyncMock()
+        state = AsyncMock()
+        with patch("bot.handlers.affiliate._owner", return_value=False):
+            if handler is owner_reply_start:
+                await handler(callback, state=state, db_session=session)
+            else:
+                await handler(callback, db_session=session)
+        callback.answer.assert_awaited_once()
+        self.assertIn("Owner only", callback.answer.await_args.args[0])
+        session.get.assert_not_awaited()
+        callback.message.edit_text.assert_not_awaited()
+
+    async def test_non_owner_cannot_open_referral_board_or_request_queue(self):
+        await self.assert_owner_only(owner_referrals, "owner:referrals:page:0")
+        await self.assert_owner_only(owner_request_queue, "owner:affiliate:requests:page:0")
+
+    async def test_non_owner_cannot_view_or_approve_requests(self):
+        await self.assert_owner_only(owner_view_request, "owner:affiliate:view:1")
+        await self.assert_owner_only(owner_approve, "owner:affiliate:approve:1")
+
+    async def test_non_owner_cannot_reject_or_mark_paid(self):
+        await self.assert_owner_only(owner_reject, "owner:affiliate:reject:1")
+        await self.assert_owner_only(owner_mark_paid, "owner:affiliate:paid:1")
+
+    async def test_non_owner_cannot_start_private_reply_flow(self):
+        await self.assert_owner_only(owner_reply_start, "owner:affiliate:reply:1")
 
 
 if __name__ == "__main__":
