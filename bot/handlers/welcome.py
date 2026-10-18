@@ -1,5 +1,6 @@
 import asyncio
 from aiogram import Router, F
+from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.types import Message, ChatMemberUpdated, ChatPermissions, CallbackQuery
 from aiogram.filters import ChatMemberUpdatedFilter, JOIN_TRANSITION, LEAVE_TRANSITION
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +22,36 @@ import structlog
 
 logger = structlog.get_logger()
 router = Router()
+
+
+@router.message(
+    F.chat.type.in_({"group", "supergroup"}),
+    F.new_chat_members | F.left_chat_member,
+)
+async def suppress_service_messages_early(message: Message, db_session: AsyncSession, **kwargs):
+    """Delete Telegram join/leave/ban service messages before broad message handlers run."""
+    settings_row = await db_session.scalar(
+        select(GroupSettings).where(GroupSettings.group_id == message.chat.id)
+    )
+    if not (settings_row and settings_row.silent_service_messages):
+        # Let the normal welcome/goodbye and other handlers process this update.
+        raise SkipHandler
+    try:
+        await message.delete()
+        logger.info(
+            "Deleted group join/leave service message",
+            chat_id=message.chat.id,
+            message_id=message.message_id,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Could not delete group join/leave service message; check delete permission",
+            chat_id=message.chat.id,
+            message_id=message.message_id,
+            error=str(exc),
+        )
+
+
 
 async def _delete_after_20_seconds(bot, chat_id: int, message_id: int):
     """Remove temporary moderation notices after 20 seconds."""
