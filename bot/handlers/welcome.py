@@ -10,7 +10,8 @@ from bot.database.models import (
     SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig, CaptchaChallenge, GroupStats, User, GroupFilter, GroupBlocklist
 )
 from bot.services.security_service import (
-    check_message_violations, is_raid_detected, create_captcha_challenge, contains_link
+    check_message_violations, is_raid_detected, create_captcha_challenge,
+    contains_link, count_mentions, count_hashtags
 )
 from bot.services.moderation_service import mute_user, ban_user, kick_user, warn_user, log_action
 from bot.services.user_service import add_xp
@@ -587,28 +588,40 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
     # Do not return early when a regular user record is missing: content locks
     # must still be enforced for every incoming group message.
 
-    # Enforce sticker lock before any later handler path can skip moderation.
-    # Only group admins/creator and members explicitly approved for stickers
-    # are exempt; all other members' stickers are deleted while the lock is ON.
-    if message.from_user and message.sticker and group_security.lock_stickers:
-        sender_is_admin = False
-        try:
-            sender_member = await message.bot.get_chat_member(
-                message.chat.id, message.from_user.id
-            )
-            sender_status = str(
-                getattr(sender_member.status, "value", sender_member.status)
-            )
-            sender_is_admin = sender_status in ("administrator", "creator", "owner")
-        except Exception as exc:
-            logger.warning(
-                "Could not verify sticker sender role",
-                chat_id=message.chat.id,
-                user_id=message.from_user.id,
-                error=str(exc),
-            )
-            # Fail closed for sticker locks if role lookup fails.
-        if not sender_is_admin:
+    # Enforce each content lock independently before other moderation branches.
+    # This makes a single lock affect only its matching content type; Lock ALL
+    # simply enables every field in the same set. Slash commands were routed to
+    # their command handlers above and are intentionally not treated as locked text.
+    if message.from_user:
+        content = message.text or message.caption or ""
+        locked_reason = None
+        if group_security.lock_text and message.text and not message.caption:
+            locked_reason = "text"
+        elif group_security.lock_links and contains_link(content):
+            locked_reason = "links"
+        elif group_security.lock_photos and message.photo:
+            locked_reason = "photos"
+        elif group_security.lock_videos and (message.video or message.video_note):
+            locked_reason = "videos"
+        elif group_security.lock_gifs and message.animation:
+            locked_reason = "gifs"
+        elif group_security.lock_audio and message.audio:
+            locked_reason = "audio"
+        elif group_security.lock_voice and message.voice:
+            locked_reason = "voice"
+        elif group_security.lock_documents and message.document:
+            locked_reason = "documents"
+        elif group_security.lock_polls and message.poll:
+            locked_reason = "polls"
+        elif group_security.lock_games and (message.dice or message.game):
+            locked_reason = "games"
+        elif group_security.lock_forwards and message.forward_origin:
+            locked_reason = "forwards"
+        elif group_security.lock_contacts and message.contact:
+            locked_reason = "contacts"
+        elif group_security.lock_locations and (message.location or message.venue):
+            locked_reason = "locations"
+        elif group_security.lock_stickers and message.sticker:
             sticker_approval = await db_session.scalar(
                 select(GroupMember).where(
                     GroupMember.group_id == db_group.id,
@@ -616,21 +629,35 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                 )
             )
             if not (sticker_approval and sticker_approval.approved_sticker):
-                try:
-                    await message.delete()
-                    logger.info(
-                        "Sticker lock deleted unapproved sticker",
-                        chat_id=message.chat.id,
-                        user_id=message.from_user.id,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Could not delete unapproved sticker; check bot delete permission",
-                        chat_id=message.chat.id,
-                        user_id=message.from_user.id,
-                        error=str(exc),
-                    )
-                return
+                locked_reason = "stickers"
+        elif group_security.lock_inline and (
+            (message.reply_markup and message.reply_markup.inline_keyboard)
+            or message.via_bot
+        ):
+            locked_reason = "inline"
+        elif group_security.lock_mentions and count_mentions(content) > 0:
+            locked_reason = "mentions"
+        elif group_security.lock_hashtags and count_hashtags(content) > 0:
+            locked_reason = "hashtags"
+
+        if locked_reason:
+            try:
+                await message.delete()
+                logger.info(
+                    "Content lock deleted message",
+                    chat_id=message.chat.id,
+                    user_id=message.from_user.id,
+                    lock_type=locked_reason,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Content lock could not delete message; check bot Delete Messages permission",
+                    chat_id=message.chat.id,
+                    user_id=message.from_user.id,
+                    lock_type=locked_reason,
+                    error=str(exc),
+                )
+            return
 
     # When Bio Link Protection is enabled, also moderate links posted by existing
     # members: delete each link message, issue persistent warnings, and mute on 3.
