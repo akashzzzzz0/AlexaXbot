@@ -20,7 +20,7 @@ router = Router()
 
 _bio_link_settings_drafts = {}
 router.message.outer_middleware(AdminActionMiddleware(
-    commands={"ban", "unban", "kick", "mute", "unmute", "warn", "unwarn", "warns", "warnings", "history", "note", "del", "purg", "pin", "unpin", "ro", "setrole", "clearrole", "role", "resetwarns", "promote", "demote"}
+    commands={"ban", "unban", "kick", "mute", "unmute", "warn", "unwarn", "warns", "warnings", "history", "note", "del", "purg", "pin", "unpin", "ro", "setrole", "clearrole", "role", "resetwarn", "resetwarns", "promote", "demote"}
 ))
 router.callback_query.outer_middleware(AdminActionMiddleware(prefixes=("mod:", "mute_duration:", "ban_duration:", "warn_action:", "ban_confirm:")))
 
