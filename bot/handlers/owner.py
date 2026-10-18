@@ -39,13 +39,14 @@ def owner_kb(_=None) -> object:
     builder.button(text="🌐 Global Controls", callback_data="owner:global_controls")
     builder.button(text="📊 Statistics", callback_data="owner:stats")
     builder.button(text="👥 Groups • Activity • Links • Permissions", callback_data="owner:groups")
+    builder.button(text="🎁 Affiliate / Referral", callback_data="owner:referrals")
     builder.button(text="🔨 Ban All", callback_data="owner:banall")
     builder.button(text="⚙️ Settings", callback_data="owner:settings")
     builder.button(text="➕ Add Groups", callback_data="owner:addgroups")
     builder.button(text=f"{'🟢 Disable' if _maintenance_mode else '🔧 Enable'} Maintenance", callback_data="owner:maintenance")
     builder.button(text="👤 User List", callback_data="owner:users")
     builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
-    builder.adjust(2, 1, 2, 2, 2)
+    builder.adjust(2, 1, 2, 2, 2, 1)
     return builder.as_markup()
 
 
