@@ -10,7 +10,7 @@ from bot.middlewares.admin_actions import AdminActionMiddleware
 
 logger = structlog.get_logger()
 router = Router()
-router.message.outer_middleware(AdminActionMiddleware(commands={"security", "lock", "unlock", "locks", "locktypes", "setflood", "flood", "setfloodmode", "clearflood"}))
+router.message.outer_middleware(AdminActionMiddleware(commands={"security", "lock", "unlock", "locks", "locktypes", "setflood", "flood", "setfloodmode", "clearflood", "approve", "unapprove"}))
 router.callback_query.outer_middleware(AdminActionMiddleware(prefixes=("sec:", "lock:", "captcha:")))
 
 
@@ -286,6 +286,60 @@ async def toggle_captcha(callback: CallbackQuery, _: callable, db_session: Async
         await callback.answer(_('feature_coming'), show_alert=True)
 
     await callback.message.edit_reply_markup(reply_markup=captcha_menu_kb(_, security))
+
+
+@router.message(Command("approve", "unapprove"))
+async def cmd_sticker_approval(message: Message, db_session: AsyncSession = None, **kwargs):
+    """Approve or revoke a member's exemption from the sticker lock."""
+    if message.chat.type not in ("group", "supergroup"):
+        await message.reply("Use this command in a group.")
+        return
+    try:
+        admin = await message.bot.get_chat_member(message.chat.id, message.from_user.id)
+        if admin.status not in ("administrator", "creator"):
+            await message.reply("Only group admins can approve stickers.")
+            return
+    except Exception:
+        await message.reply("I couldn't verify your admin permissions.")
+        return
+    if db_session is None:
+        await message.reply("Database is unavailable. Please try again.")
+        return
+
+    target = message.reply_to_message.from_user if message.reply_to_message else None
+    if target is None:
+        parts = (message.text or "").split()
+        if len(parts) > 1 and parts[1].isdigit():
+            target_id = int(parts[1])
+            try:
+                target_chat_member = await message.bot.get_chat_member(message.chat.id, target_id)
+                target = target_chat_member.user
+            except Exception:
+                target = None
+    if target is None or target.is_bot:
+        await message.reply("Reply to a member's message with /approve or /unapprove, or provide a numeric user ID.")
+        return
+
+    member = await db_session.scalar(
+        select(GroupMember).where(
+            GroupMember.group_id == message.chat.id,
+            GroupMember.user_id == target.id,
+        )
+    )
+    if member is None:
+        member = GroupMember(group_id=message.chat.id, user_id=target.id)
+        db_session.add(member)
+    approved = (message.text or "").split()[0].split("@", 1)[0].lstrip("/").lower() == "approve"
+    member.approved_sticker = approved
+    try:
+        await db_session.commit()
+    except Exception as exc:
+        await db_session.rollback()
+        logger.exception("Failed to save sticker approval", group_id=message.chat.id, user_id=target.id, error=str(exc))
+        await message.reply("Couldn't save sticker approval. Please check the bot logs.")
+        return
+    status = "approved to send stickers" if approved else "no longer approved to send stickers"
+    await message.reply(f"✅ {target.full_name} is {status} while Sticker Lock is enabled.")
 
 
 # /lock and /unlock: support all content types and persist settings.
