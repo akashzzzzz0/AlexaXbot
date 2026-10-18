@@ -28,13 +28,16 @@ from bot.handlers.affiliate import (
 
 
 class AffiliateRewardTierTests(unittest.IsolatedAsyncioTestCase):
-    def test_reward_milestones_are_total_not_cumulative(self):
+    def test_reward_milestones_accumulate_without_a_lifetime_cap(self):
         self.assertEqual(_earned_stars(0), 0)
         self.assertEqual(_earned_stars(99), 0)
         self.assertEqual(_earned_stars(100), 50)
         self.assertEqual(_earned_stars(199), 50)
         self.assertEqual(_earned_stars(200), 100)
-        self.assertEqual(_earned_stars(500), 100)
+        self.assertEqual(_earned_stars(500), 250)
+        self.assertEqual(_earned_stars(1999), 950)
+        self.assertEqual(_earned_stars(2000), 1000)
+        self.assertEqual(_earned_stars(2500), 1250)
 
     async def test_valid_referrals_exclude_accounts_that_have_not_started_dm_and_bots(self):
         engine = create_async_engine("sqlite+aiosqlite:///:memory:")
