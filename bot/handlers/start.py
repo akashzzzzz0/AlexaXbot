@@ -46,9 +46,10 @@ def _detect_lang(tg_lang):
 async def _send_add_group_prompt(message: Message):
     me = await message.bot.get_me()
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Add ALEXA to Group", url=f"https://t.me/{me.username}?startgroup=true")],
+        [InlineKeyboardButton(text="➕ Add me to your Group", url=f"https://t.me/{me.username}?startgroup=true")],
         [
             InlineKeyboardButton(text="🔔 Updates", url="https://t.me/alexa_bot_updats"),
+            InlineKeyboardButton(text="❓ Help", callback_data="start:help"),
             InlineKeyboardButton(text="💬 Discussion", url="https://t.me/alexa_Bot_discussion"),
         ],
         [
@@ -57,14 +58,13 @@ async def _send_add_group_prompt(message: Message):
         ],
     ])
     caption = (
-        "✨ <b>WELCOME TO ALEXA!</b> ✨\n\n"
-        "🛡️ Your group’s moderation and protection assistant.\n"
-        "🎮 Games • 💰 Economy • ⚙️ Group tools\n\n"
-        "🚀 <b>QUICK START</b>\n"
-        "• Add ALEXA to your group\n"
-        "• Promote ALEXA to administrator and grant required permissions\n"
-        "• Tap Start to explore the menu\n\n"
-        "💫 Let’s make your group safer and more fun!"
+        "✨ <b>Welcome to ALEXA!</b> ✨\\n\\n"
+        "Your all-in-one Telegram group assistant.\\n"
+        "🛡️ Moderation & protection • 🎮 Games • 💰 Economy\\n\\n"
+        "<b>Quick Start</b>\\n"
+        "• Add ALEXA to your group and grant the required admin permissions\\n"
+        "• Use /help to see available commands\\n\\n"
+        "Ready to make your group safer and more fun? Let's go!"
     )
     try:
         photos = await message.bot.get_user_profile_photos(me.id, limit=1)
@@ -75,7 +75,6 @@ async def _send_add_group_prompt(message: Message):
     except Exception as exc:
         logger.warning("Could not load ALEXA profile photo for /start", error=str(exc))
     await message.answer(caption, reply_markup=kb, parse_mode="HTML")
-
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, _: callable, db_session: AsyncSession = None, db_user=None, **kwargs):
@@ -124,6 +123,29 @@ async def cmd_start(message: Message, _: callable, db_session: AsyncSession = No
         _get_commands("en", name),
         reply_markup=main_menu_kb(_, is_owner=(message.from_user.id == settings.effective_owner_id)),
     )
+
+
+@router.callback_query(F.data == "start:help")
+async def start_help(callback: CallbackQuery, **kwargs):
+    name = callback.from_user.first_name or "User"
+    try:
+        if callback.message.photo:
+            await callback.message.delete()
+            await callback.bot.send_message(
+                callback.message.chat.id,
+                _get_commands("en", name),
+                reply_markup=main_menu_kb(None, is_owner=(callback.from_user.id == settings.effective_owner_id)),
+            )
+        else:
+            await callback.message.edit_text(
+                _get_commands("en", name),
+                reply_markup=main_menu_kb(None, is_owner=(callback.from_user.id == settings.effective_owner_id)),
+            )
+    except Exception as exc:
+        logger.warning("Could not open ALEXA help menu", error=str(exc))
+        await callback.answer("Please use /help to see commands.", show_alert=True)
+        return
+    await callback.answer()
 
 
 @router.callback_query(F.data == "start:open")
