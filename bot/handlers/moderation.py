@@ -26,36 +26,53 @@ router.callback_query.outer_middleware(AdminActionMiddleware(prefixes=("mod:", "
 
 
 async def get_target_user(message: Message, session: AsyncSession) -> tuple:
+    """Resolve moderation targets consistently from replies, numeric IDs, or known usernames."""
     target = None
-    reason = ""
-    if message.reply_to_message:
-        tg_user = message.reply_to_message.from_user
+    text = message.text or ""
+    parts = text.split(None, 2)
+    identifier = parts[1].strip() if len(parts) > 1 else ""
+    reason = parts[2] if len(parts) > 2 else ""
+
+    # A real replied-to Telegram user is the most reliable target. Some messages
+    # (anonymous admins/channel posts) have no from_user, so fall back to args.
+    replied = message.reply_to_message
+    tg_user = getattr(replied, "from_user", None) if replied else None
+    if tg_user is not None:
         target = await session.get(User, tg_user.id)
-        if not target:
+        if target is None:
             target = User(
-                id=tg_user.id, telegram_id=tg_user.id, first_name=tg_user.first_name or "User",
-                last_name=tg_user.last_name, username=tg_user.username, is_bot=tg_user.is_bot,
+                id=tg_user.id, telegram_id=tg_user.id,
+                first_name=tg_user.first_name or "User",
+                last_name=tg_user.last_name, username=tg_user.username,
+                is_bot=tg_user.is_bot,
             )
             session.add(target)
             await session.flush()
-        args = message.text.split(None, 1)[1] if len(message.text.split()) > 1 else ""
-        reason = args
-    elif len(message.text.split()) > 1:
-        parts = message.text.split(None, 2)
-        identifier = parts[1]
-        reason = parts[2] if len(parts) > 2 else ""
-        if identifier.startswith("@"):
-            target = await session.scalar(select(User).where(func.lower(User.username) == identifier[1:].lower()))
+        return target, reason
+
+    if not identifier:
+        return None, reason
+    if identifier.startswith("@"):
+        username = identifier[1:].lstrip("@").lower()
+        if username:
+            target = await session.scalar(
+                select(User).where(func.lower(User.username) == username)
+            )
+    else:
+        try:
+            uid = int(identifier)
+        except ValueError:
+            username = identifier.lstrip("@").lower()
+            target = await session.scalar(
+                select(User).where(func.lower(User.username) == username)
+            )
         else:
-            try:
-                uid = int(identifier)
+            if uid > 0:
                 target = await session.get(User, uid)
-                if target is None and uid > 0:
+                if target is None:
                     target = User(id=uid, telegram_id=uid, first_name=f"User {uid}", is_bot=False)
                     session.add(target)
                     await session.flush()
-            except ValueError:
-                target = await session.scalar(select(User).where(func.lower(User.username) == identifier.lower()))
     return target, reason
 
 
