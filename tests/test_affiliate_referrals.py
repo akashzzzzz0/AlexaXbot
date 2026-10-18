@@ -9,7 +9,7 @@ from bot.database.models import AffiliateRequest, Base, Referral, User
 from bot.handlers.affiliate import MIN_WITHDRAWAL, _earned_stars, _tracked_count, _valid_count
 
 
-class AffiliateRewardTierTests(unittest.TestCase):
+class AffiliateRewardTierTests(unittest.IsolatedAsyncioTestCase):
     def test_reward_milestones_are_total_not_cumulative(self):
         self.assertEqual(_earned_stars(0), 0)
         self.assertEqual(_earned_stars(99), 0)
