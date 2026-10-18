@@ -86,15 +86,33 @@ async def cmd_start(message: Message, _: callable, db_session: AsyncSession = No
     args = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else ""
     if db_user:
         db_user.dm_started = True
-    # Track referrals before the group onboarding prompt so DM-only users can participate.
+    # Track a referral only when the inviter is a known, non-bot user.
+    # The database middleware has already created the new user and marked this DM start.
     if args.startswith("ref_") and db_session and db_user:
         try:
-            referrer_id = int(args[4:])
+            raw_referrer_id = args[4:]
+            referrer_id = int(raw_referrer_id)
             if referrer_id != db_user.id:
-                from bot.services.economy_service import process_referral
-                await process_referral(db_session, referrer_id=referrer_id, new_user_id=db_user.id)
+                from bot.database.models import User
+                referrer = await db_session.get(User, referrer_id)
+                if referrer and not referrer.is_bot and referrer.dm_started:
+                    from bot.services.economy_service import process_referral
+                    await process_referral(
+                        db_session,
+                        referrer_id=referrer_id,
+                        new_user_id=db_user.id,
+                    )
+                else:
+                    logger.info(
+                        "Referral ignored: inviter not found or has not started DM",
+                        referrer_id=referrer_id,
+                    )
+        except (TypeError, ValueError):
+            logger.info("Referral ignored: invalid start payload")
         except Exception as exc:
+            # Do not swallow a failed SQL transaction; let middleware roll it back.
             logger.warning("Could not process referral start payload", error=str(exc))
+            raise
     if db_user and not db_user.has_added_bot_to_group:
         await _send_add_group_prompt(message)
         return
