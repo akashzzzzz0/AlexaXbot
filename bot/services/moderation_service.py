@@ -178,14 +178,13 @@ async def unmute_user(
     admin_id: int,
 ) -> bool:
     try:
-        # Restore the group's own default permissions, rather than granting
-        # permissions that the group has intentionally disabled.
-        chat = await bot.get_chat(group_id)
-        permissions = chat.permissions or FULL_PERMISSIONS
+        # Explicitly restore the standard send permissions after a mute.
+        # Using the group's default ChatPermissions here can leave some fields
+        # unset/false and accidentally keep the member restricted.
         await bot.restrict_chat_member(
             chat_id=group_id,
             user_id=user_id,
-            permissions=permissions,
+            permissions=FULL_PERMISSIONS,
         )
         member = await session.scalar(
             select(GroupMember).where(
