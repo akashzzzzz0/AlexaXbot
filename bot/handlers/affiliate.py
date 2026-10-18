@@ -107,8 +107,9 @@ async def _referral_link_users(session: AsyncSession, offset: int = 0, limit: in
 
 
 def _earned_stars(valid_count: int) -> int:
-    # 200 referrals means 100 Stars total, not an additional 100.
-    return 100 if valid_count >= 200 else 50 if valid_count >= 100 else 0
+    # Keep the existing rate and make milestones cumulative: every 100 valid
+    # referrals earns another 50 Stars, with no artificial lifetime cap.
+    return max(0, valid_count // 100) * 50
 
 
 async def _stars_balance(session: AsyncSession, user_id: int, valid_count: int) -> int:
@@ -116,8 +117,8 @@ async def _stars_balance(session: AsyncSession, user_id: int, valid_count: int) 
     reserved = await session.scalar(
         select(func.coalesce(func.sum(AffiliateRequest.requested_stars), 0)).where(
             AffiliateRequest.user_id == user_id,
-            AffiliateRequest.request_type == "stars",
-            AffiliateRequest.status.in_(("approved", "paid")),
+            AffiliateRequest.request_type.in_(("stars", "premium")),
+            AffiliateRequest.status.in_(("pending", "approved", "paid")),
         )
     )
     return max(0, earned - int(reserved or 0))
@@ -296,14 +297,24 @@ async def affiliate_stars(callback: CallbackQuery, db_session: AsyncSession, db_
     await callback.answer("Request submitted.")
 
 
-def _premium_terms_kb():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text=f"✅ Agree & Pay {PREMIUM_3_MONTHS_STARS} Stars",
-            callback_data="affiliate:premium:pay",
-        )],
-        [InlineKeyboardButton(text="◀️ Back to Referral Program", callback_data="affiliate:open")],
-    ])
+def _premium_terms_kb(link: str, balance: int):
+    rows = []
+    if balance < PREMIUM_3_MONTHS_STARS:
+        rows.extend([
+            [InlineKeyboardButton(
+                text="⭐ Get More Stars · Share Invite Link",
+                url="https://t.me/share/url?url=" + quote(link),
+            )],
+            [InlineKeyboardButton(text="🔗 My Personal Referral Link", callback_data="affiliate:link")],
+        ])
+    else:
+        rows.append([InlineKeyboardButton(
+            text="🎁 Request Premium",
+            callback_data="affiliate:premium:request",
+        )])
+    rows.append([InlineKeyboardButton(text="📄 Terms & Conditions", callback_data="affiliate:terms")])
+    rows.append([InlineKeyboardButton(text="◀️ Back to Referral Program", callback_data="affiliate:open")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 @router.callback_query(F.data == "affiliate:premium")
@@ -322,19 +333,75 @@ async def affiliate_premium(callback: CallbackQuery, db_session: AsyncSession, d
     if pending:
         await callback.answer("You already have an open Premium request.", show_alert=True)
         return
-    await _edit(
-        callback,
+    valid = await _valid_count(db_session, db_user.id)
+    balance = await _stars_balance(db_session, db_user.id, valid)
+    me = await callback.bot.get_me()
+    if not me.username:
+        await callback.answer("Referral link unavailable. Please try again later.", show_alert=True)
+        return
+    link = f"https://t.me/{me.username}?start=ref_{db_user.id}"
+    remaining = max(0, PREMIUM_3_MONTHS_STARS - balance)
+    text = (
         "👑 <b>Telegram Premium — 3 Months</b>\n\n"
-        f"⭐ Required payment: <b>{PREMIUM_3_MONTHS_STARS} Telegram Stars</b>\n\n"
-        "After Telegram confirms payment, ALEXA will send a request to the bot owner. "
-        "The owner must arrange the Premium gift manually; paying does not activate "
-        "Premium automatically. If the owner cannot fulfill the request, contact the "
-        "owner to arrange a resolution.\n\n"
-        "By tapping “Agree & Pay”, you confirm that you understand these conditions. "
-        "Full terms: /terms",
-        _premium_terms_kb(),
+        f"⭐ Required referral-earned balance: <b>{PREMIUM_3_MONTHS_STARS} Stars</b>\n"
+        f"⭐ Your eligible balance: <b>{balance} Stars</b>\n"
+        f"📈 Stars still needed: <b>{remaining}</b>\n\n"
+        "Earn <b>50 Stars for every 100 valid referrals</b>. Share your personal "
+        "referral link below. A referral counts when a unique non-bot account starts "
+        "ALEXA in a private chat.\n\n"
+        f"🔗 <b>Your personal referral link</b>\n<code>{escape(link)}</code>\n\n"
+        + (
+            "Once your eligible balance reaches 1000 Stars, you can submit a Premium request. "
+            "Submitting a request does not activate Premium automatically; the owner reviews "
+            "it and arranges the 3-month gift manually. Full terms: /terms"
+        )
     )
+    await _edit(callback, text, _premium_terms_kb(link, balance))
     await callback.answer()
+
+
+@router.callback_query(F.data == "affiliate:premium:request")
+async def affiliate_premium_request(callback: CallbackQuery, db_session: AsyncSession, db_user=None, **kwargs):
+    if not db_user:
+        await callback.answer("Please send /start first.", show_alert=True)
+        return
+    if not callback.message or callback.message.chat.type != "private":
+        await callback.answer("Open ALEXA in a private chat to request Premium.", show_alert=True)
+        return
+
+    pending = await db_session.scalar(select(AffiliateRequest.id).where(
+        AffiliateRequest.user_id == db_user.id,
+        AffiliateRequest.request_type == "premium",
+        AffiliateRequest.status.in_(("pending", "approved")),
+    ))
+    if pending:
+        await callback.answer("You already have an open Premium request.", show_alert=True)
+        return
+
+    valid = await _valid_count(db_session, db_user.id)
+    balance = await _stars_balance(db_session, db_user.id, valid)
+    if balance < PREMIUM_3_MONTHS_STARS:
+        await callback.answer(
+            f"You have {balance} Stars. You need {PREMIUM_3_MONTHS_STARS - balance} more from referrals.",
+            show_alert=True,
+        )
+        return
+
+    req = AffiliateRequest(
+        user_id=db_user.id,
+        request_type="premium",
+        requested_stars=PREMIUM_3_MONTHS_STARS,
+        status="pending",
+    )
+    db_session.add(req)
+    await db_session.flush()
+    await callback.message.answer(
+        f"✅ Your 3-month Telegram Premium request #{req.id} has been sent to the bot owner.\n\n"
+        "Your 1000 referral-earned Stars are reserved while the request is pending. "
+        "The owner must arrange the gift manually; Premium is not activated automatically."
+    )
+    await _notify_owner(callback, db_session, req)
+    await callback.answer("Premium request submitted.")
 
 
 @router.callback_query(F.data == "affiliate:premium:pay")
@@ -478,14 +545,40 @@ async def premium_successful_payment(message: Message, db_session: AsyncSession,
 @router.message(F.text == "/terms")
 async def affiliate_payment_terms(message: Message):
     await message.answer(
-        "📄 <b>Telegram Premium Gift Request Terms</b>\n\n"
-        f"• Price: {PREMIUM_3_MONTHS_STARS} Telegram Stars for a 3-month Premium gift request.\n"
-        "• A request is created only after Telegram confirms successful payment.\n"
-        "• Payment submits a request; Premium is not activated automatically. The bot owner must review the request and arrange the gift manually.\n"
-        "• If the owner cannot fulfill the request, contact the owner to arrange a resolution. Keep your Telegram payment receipt.\n"
-        "• By paying, you confirm that you understand these conditions."
+        "📄 <b>Telegram Premium — Referral Terms & Conditions</b>\n\n"
+        f"• A 3-month Telegram Premium request requires <b>{PREMIUM_3_MONTHS_STARS} eligible referral-earned Stars</b>. "
+        "Stars are earned through ALEXA's referral program; this is not a Telegram wallet payment.\n"
+        "• Share your personal referral link with people. A referral is valid when a unique, non-bot account starts ALEXA in a private chat.\n"
+        "• You earn <b>50 Stars for every 100 valid referrals</b>. Rewards accumulate; reaching 1000 Stars requires 2000 valid referrals under this reward rate.\n"
+        "• Open <b>Get Telegram Premium</b> to see your current eligible balance, remaining Stars, and personal referral link. If you have fewer than 1000 Stars, use <b>Get More Stars</b> to share your link.\n"
+        "• You can submit a Premium request only after your available balance reaches 1000 Stars. The request is reviewed by the bot owner.\n"
+        "• A request does not activate Premium automatically; the owner must arrange the 3-month gift manually. Contact the owner if the request cannot be fulfilled.\n"
+        "• By requesting Premium, you confirm that you understand these conditions."
     )
 
+
+@router.callback_query(F.data == "affiliate:terms")
+async def affiliate_terms_callback(callback: CallbackQuery, **kwargs):
+    await callback.answer()
+    text = (
+        "📄 <b>Telegram Premium — Referral Terms & Conditions</b>\n\n"
+        f"• A 3-month Telegram Premium request requires <b>{PREMIUM_3_MONTHS_STARS} eligible referral-earned Stars</b>. "
+        "This is not a Telegram wallet payment.\n"
+        "• Share your personal referral link. A referral is valid when a unique, non-bot account starts ALEXA in a private chat.\n"
+        "• Earn <b>50 Stars for every 100 valid referrals</b>; rewards accumulate. Under this rate, 2000 valid referrals earn 1000 Stars.\n"
+        "• You may submit a request only when your available balance reaches 1000 Stars. If you have less, use Get More Stars to share your link.\n"
+        "• The owner reviews requests and arranges the 3-month Premium gift manually. Requesting does not activate Premium automatically."
+    )
+    try:
+        await _edit(callback, text, InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Back to Premium", callback_data="affiliate:premium")],
+            [InlineKeyboardButton(text="◀️ Referral Program", callback_data="affiliate:open")],
+        ]))
+    except Exception:
+        if callback.message:
+            await callback.message.answer(text, parse_mode="HTML")
+    
+    
 
 @router.callback_query(F.data == "affiliate:requests")
 async def affiliate_requests(callback: CallbackQuery, db_session: AsyncSession, db_user=None, **kwargs):
