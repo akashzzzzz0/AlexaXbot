@@ -25,6 +25,7 @@ class OwnerStates(StatesGroup):
     waiting_broadcast = State()
     waiting_group_promotion = State()
     waiting_unban_user_id = State()
+    waiting_unmute_user_id = State()
     waiting_purge_range = State()
 
 
@@ -109,6 +110,7 @@ def _group_detail_kb(group_id: int):
     builder.button(text="🔕 Join/Leave/Ban Messages: Toggle", callback_data=f"owner:silent_service:{group_id}")
     builder.button(text="🔓 Unban Member", callback_data=f"owner:banlist:{group_id}")
     builder.button(text="🆔 Unban by User ID", callback_data=f"owner:unbanid:{group_id}")
+    builder.button(text="🔇 Unmute by User ID", callback_data=f"owner:unmuteid:{group_id}")
     builder.button(text="🔨 Ban All", callback_data=f"owner:banall:{group_id}")
     builder.button(text="🔄 Refresh", callback_data=f"owner:group:{group_id}")
     builder.button(text="◀️ Groups", callback_data="owner:groups")
@@ -746,6 +748,124 @@ async def owner_unban_user_id_input(message: Message, state: FSMContext, db_sess
         await db_session.rollback()
         logger.warning("owner_unban_by_id_failed", group_id=group_id, user_id=user_id, error=str(exc))
         await message.answer("Unban failed. Check the group permissions and user ID.")
+    finally:
+        await state.clear()
+
+
+@router.callback_query(F.data.startswith("owner:unmuteid:"))
+async def owner_unmute_by_id_start(callback: CallbackQuery, state: FSMContext, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Not available.", show_alert=True)
+        return
+    try:
+        group_id = int(callback.data.rsplit(":", 1)[1])
+    except ValueError:
+        await callback.answer("Invalid group.", show_alert=True)
+        return
+    group = await db_session.get(Group, group_id)
+    if not group or not group.is_active:
+        await callback.answer("Group is not active/registered.", show_alert=True)
+        return
+    try:
+        me = await callback.bot.get_chat_member(group_id, callback.bot.id)
+        status = str(getattr(me.status, "value", me.status))
+        if status not in {"administrator", "creator"} or (
+            status == "administrator" and not getattr(me, "can_restrict_members", False)
+        ):
+            await callback.answer("ALEXA needs admin + Restrict Members permission.", show_alert=True)
+            return
+    except Exception:
+        await callback.answer("Could not verify ALEXA's permissions.", show_alert=True)
+        return
+
+    await state.set_state(OwnerStates.waiting_unmute_user_id)
+    await state.update_data(unmute_group_id=group_id)
+    await callback.message.answer(
+        f"🔇 <b>Unmute Member — {escape(group.title)}</b>\\n\\n"
+        "Send the member's numeric Telegram User ID. Username alone cannot be used for this action.\\n"
+        "Send /cancel to cancel.",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(OwnerStates.waiting_unmute_user_id)
+async def owner_unmute_user_id_input(message: Message, state: FSMContext, db_session: AsyncSession, **kwargs):
+    if not message.from_user or not is_owner(message.from_user.id) or message.chat.type != "private":
+        await state.clear()
+        return
+    value = (message.text or "").strip()
+    if value.lower() == "/cancel":
+        await state.clear()
+        await message.answer("Unmute cancelled.")
+        return
+    try:
+        user_id = int(value)
+        if user_id <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("Please send a valid numeric Telegram User ID, or /cancel.")
+        return
+
+    data = await state.get_data()
+    try:
+        group_id = int(data["unmute_group_id"])
+    except (KeyError, TypeError, ValueError):
+        await state.clear()
+        await message.answer("Group selection expired. Open Owner Panel again.")
+        return
+    group = await db_session.get(Group, group_id)
+    if not group or not group.is_active:
+        await state.clear()
+        await message.answer("Group is not active/registered.")
+        return
+
+    try:
+        me = await message.bot.get_chat_member(group_id, message.bot.id)
+        status = str(getattr(me.status, "value", me.status))
+        if status not in {"administrator", "creator"} or (
+            status == "administrator" and not getattr(me, "can_restrict_members", False)
+        ):
+            await state.clear()
+            await message.answer("ALEXA needs admin + Restrict Members permission in that group.")
+            return
+
+        # Reuse the same explicit send permissions as the regular /unmute command.
+        from bot.services.moderation_service import FULL_PERMISSIONS
+        await message.bot.restrict_chat_member(
+            chat_id=group_id,
+            user_id=user_id,
+            permissions=FULL_PERMISSIONS,
+        )
+        record = await db_session.scalar(
+            select(GroupMember)
+            .join(User, GroupMember.user_id == User.id)
+            .where(
+                GroupMember.group_id == group_id,
+                (User.telegram_id == user_id) | (User.id == user_id),
+            )
+        )
+        if record:
+            record.is_muted = False
+            record.mute_until = None
+        await db_session.commit()
+        await message.answer(
+            f"✅ User <code>{user_id}</code> unmuted in <b>{escape(group.title)}</b>.",
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as exc:
+        await db_session.rollback()
+        await message.answer(
+            f"Telegram could not unmute this ID: {escape(str(exc)[:250])}",
+            parse_mode="HTML",
+        )
+    except TelegramForbiddenError:
+        await db_session.rollback()
+        await message.answer("Unmute failed: ALEXA does not have Restrict Members permission.")
+    except Exception as exc:
+        await db_session.rollback()
+        logger.warning("owner_unmute_by_id_failed", group_id=group_id, user_id=user_id, error=str(exc))
+        await message.answer("Unmute failed. Check the group permissions and user ID.")
     finally:
         await state.clear()
 
