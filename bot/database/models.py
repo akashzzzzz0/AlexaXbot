@@ -117,6 +117,7 @@ class GroupSettings(Base):
     xp_enabled = Column(Boolean, default=True)
     reputation_enabled = Column(Boolean, default=True)
     silent_actions = Column(Boolean, default=False)
+    silent_service_messages = Column(Boolean, default=False, nullable=False)
     auto_delete_seconds = Column(Integer, default=0, nullable=False)
     max_warns = Column(Integer, default=3)
     warn_action = Column(String(16), default="mute")
