@@ -226,6 +226,16 @@ async def affiliate_stars(callback: CallbackQuery, db_session: AsyncSession, db_
     await callback.answer("Request submitted.")
 
 
+def _premium_terms_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=f"✅ Agree & Pay {PREMIUM_3_MONTHS_STARS} Stars",
+            callback_data="affiliate:premium:pay",
+        )],
+        [InlineKeyboardButton(text="◀️ Back to Referral Program", callback_data="affiliate:open")],
+    ])
+
+
 @router.callback_query(F.data == "affiliate:premium")
 async def affiliate_premium(callback: CallbackQuery, db_session: AsyncSession, db_user=None, **kwargs):
     if not db_user:
@@ -242,9 +252,46 @@ async def affiliate_premium(callback: CallbackQuery, db_session: AsyncSession, d
     if pending:
         await callback.answer("You already have an open Premium request.", show_alert=True)
         return
+    await _edit(
+        callback,
+        "👑 <b>Telegram Premium — 3 Months</b>\n\n"
+        f"⭐ Required payment: <b>{PREMIUM_3_MONTHS_STARS} Telegram Stars</b>\n\n"
+        "After Telegram confirms payment, ALEXA will send a request to the bot owner. "
+        "The owner must arrange the Premium gift manually; paying does not activate "
+        "Premium automatically. If the owner cannot fulfill the request, contact the "
+        "owner to arrange a resolution.\n\n"
+        "By tapping “Agree & Pay”, you confirm that you understand these conditions. "
+        "Full terms: /terms",
+        _premium_terms_kb(),
+    )
+    await callback.answer()
 
-    # The invoice payload is persisted before sending the invoice so that both
-    # pre-checkout and successful-payment updates can be validated against it.
+
+@router.callback_query(F.data == "affiliate:premium:pay")
+async def affiliate_premium_pay(callback: CallbackQuery, db_session: AsyncSession, db_user=None, **kwargs):
+    if not db_user:
+        await callback.answer("Please send /start first.", show_alert=True)
+        return
+    if callback.message.chat.type != "private":
+        await callback.answer("Open ALEXA in a private chat to pay.", show_alert=True)
+        return
+    pending_request = await db_session.scalar(select(AffiliateRequest.id).where(
+        AffiliateRequest.user_id == db_user.id,
+        AffiliateRequest.request_type == "premium",
+        AffiliateRequest.status.in_(("pending", "approved")),
+    ))
+    if pending_request:
+        await callback.answer("You already have an open Premium request.", show_alert=True)
+        return
+    pending_invoice = await db_session.scalar(select(AffiliatePayment.id).where(
+        AffiliatePayment.user_id == db_user.id,
+        AffiliatePayment.status == "pending",
+    ))
+    if pending_invoice:
+        await callback.answer("You already have a pending Stars invoice. Complete it first or contact the owner if it expired.", show_alert=True)
+        return
+
+    # Persist a unique invoice payload before sending the invoice.
     payload = f"premium3:{db_user.id}:{uuid4().hex}"
     order = AffiliatePayment(
         user_id=db_user.id,
@@ -286,9 +333,15 @@ async def premium_pre_checkout(query: PreCheckoutQuery, db_session: AsyncSession
     order = await db_session.scalar(select(AffiliatePayment).where(
         AffiliatePayment.invoice_payload == query.invoice_payload
     ))
+    open_request = await db_session.scalar(select(AffiliateRequest.id).where(
+        AffiliateRequest.user_id == query.from_user.id,
+        AffiliateRequest.request_type == "premium",
+        AffiliateRequest.status.in_(("pending", "approved")),
+    ))
     valid = bool(
         order
         and order.status == "pending"
+        and not open_request
         and order.user_id == query.from_user.id
         and query.currency == "XTR"
         and query.total_amount == order.amount == PREMIUM_3_MONTHS_STARS
