@@ -17,7 +17,7 @@ from bot.config import settings
 from bot.database.models import User, Referral, AffiliateRequest, AffiliatePayment
 
 router = Router()
-MIN_WITHDRAWAL = 100
+MIN_WITHDRAWAL = 150
 PREMIUM_3_MONTHS_STARS = 1000
 USER_PAGE_SIZE = 10
 REFERRAL_PAGE_SIZE = 10
