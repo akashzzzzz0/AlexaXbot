@@ -154,13 +154,15 @@ class DatabaseMiddleware(BaseMiddleware):
                                 except Exception: pass
                             return None
                     except Exception as emergency_error:
-                        logger.warning("Emergency lockdown check failed", error=str(emergency_error))
-                        if event.callback_query:
-                            await event.callback_query.answer("Emergency lockdown is enabled.", show_alert=True)
-                        elif event.message:
-                            try: await event.message.delete()
-                            except Exception: pass
-                        return None
+                        # Do not silently swallow every group update when Telegram's
+                        # membership lookup fails. Log the failure and let normal
+                        # command handlers run; the next update will retry the check.
+                        logger.error(
+                            "Emergency lockdown membership check failed; allowing update to continue",
+                            chat_id=chat.id,
+                            user_id=user.id,
+                            error=str(emergency_error),
+                        )
 
                 # Enforce disabled commands before routers can execute their handlers.
                 if isinstance(event, Update) and event.message and event.message.text and chat and chat.type in ("group", "supergroup"):
