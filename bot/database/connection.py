@@ -108,6 +108,7 @@ async def create_tables() -> None:
         if conn.dialect.name == "postgresql":
             statements = [
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS dm_started BOOLEAN NOT NULL DEFAULT FALSE",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_link_requested BOOLEAN NOT NULL DEFAULT FALSE",
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS has_added_bot_to_group BOOLEAN NOT NULL DEFAULT FALSE",
                 "ALTER TABLE groups ADD COLUMN IF NOT EXISTS invite_link VARCHAR(512)",
                 "ALTER TABLE group_settings ADD COLUMN IF NOT EXISTS auto_delete_seconds INTEGER NOT NULL DEFAULT 0",
@@ -122,6 +123,7 @@ async def create_tables() -> None:
         elif conn.dialect.name == "sqlite":
             for table, column, definition in [
                 ("users", "dm_started", "BOOLEAN NOT NULL DEFAULT 0"),
+                ("users", "referral_link_requested", "BOOLEAN NOT NULL DEFAULT 0"),
                 ("users", "has_added_bot_to_group", "BOOLEAN NOT NULL DEFAULT 0"),
                 ("groups", "invite_link", "VARCHAR(512)"),
                 ("group_settings", "auto_delete_seconds", "INTEGER NOT NULL DEFAULT 0"),
