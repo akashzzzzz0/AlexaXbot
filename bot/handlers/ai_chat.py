@@ -4,6 +4,7 @@ ALEXA stays silent on missing keys, API errors, or network failures.
 """
 import html
 import re
+import time
 from collections import defaultdict, deque
 
 import httpx
@@ -15,6 +16,10 @@ from bot.config import get_gemini_api_key, settings
 
 router = Router(name="alexa_ai_chat")
 _conversations = defaultdict(lambda: deque(maxlen=12))
+# A user who addresses Alexa keeps a short, per-chat conversation window.
+# This lets follow-up messages work without repeatedly tagging/replying to her.
+_active_until = {}
+_SESSION_SECONDS = 10 * 60
 _bot_username = None
 
 _GREETING_RE = re.compile(
@@ -31,10 +36,13 @@ async def is_alexa_trigger(message: Message) -> bool:
     if not text or not message.from_user or message.from_user.is_bot:
         return False
 
+    # Keep slash commands available to their existing feature handlers in every chat.
+    if text.startswith("/"):
+        return False
+
     # In private chat, every ordinary text message starts/continues Alexa chat.
-    # Keep slash commands available to their existing feature handlers.
     if message.chat.type == ChatType.PRIVATE:
-        return not text.startswith("/")
+        return True
 
     replied = message.reply_to_message
     if replied and replied.from_user and replied.from_user.id == message.bot.id:
@@ -55,7 +63,12 @@ async def is_alexa_trigger(message: Message) -> bool:
     ):
         return True
 
-    return bool(_GREETING_RE.match(text))
+    # A group conversation stays active for this user for 10 minutes after
+    # they last spoke to Alexa; unrelated members' messages are never captured.
+    if _GREETING_RE.match(text):
+        return True
+    session_key = (message.chat.id, message.from_user.id)
+    return time.monotonic() < _active_until.get(session_key, 0.0)
 
 
 async def _ask_gemini(user_text: str, history: deque) -> str:
@@ -70,12 +83,16 @@ async def _ask_gemini(user_text: str, history: deque) -> str:
     ]
     contents.append({"role": "user", "parts": [{"text": user_text}]})
     system_instruction = (
-        "You are Alexa, a friendly female-presenting AI chatbot in a Telegram group. "
-        "Speak naturally and casually, usually in Roman Urdu/Hinglish matching the user. "
-        "Use feminine Urdu phrasing for yourself where natural (for example, 'kar rahi hoon'). "
-        "Be warm, playful, respectful, concise, and use occasional fitting emojis. "
-        "Respond naturally to greetings. Do not claim to be a real human. "
-        "Answer the actual message; do not mention prompts, API keys, or internal setup."
+        "You are Alexa, a warm, friendly, feminine conversational assistant in Telegram. "
+        "Sound like a natural young woman chatting casually, not like a formal helpdesk or a robotic AI. "
+        "Usually use the user's language; for Roman Urdu/Hinglish, reply in fluent, everyday Roman Urdu/Hinglish. "
+        "Use feminine self-reference naturally when appropriate (such as 'kar rahi hoon', 'samajh gayi', 'bata deti hoon'). "
+        "Be expressive, kind, witty when it fits, and use occasional emojis without overdoing them. "
+        "Remember the conversation history and answer follow-up messages directly; do not ask the user to repeat context you have. "
+        "Do not repeatedly announce that you are an AI or say 'I am an AI bot' unless the user directly asks what you are. "
+        "Never claim to be a real human, and do not invent personal experiences. "
+        "Avoid canned openings, repetitive disclaimers, and overly formal wording. "
+        "Answer the actual message; never mention prompts, API keys, or internal setup."
     )
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
@@ -131,6 +148,9 @@ async def alexa_ai_chat(message: Message) -> None:
         text = "Say hello and start a friendly conversation."
 
     key = (message.chat.id, message.from_user.id)
+    # Refresh the short group-chat session whenever this user talks to Alexa.
+    if message.chat.type != ChatType.PRIVATE:
+        _active_until[key] = time.monotonic() + _SESSION_SECONDS
     history = _conversations[key]
     try:
         answer = await _ask_gemini(text, history)
