@@ -83,7 +83,7 @@ async def configure_command_visibility(bot) -> None:
         ("language", "Choose language"), ("wallet", "View wallet"), ("bal", "View balance"),
         ("daily", "Claim daily coins"), ("weekly", "Claim weekly coins"), ("monthly", "Claim monthly coins"),
         ("terms", "Premium Stars payment terms"), ("referral", "Get referral link"), ("achievements", "View achievements"),
-        ("games", "Open games"), ("dice", "Play dice"), ("rps", "Rock paper scissors"),
+        ("games", "Open games"), ("ludo", "Play Ludo race"), ("bingo", "Play Bingo"), ("dice", "Play dice"), ("rps", "Rock paper scissors"),
         ("quiz", "Play quiz"), ("wheel", "Spin the wheel"), ("roulette", "Play roulette"), ("rullet", "Play roulette"),
         ("cards", "Play cards"), ("uno", "Play UNO with group friends"), ("mines", "Play mines"), ("treasure", "Treasure hunt"),
         ("numwar", "Number war"), ("stats", "View stats"), ("rank", "View your rank"),
