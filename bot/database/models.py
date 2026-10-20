@@ -755,3 +755,28 @@ class AffiliatePayment(Base):
     request_id = Column(Integer, ForeignKey("affiliate_requests.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     paid_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class CommunityShieldGroup(Base):
+    """Per-group opt-in state for the Community Shield network."""
+    __tablename__ = "community_shield_groups"
+
+    group_id = Column(BigInteger, primary_key=True)
+    enabled = Column(Boolean, default=False, nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class CommunityShieldReport(Base):
+    """One evidence-based report per participating group and target user."""
+    __tablename__ = "community_shield_reports"
+    __table_args__ = (
+        UniqueConstraint("group_id", "target_user_id", name="uq_shield_group_target"),
+        Index("ix_shield_target_user", "target_user_id"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    group_id = Column(BigInteger, nullable=False, index=True)
+    target_user_id = Column(BigInteger, nullable=False, index=True)
+    reporter_user_id = Column(BigInteger, nullable=False)
+    reason = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
