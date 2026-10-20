@@ -4,6 +4,7 @@ The API key is read from private runtime configuration, never committed here.
 Supports GEMINI_API_KEY/API_KEY environment settings or ignored bot/gemini_secret.py.
 """
 import asyncio
+import html
 import logging
 import os
 from typing import Optional
@@ -137,7 +138,7 @@ async def _handle(message: Message, prompt: Optional[str]) -> None:
         return
 
     # Only publish AI text after a successful, non-empty Gemini response.
-    await status.edit_text(answer)
+    await status.edit_text(html.escape(answer[:3500]))
 
 
 @router.message(Command("ai"))
