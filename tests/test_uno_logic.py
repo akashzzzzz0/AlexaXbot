@@ -5,6 +5,23 @@ from bot.handlers import uno
 
 
 class UnoRulesTests(unittest.TestCase):
+    def test_lobby_board_renders_before_game_has_started(self):
+        # /uno creates a lobby before dealing cards. The board must have a
+        # placeholder top card so rendering does not crash on an empty discard.
+        game = {
+            "id": "abc123",
+            "players": [{"id": 1, "name": "Creator"}],
+            "hands": {},
+            "discard": [("R", "0")],
+            "color": "R",
+            "started": False,
+            "current": 0,
+        }
+        board = uno._board_text(game, "Join the game")
+        self.assertIn("ALEXA UNO", board)
+        self.assertIn("Red 0", board)
+        self.assertIn("Players joined", board)
+
     def test_deck_has_standard_108_cards(self):
         deck = uno._make_deck()
         self.assertEqual(len(deck), 108)
