@@ -69,7 +69,7 @@ def build_help_text(_: callable) -> str:
         f"/stats — {_('help_cmd_stats')}\n"
         f"/help — {_('help_cmd_help')}\n\n"
         "⚔️ <b>Multiverse Wars</b>\n"
-        "/war /warmission /waranswer /warboard /warresult — missions, scores and results\n"
+        "/war /warmission /waranswer /warboard /worldrank /mystery /warresult — missions, rankings and rewards\n"
         "/warregister /warleave /warchallenge /waraccept — group admin controls\n\n"
         f"<i>{_('help_hint')}</i>"
     )
@@ -90,7 +90,8 @@ def build_public_help_text(_: callable) -> str:
         "/bal — View game balance\n/rank — View your rank\n/leaders — Top players\n"
         "/items — View game items\n/pfp — View profile picture\n\n"
         "⚔️ <b>Multiverse Wars</b>\n/war — Wars menu\n/warmission — Daily team mission\n"
-        "/waranswer ANSWER — Submit answer\n/warboard — Weekly group ranking\n/warresult ID — Challenge results\n\n"
+        "/waranswer ANSWER — Submit answer\n/warboard — Weekly group ranking\n/worldrank — All-time world ranking\n"
+        "/mystery — Open daily mystery reward\n/warresult ID — Challenge results\n\n"
         "ℹ️ <b>Other</b>\n/language — Change language\n/stats — View statistics\n/help — Show help"
     )
 
