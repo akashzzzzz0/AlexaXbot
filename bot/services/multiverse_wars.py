@@ -1,13 +1,14 @@
 """Persistence and scoring rules for ALEXA Multiverse Wars."""
 from datetime import date, datetime, timedelta, timezone
+import random
 import re
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import (
     WarGuild, WarSeasonScore, WarContribution, WarChallenge,
-    WarChallengeContribution,
+    WarChallengeContribution, MysteryRewardClaim, Wallet,
 )
 
 MISSION_POINTS = 5
@@ -281,3 +282,45 @@ async def settle_expired_challenges(session: AsyncSession, now: datetime | None 
         challenge.resolved_at = moment
     await session.flush()
     return len(expired) + len(stale_pending)
+
+
+
+async def world_leaderboard(session: AsyncSession, limit: int = 10):
+    """All-time ranking across every season, not just the current week."""
+    total_points = func.coalesce(func.sum(WarSeasonScore.points), 0).label("total_points")
+    return (await session.execute(
+        select(WarGuild, total_points)
+        .outerjoin(WarSeasonScore, WarSeasonScore.group_id == WarGuild.group_id)
+        .where(WarGuild.is_active.is_(True))
+        .group_by(WarGuild.group_id)
+        .order_by(total_points.desc(), WarGuild.title.asc())
+        .limit(max(1, min(limit, 20)))
+    )).all()
+
+
+async def claim_mystery_reward(
+    session: AsyncSession, *, user_id: int, now: datetime | None = None,
+) -> dict:
+    """Award a small virtual-coin surprise once per UTC day."""
+    moment = now or datetime.now(timezone.utc)
+    today = day_key(moment)
+    existing = await session.scalar(
+        select(MysteryRewardClaim).where(
+            MysteryRewardClaim.user_id == user_id,
+            MysteryRewardClaim.day_key == today,
+        )
+    )
+    if existing is not None:
+        return {"status": "already_claimed", "amount": existing.reward_amount}
+
+    amount = random.choice((25, 50, 75, 100, 150, 250))
+    wallet = await session.scalar(select(Wallet).where(Wallet.user_id == user_id))
+    if wallet is None:
+        wallet = Wallet(user_id=user_id, balance=0, bank_balance=0, total_earned=0, total_spent=0)
+        session.add(wallet)
+        await session.flush()
+    wallet.balance = (wallet.balance or 0) + amount
+    wallet.total_earned = (wallet.total_earned or 0) + amount
+    session.add(MysteryRewardClaim(user_id=user_id, day_key=today, reward_amount=amount))
+    await session.flush()
+    return {"status": "claimed", "amount": amount, "balance": wallet.balance}
