@@ -384,7 +384,7 @@ ROULETTE_NUMBERS = list(range(37))
 ROULETTE_RED = {1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36}
 
 
-@router.message(Command('roulette'))
+@router.message(Command('roulette', 'rullet'))
 async def cmd_roulette(message: Message, _: callable, **kwargs):
     builder = InlineKeyboardBuilder()
     builder.button(text=_('roulette_red').format(mult='1.9×'), callback_data='roulette:red:0')
