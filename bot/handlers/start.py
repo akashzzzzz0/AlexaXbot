@@ -50,15 +50,18 @@ def _detect_lang(tg_lang):
 async def _send_add_group_prompt(message: Message):
     me = await message.bot.get_me()
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Add me to your Group", url=f"https://t.me/{me.username}?startgroup=true")],
+        [InlineKeyboardButton(text="👑 Premium · 3 Months + ⭐ Stars", callback_data="affiliate:promo")],
+        [InlineKeyboardButton(text="🎁 My Referral Rewards", callback_data="affiliate:open")],
         [
-            InlineKeyboardButton(text="🔔 Updates", url="https://t.me/+X5aelUHksVRlODQ8"),
-            InlineKeyboardButton(text="❓ Help", callback_data="start:help"),
-            InlineKeyboardButton(text="💬 Discussion", url="https://t.me/+dGq9_BqdD5hjYzk0"),
+            InlineKeyboardButton(text="🎮 Games & Economy", callback_data="menu:games"),
+            InlineKeyboardButton(text="🛡️ Group Security", callback_data="menu:security"),
         ],
-        [
-            InlineKeyboardButton(text="⭐ Telegram Premium + Stars", callback_data="affiliate:promo"),
-        ],
+        [InlineKeyboardButton(text="🤖 AI Assistant", callback_data="menu:main")],
+        [InlineKeyboardButton(text="📚 Help & Commands", callback_data="start:help")],
+        [InlineKeyboardButton(text="➕ Add Me to Your Group", url=f"https://t.me/{me.username}?startgroup=true")],
+        [InlineKeyboardButton(text="💬 Discussion Group", url="https://t.me/+dGq9_BqdD5hjYzk0")],
+        [InlineKeyboardButton(text="📢 Updates Channel", url="https://t.me/+X5aelUHksVRlODQ8")],
+        [InlineKeyboardButton(text="📣 Free Group Promotion", callback_data="start:promotion")],
     ])
     user = message.from_user
     first_name = escape(user.first_name or "there") if user else "there"
@@ -167,6 +170,33 @@ async def start_help(callback: CallbackQuery, _: callable, **kwargs):
     except Exception as exc:
         logger.warning("Could not open ALEXA help menu", error=str(exc))
         await callback.answer("Please use /help to see commands.", show_alert=True)
+        return
+    await callback.answer()
+
+
+@router.callback_query(F.data == "start:promotion")
+async def start_group_promotion(callback: CallbackQuery, **kwargs):
+    text = (
+        "📣 <b>FREE GROUP PROMOTION</b>\\n\\n"
+        "Promote your Telegram group through ALEXA.\\n\\n"
+        "1. Add ALEXA to your Telegram group.\\n"
+        "2. Give ALEXA the required administrator permissions.\\n"
+        "3. Return to this DM and send <code>.done</code>.\\n"
+        "4. Send your group link to ALEXA in this private chat.\\n\\n"
+        "ALEXA must be able to verify the group before a promotion can be reviewed."
+    )
+    try:
+        await callback.message.edit_text(
+            text,
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="➕ Add Me to Your Group", url=f"https://t.me/{(await callback.bot.get_me()).username}?startgroup=true")],
+                [InlineKeyboardButton(text="◀️ Back to ALEXA", callback_data="start:open")],
+            ]),
+        )
+    except Exception as exc:
+        logger.warning("Could not open group promotion instructions", error=str(exc))
+        await callback.answer("Please open /start again.", show_alert=True)
         return
     await callback.answer()
 
