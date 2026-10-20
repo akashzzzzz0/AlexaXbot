@@ -28,7 +28,8 @@ def _menu_keyboard():
     kb.button(text="🏆 World Players", callback_data="arena:top")
     kb.button(text="🌍 World Groups", callback_data="arena:groups")
     kb.button(text="📊 My Rank", callback_data="arena:me")
-    kb.adjust(2, 2, 1)
+    kb.button(text="⚔️ Group Wars", callback_data="arena:wars")
+    kb.adjust(2, 2, 2)
     return kb.as_markup()
 
 
@@ -319,6 +320,16 @@ async def arena_callback(callback: CallbackQuery, db_session: AsyncSession = Non
         await callback.answer()
         await world_groups_from_callback(callback, db_session)
         return
+    if data == "arena:wars":
+        await callback.answer()
+        await callback.message.answer(
+            "⚔️ <b>Cross-group competitions</b>\n\n"
+            "Alexa already has Multiverse Wars for group-vs-group challenges. "
+            "Use /war to open it and /worldrank to view the all-time group ranking. "
+            "World Arena player XP remains a separate leaderboard.",
+            parse_mode="HTML",
+        )
+        return
     if data == "arena:me":
         profile = await get_or_create_profile(db_session, callback.from_user.id)
         ahead = await db_session.scalar(select(func.count(ArenaProfile.user_id)).where(ArenaProfile.xp > profile.xp))
@@ -437,9 +448,12 @@ async def arena_callback(callback: CallbackQuery, db_session: AsyncSession = Non
         else:
             winner_id = None
         battle.winner_id = winner_id
-        winner = "Draw — both players receive XP." if winner_id is None else (
-            f"🏆 Winner: {callback.message.chat.title or 'Arena'} player "
-            f"{'challenger' if winner_id == battle.challenger_id else 'opponent'}!")
+        if winner_id is None:
+            winner = "Draw — both players receive XP."
+        else:
+            winner_user = await db_session.get(User, winner_id)
+            winner_name = winner_user.first_name if winner_user else "Champion"
+            winner = f"🏆 Winner: {winner_name}!"
         await callback.answer("Battle resolved!")
         await callback.message.answer(
             f"⚔️ <b>BATTLE RESULT</b>\n{winner}\n"
