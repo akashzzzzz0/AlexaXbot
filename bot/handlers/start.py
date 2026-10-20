@@ -48,9 +48,9 @@ async def _send_add_group_prompt(message: Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Add me to your Group", url=f"https://t.me/{me.username}?startgroup=true")],
         [
-            InlineKeyboardButton(text="🔔 Updates", url="https://t.me/alexa_bot_updats"),
+            InlineKeyboardButton(text="🔔 Updates", url="https://t.me/+X5aelUHksVRlODQ8"),
             InlineKeyboardButton(text="❓ Help", callback_data="start:help"),
-            InlineKeyboardButton(text="💬 Discussion", url="https://t.me/alexa_Bot_discussion"),
+            InlineKeyboardButton(text="💬 Discussion", url="https://t.me/+dGq9_BqdD5hjYzk0"),
         ],
         [
             InlineKeyboardButton(text="⭐ Telegram Premium + Stars", callback_data="affiliate:promo"),
