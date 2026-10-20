@@ -83,8 +83,8 @@ class AffiliateRewardTierTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await engine.dispose()
 
-    def test_minimum_withdrawal_is_100_stars(self):
-        self.assertEqual(MIN_WITHDRAWAL, 100)
+    def test_minimum_withdrawal_is_150_stars(self):
+        self.assertEqual(MIN_WITHDRAWAL, 150)
 
     def test_affiliate_request_table_is_created_and_links_to_user(self):
         engine = create_engine("sqlite:///:memory:")
