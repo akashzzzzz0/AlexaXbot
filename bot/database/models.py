@@ -780,3 +780,20 @@ class CommunityShieldReport(Base):
     reporter_user_id = Column(BigInteger, nullable=False)
     reason = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ScamReview(Base):
+    """A group-scoped scam concern awaiting human admin review."""
+    __tablename__ = "scam_reviews"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    group_id = Column(BigInteger, nullable=False, index=True)
+    target_user_id = Column(BigInteger, nullable=False, index=True)
+    reporter_user_id = Column(BigInteger, nullable=False)
+    reason = Column(Text, nullable=False)
+    evidence = Column(Text, nullable=True)
+    status = Column(String(16), nullable=False, default="pending", index=True)
+    resolved_by = Column(BigInteger, nullable=True)
+    resolution_note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
