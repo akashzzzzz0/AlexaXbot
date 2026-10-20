@@ -133,6 +133,9 @@ async def configure_command_visibility(bot) -> None:
         ("warregister", "Register this group for Wars"), ("warleave", "Leave Multiverse Wars"),
         ("warchallenge", "Challenge another registered group"), ("waraccept", "Accept a group war challenge"),
     ]
+    # Telegram allows at most 100 commands per scope. Keep the visible menu
+    # within the limit; all handlers/features remain available by typing commands.
+    admin_commands = admin_commands[:90]
     public = [BotCommand(command=name, description=description) for name, description in public_commands]
     admin = [BotCommand(command=name, description=description) for name, description in admin_commands]
     try:
@@ -144,8 +147,9 @@ async def configure_command_visibility(bot) -> None:
         await bot.set_my_commands(admin, scope=BotCommandScopeAllChatAdministrators())
         owner_id = settings.effective_owner_id
         if owner_id:
-            owner_commands = admin + [BotCommand(command="owner", description="Open ALEXA Owner Panel")]
-            await bot.set_my_commands(owner_commands, scope=BotCommandScopeChat(chat_id=owner_id))
+            # Keep /owner out of Telegram's command menu; it remains available
+            # through its owner-only handler.
+            await bot.set_my_commands(admin, scope=BotCommandScopeChat(chat_id=owner_id))
         logger.info("Telegram command visibility configured", owner_id=settings.effective_owner_id or None)
     except Exception as exc:
         logger.warning("Could not configure command visibility", error=str(exc))
