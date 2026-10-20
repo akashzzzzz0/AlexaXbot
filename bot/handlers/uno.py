@@ -193,7 +193,7 @@ async def _update_board(bot, game, status=None):
         await bot.edit_message_text(
             _board_text(game, status), chat_id=game["group_id"],
             message_id=game["group_message_id"], parse_mode="HTML",
-            reply_markup=_lobby_keyboard(game["id"]) if not game["started"] else None,
+            reply_markup=_lobby_keyboard(game["id"]) if not game["started"] and not game.get("finished") else None,
         )
     except Exception:
         pass
@@ -247,10 +247,19 @@ def _advance(game, steps=1):
 async def _finish(bot, game, winner_id):
     winner = next(p for p in game["players"] if p["id"] == winner_id)
     game["started"] = False
+    game["finished"] = True
     await _update_board(bot, game, f"🏆 <b>{escape(winner['name'])} wins!</b> UNO game finished.")
     for player in game["players"]:
         try:
-            await bot.send_message(player["id"], f"🏆 {escape(winner['name'])} won the UNO game in your group!")
+            message_id = game["dm_messages"].get(player["id"])
+            if message_id:
+                await bot.edit_message_caption(
+                    chat_id=player["id"], message_id=message_id,
+                    caption=f"🏆 <b>{escape(winner['name'])} won the UNO game!</b>",
+                    parse_mode="HTML", reply_markup=None,
+                )
+            else:
+                await bot.send_message(player["id"], f"🏆 {escape(winner['name'])} won the UNO game in your group!")
         except Exception:
             pass
     _GROUP_GAME.pop(game["group_id"], None)
