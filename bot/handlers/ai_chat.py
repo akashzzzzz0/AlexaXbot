@@ -115,9 +115,9 @@ async def alexa_ai_chat(message: Message) -> None:
     if prefix_match:
         text = prefix_match.group(1).strip() or "Say hello and start a friendly conversation."
 
-    username = (getattr(message.bot, "username", None) or "").casefold()
+    username = _bot_username or ""
     if username:
-        text = re.sub(rf"(?<!\w)@{re.escape(username)}\b", "", text, flags=re.IGNORECASE).strip()
+        text = re.sub(rf"(?<!\\w)@{re.escape(username)}\\b", "", text, flags=re.IGNORECASE).strip()
     if not text and message.reply_to_message and message.reply_to_message.text:
         text = message.reply_to_message.text.strip()
     if not text:
