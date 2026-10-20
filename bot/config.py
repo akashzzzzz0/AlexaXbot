@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     OWNER_ID: int = 0
     API_ID: int = 0
     API_HASH: str = ""
+    # Optional group-chat AI. Keep the real key only in the host's private environment.
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-2.5-flash"
     LOG_LEVEL: str = "INFO"
     ENVIRONMENT: str = "production"
 
