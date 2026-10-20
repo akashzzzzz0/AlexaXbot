@@ -84,14 +84,8 @@ async def _send_add_group_prompt(message: Message):
         '📋 Use /help to explore commands.\n\n'
         '<tg-emoji emoji-id="5436040291507247633">🎉</tg-emoji> <b>Let’s make your group safer and more fun!</b>'
     )
-    try:
-        photos = await message.bot.get_user_profile_photos(me.id, limit=1)
-        if photos.total_count and photos.photos and photos.photos[0]:
-            photo = photos.photos[0][-1]
-            await message.answer_photo(photo.file_id, caption=caption, reply_markup=kb, parse_mode="HTML")
-            return
-    except Exception as exc:
-        logger.warning("Could not load ALEXA profile photo for /start", error=str(exc))
+    # Send the welcome screen as text instead of reusing a profile-photo file_id.
+    # Telegram may reject profile-photo IDs with DOCUMENT_INVALID.
     await message.answer(caption, reply_markup=kb, parse_mode="HTML")
 
 @router.message(CommandStart())
