@@ -92,6 +92,9 @@ def build_public_help_text(_: callable) -> str:
         "⚔️ <b>Multiverse Wars</b>\n/war — Wars menu\n/warmission — Daily team mission\n"
         "/waranswer ANSWER — Submit answer\n/warboard — Weekly group ranking\n/worldrank — All-time world ranking\n"
         "/mystery — Open daily mystery reward\n/warresult ID — Challenge results\n\n"
+        "🌌 <b>Ultra VIP Package</b>\n/empire — Global Empire ranking\n"
+        "/empirecreate — Create an Empire (group admins)\n/empirecontribute — Add daily Empire XP\n"
+        "/vip — Elite Club profile\n/vault — Open daily Legendary Vault\n/badges — View your collection\n\n"
         "ℹ️ <b>Other</b>\n/language — Change language\n/stats — View statistics\n/help — Show help"
     )
 
