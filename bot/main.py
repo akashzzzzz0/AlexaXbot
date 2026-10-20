@@ -116,6 +116,8 @@ async def configure_command_visibility(bot) -> None:
         ("unprotect", "Remove protection"), ("kill", "Virtual game action"),
         ("rob", "Virtual coin game"), ("revive", "Revive game profile"),
         ("bluff", "Play bluff game"), ("hack", "Play hack game"), ("task", "View tasks"),
+        ("shield", "Configure Community Shield"), ("shieldreport", "Report suspected scam"),
+        ("shieldcheck", "Check Community Shield reports"),
     ]
     public = [BotCommand(command=name, description=description) for name, description in public_commands]
     admin = [BotCommand(command=name, description=description) for name, description in admin_commands]
