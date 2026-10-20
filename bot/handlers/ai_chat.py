@@ -58,10 +58,7 @@ async def is_alexa_trigger(message: Message) -> bool:
 async def _ask_gemini(user_text: str, history: deque) -> str:
     api_key = settings.GEMINI_API_KEY.strip()
     if not api_key:
-        return (
-            "Aww 💜 meri AI abhi setup ho rahi hai! "
-            "Owner jald API key set kar dega, phir hum baatein karenge 😊"
-        )
+        return ""
 
     model = settings.GEMINI_MODEL.strip() or "gemini-2.5-flash"
     contents = []
@@ -127,19 +124,19 @@ async def alexa_ai_chat(message: Message) -> None:
     history = _conversations[key]
     try:
         answer = await _ask_gemini(text, history)
-    except httpx.HTTPStatusError as exc:
-        # Do not expose the API response or key to group members.
-        if exc.response.status_code in (400, 401, 403):
-            answer = "Oops 💜 meri AI service ki setting mein masla aa gaya hai. Owner ko key/model check karna hoga."
-        else:
-            answer = "Abhi mera reply nahi aa pa raha 😅 Thori der baad phir baat karte hain."
+        # Missing API configuration and all Gemini/network/API failures are silent.
+        # Alexa must never invent a fallback reply when Gemini is unavailable.
+        if not answer:
+            return
+    except (httpx.HTTPError, ValueError):
+        return
     except Exception:
-        answer = "Oops 😅 abhi jawab generate nahi ho saka. Thori der baad try karna."
+        return
 
     history.append(("user", text))
     history.append(("model", answer))
     try:
         await message.reply(answer)
     except Exception:
-        # A reply failure should never crash polling.
+        # A Telegram reply failure should never crash polling.
         pass
