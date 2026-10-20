@@ -5,7 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.config import settings
 from bot.keyboards.main_menu import main_menu_kb, back_button_kb
 import structlog
-from html import escape
+from html import escape, unescape
+import re
 
 logger = structlog.get_logger()
 router = Router()
@@ -84,9 +85,19 @@ async def _send_add_group_prompt(message: Message):
         '📋 Use /help to explore commands.\n\n'
         '<tg-emoji emoji-id="5436040291507247633">🎉</tg-emoji> <b>Let’s make your group safer and more fun!</b>'
     )
-    # Send the welcome screen as text instead of reusing a profile-photo file_id.
-    # Telegram may reject profile-photo IDs with DOCUMENT_INVALID.
-    await message.answer(caption, reply_markup=kb, parse_mode="HTML")
+    # Use ordinary Unicode emoji and plain text. This avoids invalid custom-emoji
+    # entities and ensures /start does not depend on a profile-photo/document ID.
+    safe_caption = re.sub(r'<tg-emoji[^>]*>(.*?)</tg-emoji>', r'\\1', caption)
+    safe_caption = re.sub(r'</?b>', '', safe_caption)
+    safe_caption = unescape(safe_caption)
+    safe_caption = re.sub(r'<[^>]+>', '', safe_caption)
+
+    try:
+        await message.answer(safe_caption, reply_markup=kb, parse_mode=None)
+    except Exception as exc:
+        logger.warning("Could not send ALEXA welcome with buttons; retrying plain text", error=str(exc))
+        # Last-resort fallback: no markup, no parse mode, no media.
+        await message.answer(safe_caption, parse_mode=None)
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, _: callable, db_session: AsyncSession = None, db_user=None, **kwargs):
