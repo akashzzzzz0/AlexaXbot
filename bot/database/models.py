@@ -1045,3 +1045,20 @@ class ArenaBattle(Base):
     resolved = Column(Boolean, default=False, nullable=False)
     winner_id = Column(BigInteger, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class InboxMessage(Base):
+    """A private message received from a user, visible only in the owner inbox."""
+    __tablename__ = "inbox_messages"
+    __table_args__ = (
+        Index("ix_inbox_user_created", "user_id", "created_at"),
+        Index("ix_inbox_unread", "is_read"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    telegram_message_id = Column(BigInteger, nullable=False)
+    content_type = Column(String(32), nullable=False, default="text")
+    preview = Column(Text, nullable=True)
+    is_read = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
