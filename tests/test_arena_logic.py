@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timedelta, timezone
 
 from bot.services.arena_service import (
     QUESTION_BANK, calculate_battle_rewards, choose_question, rank_for_xp, utc_day_key,
@@ -31,8 +32,9 @@ class ArenaLogicTests(unittest.TestCase):
         self.assertEqual(calculate_battle_rewards(True, True, 1.0, 1.0), (10, 10, 0, 0))
         self.assertEqual(calculate_battle_rewards(False, False, 1.0, 2.0), (2, 2, 0, 0))
 
-    def test_day_key_is_utc(self):
-        self.assertEqual(utc_day_key(), utc_day_key())
+    def test_day_key_converts_to_utc(self):
+        local_time = datetime(2026, 1, 1, 1, 0, tzinfo=timezone(timedelta(hours=2)))
+        self.assertEqual(utc_day_key(local_time), "2025-12-31")
 
 
 if __name__ == "__main__":
