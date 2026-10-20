@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     BOT_TOKEN: str = ""
     DATABASE_URL: str = "sqlite+aiosqlite:///./alexa.db"
 
+    # Gemini key is loaded from private runtime config; never commit a real key.
+    GEMINI_API_KEY: str = ""
+    API_KEY: str = ""
+
     WEBHOOK_URL: str = ""
     WEBHOOK_SECRET: str = "guardian_x_secret"
     WEBHOOK_PORT: int = 8080
