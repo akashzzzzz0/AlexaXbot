@@ -14,7 +14,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from bot.config import settings
+from bot.config import get_gemini_api_key, settings
 
 router = Router(name="gemini_ai")
 logger = logging.getLogger(__name__)
@@ -24,16 +24,7 @@ API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:gene
 
 
 def _api_key() -> str:
-    key = (getattr(settings, "GEMINI_API_KEY", "") or
-           os.getenv("GEMINI_API_KEY", "") or os.getenv("API_KEY", "")).strip()
-    if key:
-        return key
-    # Optional local-only key file; .gitignore prevents it entering Git.
-    try:
-        from bot.gemini_secret import GEMINI_API_KEY
-        return str(GEMINI_API_KEY).strip()
-    except (ImportError, AttributeError, TypeError):
-        return ""
+    return get_gemini_api_key()
 
 
 def _message_text(message: Message) -> str:
