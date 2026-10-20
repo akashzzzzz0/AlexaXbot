@@ -30,6 +30,8 @@ required = {
     "bot/services/mission_service.py": ["async def seed_missions", "async def track_progress"],
     "bot/handlers/group_tools.py": ["async def add_filter", "async def add_blocklist", "async def set_rules_finish"],
     "bot/handlers/games.py": ["async def game_wheel", "Free wheel spin reward"],
+    "bot/handlers/arena.py": ["async def arena_command", "async def battle_command", "async def arena_callback"],
+    "bot/services/arena_service.py": ["def rank_for_xp", "async def award_xp", "def calculate_battle_rewards"],
 }
 for rel, needles in required.items():
     p = ROOT / rel
@@ -114,7 +116,7 @@ keyboard_callbacks = set()
 for path in (ROOT / "bot" / "keyboards").glob("*.py"):
     data = path.read_text(encoding="utf-8")
     keyboard_callbacks.update(re.findall(r"callback_data\s*=\s*[\"']([^\"']+)[\"']", data))
-    keyboard_callbacks.update(re.findall(r"[\"']((?:menu|sec|lock|captcha|settings|welcome|goodbye|logs|log|gs|slowmode|autodel|mod|mute_duration|ban_duration|warn_action|ban_confirm|game|dice|rps|roulette|quiz_ans|trn|duel|eco|shop|mission|missions|rewards|transfer|owner|lang|stats|lb):[^\"']+)[\"']", data))
+    keyboard_callbacks.update(re.findall(r"[\"']((?:menu|sec|lock|captcha|settings|welcome|goodbye|logs|log|gs|slowmode|autodel|mod|mute_duration|ban_duration|warn_action|ban_confirm|game|dice|rps|roulette|quiz_ans|trn|duel|eco|shop|mission|missions|rewards|transfer|owner|lang|stats|lb|arena):[^\"']+)[\"']", data))
 exact_callbacks = set()
 callback_prefixes = set()
 for path in (ROOT / "bot" / "handlers").glob("*.py"):
@@ -142,7 +144,7 @@ for path in (ROOT / "bot" / "handlers").glob("*.py"):
             else:
                 for constant in ast.walk(decorator.args[0]):
                     if isinstance(constant, ast.Constant) and isinstance(constant.value, str):
-                        if constant.value.startswith(("menu:", "sec:", "lock:", "captcha:", "settings:", "welcome:", "goodbye:", "logs:", "log:", "gs:", "slowmode:", "autodel:", "mod:", "mute_duration:", "ban_duration:", "warn_action:", "ban_confirm:", "game:", "dice:", "rps:", "roulette:", "quiz_ans:", "trn:", "duel:", "duel_accept:", "duel_decline:", "eco:", "shop:", "mission:", "missions:", "rewards:", "transfer:", "owner:", "lang:", "stats:", "lb:")):
+                        if constant.value.startswith(("menu:", "sec:", "lock:", "captcha:", "settings:", "welcome:", "goodbye:", "logs:", "log:", "gs:", "slowmode:", "autodel:", "mod:", "mute_duration:", "ban_duration:", "warn_action:", "ban_confirm:", "game:", "dice:", "rps:", "roulette:", "quiz_ans:", "trn:", "duel:", "duel_accept:", "duel_decline:", "eco:", "shop:", "mission:", "missions:", "rewards:", "transfer:", "owner:", "lang:", "stats:", "lb:", "arena:")):
                             exact_callbacks.add(constant.value)
 for callback in keyboard_callbacks:
     if callback not in exact_callbacks and not any(callback.startswith(prefix) for prefix in callback_prefixes):

@@ -1,5 +1,5 @@
 from aiogram import Router
-from bot.handlers import start, security, moderation, economy, games, duels, statistics, settings, help, affiliate, owner, welcome, tournaments, alexa_games, group_tools, community_shield, scam_review, multiverse_wars, ultra_vip
+from bot.handlers import start, security, moderation, economy, games, duels, statistics, settings, help, affiliate, owner, welcome, tournaments, alexa_games, group_tools, community_shield, scam_review, multiverse_wars, ultra_vip, arena
 from bot.handlers.auto_delete_middleware import StartMenuAutoDeleteMessageMiddleware, StartMenuAutoDeleteCallbackMiddleware
 
 
@@ -28,6 +28,7 @@ def get_main_router() -> Router:
     router.include_router(scam_review.router)
     router.include_router(multiverse_wars.router)
     router.include_router(ultra_vip.router)
+    router.include_router(arena.router)
     # Keep welcome/join-leave/captcha processing, but after feature handlers.
     router.include_router(welcome.router)
     return router
