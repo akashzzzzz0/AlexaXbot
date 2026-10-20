@@ -74,7 +74,7 @@ async def empire_contribute_command(message: Message, db_session: AsyncSession =
     await message.reply(f"🌌 Empire contribution saved!\n+10 Empire XP · +5 Elite XP\n"
         f"🏰 Empire Level: {result['level']} · Progress: {result['xp']}/{result['level'] * 100} XP\nUse /vip to check your Elite status.")
 
-@router.message(Command("vip"))
+@router.message(Command("vip", "pro"))
 async def vip_profile(message: Message, db_session: AsyncSession = None, db_user=None, **kwargs):
     if not db_user or db_session is None:
         await message.reply("Open Alexa in private chat and press /start first, then use /vip."); return
