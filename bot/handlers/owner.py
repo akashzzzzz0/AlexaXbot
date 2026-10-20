@@ -9,7 +9,7 @@ from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from bot.database.models import User, Group, GroupMember, GroupSettings, ActionLog, SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig, ScamReview
+from bot.database.models import User, Group, GroupMember, GroupSettings, ActionLog, SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig, ScamReview, InboxMessage
 from bot.keyboards.main_menu import back_button_kb
 from bot.config import settings
 from bot.utils.helpers import format_number
@@ -29,6 +29,7 @@ class OwnerStates(StatesGroup):
     waiting_unban_user_id = State()
     waiting_unmute_user_id = State()
     waiting_purge_range = State()
+    waiting_inbox_reply = State()
 
 
 def is_owner(user_id: int) -> bool:
@@ -55,8 +56,9 @@ def owner_kb(_=None) -> object:
     builder.button(text="➕ Add Groups", callback_data="owner:addgroups")
     builder.button(text=f"{'🟢 Disable' if _maintenance_mode else '🔧 Enable'} Maintenance", callback_data="owner:maintenance")
     builder.button(text="👤 User List", callback_data="owner:users")
+    builder.button(text="📩 User Messages", callback_data="owner:inbox")
     builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
-    builder.adjust(2, 2, 2, 2, 2, 2, 1)
+    builder.adjust(2, 2, 2, 2, 2, 2, 2)
     return builder.as_markup()
 
 
@@ -205,7 +207,7 @@ async def owner_panel(message: Message, _: callable, **kwargs):
         "📡 <b>CONTROL MODULES</b>\n"
         "Broadcast • Promotion • Global Controls • Statistics\n"
         "Groups • Referrals • Ban All • Settings\n"
-        "Maintenance • User List • Emergency Controls\n\n"
+        "Maintenance • User List • User Messages • Emergency Controls\n\n"
         "🔹 Select a module below. Existing actions and permissions are retained.",
         reply_markup=owner_kb(),
         parse_mode="HTML",
@@ -1655,7 +1657,7 @@ async def owner_menu_back(callback: CallbackQuery, _: callable, **kwargs):
         "📡 <b>CONTROL MODULES</b>\n"
         "Broadcast • Promotion • Global Controls • Statistics\n"
         "Groups • Referrals • Ban All • Settings\n"
-        "Maintenance • User List • Emergency Controls\n\n"
+        "Maintenance • User List • User Messages • Emergency Controls\n\n"
         "🔹 Select a module below. Existing actions and permissions are retained.",
         reply_markup=owner_kb(),
         parse_mode="HTML",
@@ -1752,6 +1754,141 @@ async def start_broadcast(callback: CallbackQuery, _: callable, state: FSMContex
 
 def get_maintenance_mode() -> bool:
     return _maintenance_mode
+
+
+@router.callback_query(F.data == "owner:inbox")
+async def owner_inbox(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id) or not callback.message or callback.message.chat.type != "private":
+        await callback.answer("Not available.", show_alert=True)
+        return
+    rows = (await db_session.scalars(
+        select(InboxMessage).order_by(desc(InboxMessage.created_at), desc(InboxMessage.id)).limit(500)
+    )).all()
+    latest_by_user = {}
+    for row in rows:
+        latest_by_user.setdefault(row.user_id, row)
+    if not latest_by_user:
+        await callback.message.edit_text(
+            "📩 <b>USER MESSAGES</b>\n\nNo user messages have been received yet.",
+            parse_mode="HTML", reply_markup=back_button_kb(None, "owner:menu")
+        )
+        await callback.answer()
+        return
+    builder = InlineKeyboardBuilder()
+    for user_id in list(latest_by_user)[:40]:
+        user = await db_session.get(User, user_id)
+        if not user:
+            continue
+        unread = await db_session.scalar(select(func.count()).select_from(InboxMessage).where(
+            InboxMessage.user_id == user_id, InboxMessage.is_read.is_(False)
+        ))
+        name = (user.first_name or "User")[:24]
+        handle = f" @{user.username}" if user.username else ""
+        label = f"{'🆕 ' + str(unread) + ' · ' if unread else ''}{name}{handle}"[:60]
+        builder.button(text=label, callback_data=f"owner:inbox:{user_id}")
+    builder.button(text="🔄 Refresh", callback_data="owner:inbox")
+    builder.button(text="◀️ Owner Panel", callback_data="owner:menu")
+    builder.adjust(1)
+    total_unread = await db_session.scalar(select(func.count()).select_from(InboxMessage).where(InboxMessage.is_read.is_(False)))
+    await callback.message.edit_text(
+        "📩 <b>USER MESSAGES</b>\n━━━━━━━━━━━━━━━━━━\n"
+        f"👤 Conversations: <b>{len(latest_by_user)}</b>\n"
+        f"🔔 Unread messages: <b>{total_unread or 0}</b>\n\n"
+        "Choose a user to open their saved messages.",
+        parse_mode="HTML", reply_markup=builder.as_markup()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner:inbox:"))
+async def owner_inbox_conversation(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id) or not callback.message or callback.message.chat.type != "private":
+        await callback.answer("Not available.", show_alert=True)
+        return
+    try:
+        user_id = int(callback.data.rsplit(":", 1)[1])
+    except (ValueError, IndexError):
+        await callback.answer("Invalid user.", show_alert=True)
+        return
+    user = await db_session.get(User, user_id)
+    if not user:
+        await callback.answer("User not found.", show_alert=True)
+        return
+    messages = (await db_session.scalars(
+        select(InboxMessage).where(InboxMessage.user_id == user_id)
+        .order_by(desc(InboxMessage.created_at), desc(InboxMessage.id)).limit(10)
+    )).all()
+    for item in messages:
+        item.is_read = True
+    builder = InlineKeyboardBuilder()
+    builder.button(text="↩️ Reply to User", callback_data=f"owner:inbox_reply:{user_id}")
+    builder.button(text="🔄 Refresh Messages", callback_data=f"owner:inbox:{user_id}")
+    builder.button(text="◀️ All User Messages", callback_data="owner:inbox")
+    builder.button(text="👑 Owner Panel", callback_data="owner:menu")
+    builder.adjust(1)
+    await callback.message.edit_text(
+        "📩 <b>USER CONVERSATION</b>\n━━━━━━━━━━━━━━━━━━\n"
+        f"👤 <b>{escape(user.first_name or 'User')}</b>"
+        f"{' (@' + escape(user.username) + ')' if user.username else ''}\n"
+        f"🆔 <code>{user.id}</code>\n"
+        f"Showing latest <b>{len(messages)}</b> saved messages below. Tap Reply to answer through ALEXA.",
+        parse_mode="HTML", reply_markup=builder.as_markup()
+    )
+    for item in reversed(messages):
+        try:
+            reply_kb = InlineKeyboardBuilder()
+            reply_kb.button(text="↩️ Reply to this user", callback_data=f"owner:inbox_reply:{user_id}")
+            await callback.bot.copy_message(
+                chat_id=callback.from_user.id, from_chat_id=user_id,
+                message_id=item.telegram_message_id, reply_markup=reply_kb.as_markup()
+            )
+        except Exception as exc:
+            logger.warning("Could not copy saved user message to owner inbox", user_id=user_id, message_id=item.telegram_message_id, error=str(exc))
+    await callback.answer("Conversation opened.")
+
+
+@router.callback_query(F.data.startswith("owner:inbox_reply:"))
+async def owner_inbox_reply_start(callback: CallbackQuery, state: FSMContext, **kwargs):
+    if not is_owner(callback.from_user.id) or not callback.message or callback.message.chat.type != "private":
+        await callback.answer("Not available.", show_alert=True)
+        return
+    try:
+        user_id = int(callback.data.rsplit(":", 1)[1])
+    except (ValueError, IndexError):
+        await callback.answer("Invalid user.", show_alert=True)
+        return
+    await state.set_state(OwnerStates.waiting_inbox_reply)
+    await state.update_data(inbox_reply_user_id=user_id)
+    await callback.message.answer(
+        f"↩️ Send the reply for Telegram user <code>{user_id}</code>.\n"
+        "Send /cancel to stop. ALEXA will deliver your reply to that user.", parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.message(OwnerStates.waiting_inbox_reply)
+async def owner_inbox_reply_send(message: Message, state: FSMContext, **kwargs):
+    if not is_owner(message.from_user.id) or message.chat.type != "private":
+        await state.clear()
+        return
+    if (message.text or "").strip().lower() == "/cancel":
+        await state.clear()
+        await message.reply("Reply cancelled.")
+        return
+    data = await state.get_data()
+    try:
+        user_id = int(data.get("inbox_reply_user_id"))
+        await message.copy_to(chat_id=user_id)
+        await message.reply("✅ Reply sent through ALEXA.")
+    except TelegramForbiddenError:
+        await message.reply("❌ ALEXA cannot message this user. They may have blocked the bot.")
+    except Exception as exc:
+        logger.warning("Owner inbox reply failed", error=str(exc))
+        await message.reply("❌ Could not deliver the reply. Check that the user has started ALEXA.")
+    finally:
+        await state.clear()
+
+
 
 @router.callback_query(F.data.startswith("owner:"))
 async def owner_catch_all(callback: CallbackQuery, _: callable, **kwargs):
