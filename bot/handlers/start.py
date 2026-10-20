@@ -140,20 +140,29 @@ async def cmd_start(message: Message, _: callable, db_session: AsyncSession = No
 
 
 @router.callback_query(F.data == "start:help")
-async def start_help(callback: CallbackQuery, **kwargs):
-    name = callback.from_user.first_name or "User"
+async def start_help(callback: CallbackQuery, _: callable, **kwargs):
     try:
+        from bot.handlers.help import build_help_text
+        help_text = build_help_text(_)
         if callback.message.photo:
             await callback.message.delete()
             await callback.bot.send_message(
                 callback.message.chat.id,
-                _get_commands("en", name),
-                reply_markup=main_menu_kb(None, is_owner=(callback.from_user.id == settings.effective_owner_id)),
+                help_text,
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🧭 Help Sections", callback_data="menu:help")],
+                    [InlineKeyboardButton(text="🏠 Main Menu", callback_data="menu:main")],
+                ]),
             )
         else:
             await callback.message.edit_text(
-                _get_commands("en", name),
-                reply_markup=main_menu_kb(None, is_owner=(callback.from_user.id == settings.effective_owner_id)),
+                help_text,
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🧭 Help Sections", callback_data="menu:help")],
+                    [InlineKeyboardButton(text="🏠 Main Menu", callback_data="menu:main")],
+                ]),
             )
     except Exception as exc:
         logger.warning("Could not open ALEXA help menu", error=str(exc))
