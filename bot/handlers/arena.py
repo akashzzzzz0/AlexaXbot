@@ -1,5 +1,6 @@
 """Alexa World Arena: global quizzes, puzzles, daily missions and player battles."""
 from datetime import datetime, timedelta, timezone
+from html import escape as html_escape
 from uuid import uuid4
 
 from aiogram import F, Router
@@ -199,7 +200,7 @@ async def world_top_command(message: Message, db_session: AsyncSession = None, *
     lines = ["🌍 <b>WORLD ARENA — TOP PLAYERS</b>"]
     for index, (first_name, username, xp, wins) in enumerate(rows, 1):
         label = ("@" + username) if username else first_name
-        lines.append(f"{index}. {label} — <b>{xp} XP</b> · {rank_for_xp(xp)} · {wins} wins")
+        lines.append(f"{index}. {html_escape(label)} — <b>{xp} XP</b> · {rank_for_xp(xp)} · {wins} wins")
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 
@@ -222,10 +223,10 @@ async def group_rank_command(message: Message, db_session: AsyncSession = None, 
     if not rows:
         await message.answer("🏆 No Arena scores in this group yet. Use /play to start!")
         return
-    lines = [f"🏆 <b>{message.chat.title or 'Group'} — ARENA RANK</b>"]
+    lines = [f"🏆 <b>{html_escape(message.chat.title or 'Group')} — ARENA RANK</b>"]
     for index, (first_name, username, xp) in enumerate(rows, 1):
         label = ("@" + username) if username else first_name
-        lines.append(f"{index}. {label} — <b>{int(xp or 0)} XP</b>")
+        lines.append(f"{index}. {html_escape(label)} — <b>{int(xp or 0)} XP</b>")
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 
@@ -246,7 +247,7 @@ async def world_groups_command(message: Message, db_session: AsyncSession = None
         return
     lines = ["🌍 <b>WORLD ARENA — TOP GROUPS</b>"]
     for index, (title, xp) in enumerate(rows, 1):
-        lines.append(f"{index}. {title} — <b>{int(xp or 0)} XP</b>")
+        lines.append(f"{index}. {html_escape(title)} — <b>{int(xp or 0)} XP</b>")
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 
@@ -453,7 +454,7 @@ async def arena_callback(callback: CallbackQuery, db_session: AsyncSession = Non
         else:
             winner_user = await db_session.get(User, winner_id)
             winner_name = winner_user.first_name if winner_user else "Champion"
-            winner = f"🏆 Winner: {winner_name}!"
+            winner = f"🏆 Winner: {html_escape(winner_name)}!"
         await callback.answer("Battle resolved!")
         await callback.message.answer(
             f"⚔️ <b>BATTLE RESULT</b>\n{winner}\n"
