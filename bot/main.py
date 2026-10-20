@@ -88,10 +88,6 @@ async def configure_command_visibility(bot) -> None:
         ("cards", "Play cards"), ("uno", "Play UNO with group friends"), ("mines", "Play mines"), ("treasure", "Treasure hunt"),
         ("numwar", "Number war"), ("stats", "View stats"), ("rank", "View your rank"),
         ("leaders", "Top players"), ("items", "View your items"), ("pfp", "Profile photo"),
-        ("war", "Multiverse Wars menu"), ("warmission", "View daily war mission"),
-        ("waranswer", "Answer daily war mission"), ("warboard", "Weekly war leaderboard"),
-        ("warresult", "View a group challenge result"),
-        ("worldrank", "All-time world group ranking"), ("mystery", "Open daily mystery reward"),
         ("empire", "Multiverse Empire ranking"),
         ("empirecontribute", "Contribute to your Empire"), ("vip", "View Elite Club status"),
         ("vault", "Open daily Legendary Vault"), ("badges", "View collectible badges"),
@@ -130,8 +126,6 @@ async def configure_command_visibility(bot) -> None:
         ("scamreview", "Queue a scam review"), ("scamreviews", "List pending scam reviews"),
         ("scamresolve", "Mark a scam review as reviewed"),
         ("empirecreate", "Create this group Empire"),
-        ("warregister", "Register this group for Wars"), ("warleave", "Leave Multiverse Wars"),
-        ("warchallenge", "Challenge another registered group"), ("waraccept", "Accept a group war challenge"),
     ]
     # Telegram allows at most 100 commands per scope. Keep the visible menu
     # within the limit; all handlers/features remain available by typing commands.
