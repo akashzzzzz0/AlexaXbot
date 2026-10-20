@@ -177,12 +177,12 @@ async def start_help(callback: CallbackQuery, _: callable, **kwargs):
 @router.callback_query(F.data == "start:promotion")
 async def start_group_promotion(callback: CallbackQuery, **kwargs):
     text = (
-        "📣 <b>FREE GROUP PROMOTION</b>\\n\\n"
-        "Promote your Telegram group through ALEXA.\\n\\n"
-        "1. Add ALEXA to your Telegram group.\\n"
-        "2. Give ALEXA the required administrator permissions.\\n"
-        "3. Return to this DM and send <code>.done</code>.\\n"
-        "4. Send your group link to ALEXA in this private chat.\\n\\n"
+        "📣 <b>FREE GROUP PROMOTION</b>\n\n"
+        "Promote your Telegram group through ALEXA.\n\n"
+        "1. Add ALEXA to your Telegram group.\n"
+        "2. Give ALEXA the required administrator permissions.\n"
+        "3. Return to this DM and send <code>.done</code>.\n"
+        "4. Send your group link to ALEXA in this private chat.\n\n"
         "ALEXA must be able to verify the group before a promotion can be reviewed."
     )
     try:
@@ -191,7 +191,7 @@ async def start_group_promotion(callback: CallbackQuery, **kwargs):
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="➕ Add Me to Your Group", url=f"https://t.me/{(await callback.bot.get_me()).username}?startgroup=true")],
-                [InlineKeyboardButton(text="◀️ Back to ALEXA", callback_data="start:open")],
+                [InlineKeyboardButton(text="◀️ Back to Main Menu", callback_data="menu:main")],
             ]),
         )
     except Exception as exc:
