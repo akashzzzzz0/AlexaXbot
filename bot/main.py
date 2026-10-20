@@ -96,9 +96,7 @@ async def configure_command_visibility(bot) -> None:
         ("empirecontribute", "Contribute to your Empire"), ("vip", "View Elite Club status"),
         ("vault", "Open daily Legendary Vault"), ("badges", "View collectible badges"),
         ("arena", "Open World Arena"), ("play", "Play a World Arena challenge"),
-        ("arenadaily", "Attempt daily Arena mission"), ("battle", "Challenge a player"),
-        ("myrank", "View World Arena rank"), ("worldtop", "Global Arena leaderboard"),
-        ("grouprank", "This group Arena leaderboard"), ("worldgroups", "Global group Arena ranking"),
+        ("battle", "Challenge a player"),
     ]
     admin_commands = public_commands + [
         ("security", "Group security panel"), ("settings", "Group settings"),
