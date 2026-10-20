@@ -34,20 +34,26 @@ def is_owner(user_id: int) -> bool:
 
 
 def owner_kb(_=None) -> object:
+    """Cyber Neon Pro layout; existing callback_data values are intentionally preserved."""
     builder = InlineKeyboardBuilder()
+    # Broadcast & promotion
     builder.button(text="📨 DM Broadcast", callback_data="owner:broadcast")
     builder.button(text="📣 Group Promotion", callback_data="owner:promotion")
+    # Global overview & analytics
     builder.button(text="🌐 Global Controls", callback_data="owner:global_controls")
     builder.button(text="📊 Statistics", callback_data="owner:stats")
+    # Group network & rewards
     builder.button(text="👥 Groups • Activity • Links • Permissions", callback_data="owner:groups")
     builder.button(text="🎁 Affiliate / Referral", callback_data="owner:referrals")
+    # Moderation & configuration
     builder.button(text="🔨 Ban All", callback_data="owner:banall")
     builder.button(text="⚙️ Settings", callback_data="owner:settings")
+    # Administration & protection
     builder.button(text="➕ Add Groups", callback_data="owner:addgroups")
     builder.button(text=f"{'🟢 Disable' if _maintenance_mode else '🔧 Enable'} Maintenance", callback_data="owner:maintenance")
     builder.button(text="👤 User List", callback_data="owner:users")
     builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
-    builder.adjust(2, 1, 2, 2, 2, 1)
+    builder.adjust(2, 2, 2, 2, 2, 2)
     return builder.as_markup()
 
 
@@ -189,7 +195,15 @@ async def owner_panel(message: Message, _: callable, **kwargs):
         # Never post the owner panel into a group, even if the owner invokes it there.
         return
     await message.answer(
-        "👑 <b>ALEXA OWNER PANEL</b>\n\nOnly the bot owner can access these controls.",
+        "💠 <b>ALEXA X</b>  <code>CYBER NEON PRO</code>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "👑 <b>OWNER ACCESS: VERIFIED</b>\n"
+        "⚡ <b>ULTRA CONTROL DECK</b>\n\n"
+        "📡 <b>CONTROL MODULES</b>\n"
+        "Broadcast • Promotion • Global Controls • Statistics\n"
+        "Groups • Referrals • Ban All • Settings\n"
+        "Maintenance • User List • Emergency Controls\n\n"
+        "🔹 Select a module below. Existing actions and permissions are retained.",
         reply_markup=owner_kb(),
         parse_mode="HTML",
     )
@@ -1586,7 +1600,15 @@ async def owner_menu_back(callback: CallbackQuery, _: callable, **kwargs):
         await callback.answer("Not available.", show_alert=True)
         return
     await callback.message.edit_text(
-        "👑 <b>ALEXA OWNER PANEL</b>",
+        "💠 <b>ALEXA X</b>  <code>CYBER NEON PRO</code>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "👑 <b>OWNER ACCESS: VERIFIED</b>\n"
+        "⚡ <b>ULTRA CONTROL DECK</b>\n\n"
+        "📡 <b>CONTROL MODULES</b>\n"
+        "Broadcast • Promotion • Global Controls • Statistics\n"
+        "Groups • Referrals • Ban All • Settings\n"
+        "Maintenance • User List • Emergency Controls\n\n"
+        "🔹 Select a module below. Existing actions and permissions are retained.",
         reply_markup=owner_kb(),
         parse_mode="HTML",
     )
