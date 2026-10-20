@@ -292,7 +292,10 @@ async def world_leaderboard(session: AsyncSession, limit: int = 10):
         select(WarGuild, total_points)
         .outerjoin(WarSeasonScore, WarSeasonScore.group_id == WarGuild.group_id)
         .where(WarGuild.is_active.is_(True))
-        .group_by(WarGuild.group_id)
+        .group_by(
+            WarGuild.group_id, WarGuild.title, WarGuild.username,
+            WarGuild.registered_by, WarGuild.is_active, WarGuild.registered_at,
+        )
         .order_by(total_points.desc(), WarGuild.title.asc())
         .limit(max(1, min(limit, 20)))
     )).all()
