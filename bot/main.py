@@ -92,7 +92,7 @@ async def configure_command_visibility(bot) -> None:
         ("waranswer", "Answer daily war mission"), ("warboard", "Weekly war leaderboard"),
         ("warresult", "View a group challenge result"),
         ("worldrank", "All-time world group ranking"), ("mystery", "Open daily mystery reward"),
-        ("empire", "Multiverse Empire ranking"), ("empirecreate", "Create this group Empire"),
+        ("empire", "Multiverse Empire ranking"),
         ("empirecontribute", "Contribute to your Empire"), ("vip", "View Elite Club status"),
         ("vault", "Open daily Legendary Vault"), ("badges", "View collectible badges"),
     ]
@@ -127,6 +127,7 @@ async def configure_command_visibility(bot) -> None:
         ("shieldcheck", "Check Community Shield reports"),
         ("scamreview", "Queue a scam review"), ("scamreviews", "List pending scam reviews"),
         ("scamresolve", "Mark a scam review as reviewed"),
+        ("empirecreate", "Create this group Empire"),
         ("warregister", "Register this group for Wars"), ("warleave", "Leave Multiverse Wars"),
         ("warchallenge", "Challenge another registered group"), ("waraccept", "Accept a group war challenge"),
     ]
