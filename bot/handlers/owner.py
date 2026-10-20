@@ -1836,6 +1836,20 @@ async def owner_inbox_conversation(callback: CallbackQuery, db_session: AsyncSes
     )
     for item in reversed(messages):
         try:
+            # Put sender identity directly above every copied message, chat-style.
+            sender_name = escape(user.first_name or "User")
+            sender_handle = f"@{escape(user.username)}" if user.username else "No username"
+            await callback.bot.send_message(
+                chat_id=callback.from_user.id,
+                text=(
+                    "📩 <b>NEW USER MESSAGE</b>\n"
+                    f"👤 <b>{sender_name}</b>\n"
+                    f"🔗 {sender_handle}\n"
+                    f"🆔 <code>{user.id}</code>\n"
+                    f"🕒 {escape(item.created_at.strftime('%Y-%m-%d %H:%M UTC') if item.created_at else 'Time unavailable')}"
+                ),
+                parse_mode="HTML",
+            )
             reply_kb = InlineKeyboardBuilder()
             reply_kb.button(text="↩️ Reply to this user", callback_data=f"owner:inbox_reply:{user_id}")
             await callback.bot.copy_message(
