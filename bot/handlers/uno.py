@@ -1,7 +1,9 @@
 """Chat-based multiplayer UNO for ALEXA. Active matches live in memory."""
+import asyncio
 import io
 import random
 import secrets
+from functools import wraps
 from html import escape
 
 from aiogram import Router, F
@@ -15,6 +17,21 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 router = Router()
 _GAMES = {}
 _GROUP_GAME = {}
+
+
+def _serialize_game_action(handler):
+    """Serialize callbacks for a match so rapid/double taps cannot apply two moves."""
+    @wraps(handler)
+    async def wrapped(callback, *args, **kwargs):
+        parts = (getattr(callback, "data", "") or "").split(":")
+        game_id = parts[2] if len(parts) > 2 and parts[0] == "uno" else None
+        game = _GAMES.get(game_id)
+        if game is None:
+            return await handler(callback, *args, **kwargs)
+        lock = game.setdefault("_action_lock", asyncio.Lock())
+        async with lock:
+            return await handler(callback, *args, **kwargs)
+    return wrapped
 
 
 COLORS = {
@@ -226,16 +243,31 @@ async def _send_or_update_hand(bot, game, user_id, status=None):
     message_id = game["dm_messages"].get(user_id)
     if message_id:
         try:
-            await bot.edit_message_media(
-                chat_id=user_id, message_id=message_id,
-                media=InputMediaPhoto(media=photo, caption=caption, parse_mode="HTML"),
-                reply_markup=keyboard,
-            )
+            previous_hand = game.get("rendered_hands", {}).get(user_id)
+            if previous_hand == cards:
+                # Most moves do not change every player's cards. Update the status
+                # and buttons without uploading an identical image again.
+                await bot.edit_message_caption(
+                    chat_id=user_id, message_id=message_id, caption=caption,
+                    parse_mode="HTML", reply_markup=keyboard,
+                )
+            else:
+                await bot.edit_message_media(
+                    chat_id=user_id, message_id=message_id,
+                    media=InputMediaPhoto(media=photo, caption=caption, parse_mode="HTML"),
+                    reply_markup=keyboard,
+                )
+            game.setdefault("rendered_hands", {})[user_id] = list(cards)
             return
-        except Exception:
-            pass
+        except Exception as exc:
+            # Telegram reports "message is not modified" when neither the caption
+            # nor keyboard changed. That is not a reason to send duplicate DMs.
+            if "message is not modified" in str(exc).lower():
+                game.setdefault("rendered_hands", {})[user_id] = list(cards)
+                return
     sent = await bot.send_photo(user_id, photo=photo, caption=caption, parse_mode="HTML", reply_markup=keyboard)
     game["dm_messages"][user_id] = sent.message_id
+    game.setdefault("rendered_hands", {})[user_id] = list(cards)
 
 
 async def _refresh_hands(bot, game, status=None):
@@ -287,17 +319,17 @@ async def _begin_game(callback, game):
         return
     game["deck"] = _make_deck()
     game["hands"] = {p["id"]: [game["deck"].pop() for _ in range(7)] for p in game["players"]}
-    game["discard"] = []
-    while game["deck"]:
-        first = game["deck"].pop()
-        if first[0] in COLORS and first[1].isdigit():
-            game["discard"].append(first)
-            break
-        game["deck"].insert(0, first)
-        # Prevent an impossible loop in the unlikely event the deck has no number cards.
-        if len(game["deck"]) < 1:
-            game["discard"].append(("R", "0"))
-            break
+    # Start on a number card. Select it directly instead of rotating action cards
+    # through the deck, which can make startup logic harder to reason about.
+    first_number = next(
+        (index for index, card in enumerate(game["deck"])
+         if card[0] in COLORS and card[1].isdigit()),
+        None,
+    )
+    if first_number is None:
+        game["discard"] = [("R", "0")]
+    else:
+        game["discard"] = [game["deck"].pop(first_number)]
     game["color"] = game["discard"][-1][0]
     game["current"] = 0
     game["direction"] = 1
@@ -306,6 +338,7 @@ async def _begin_game(callback, game):
     game["pending_wild"] = None
     game["drawn_pending"] = {}
     game["dm_messages"] = {}
+    game["rendered_hands"] = {}
     try:
         for player in game["players"]:
             photo = _render_hand_image(game["hands"][player["id"]])
@@ -316,8 +349,21 @@ async def _begin_game(callback, game):
             )
             game["dm_messages"][player["id"]] = sent.message_id
     except Exception:
+        # Roll back partial startup: remove already-sent private hand messages so
+        # nobody is left with cards from a game that never actually began.
+        for user_id, message_id in list(game["dm_messages"].items()):
+            try:
+                await callback.bot.delete_message(chat_id=user_id, message_id=message_id)
+            except Exception:
+                pass
         game["started"] = False
         game["hands"] = {}
+        game["deck"] = []
+        game["discard"] = []
+        game["dm_messages"] = {}
+        game["rendered_hands"] = {}
+        game["pending_wild"] = None
+        game["drawn_pending"] = {}
         await _update_board(callback.bot, game, "⚠️ I couldn't DM every player. Each player must open ALEXA and press /start, then the creator can press Start Game again.")
         await callback.answer("A player must open the bot and press /start first.", show_alert=True)
         return
@@ -368,6 +414,7 @@ async def menu_uno(callback: CallbackQuery, **kwargs):
 
 
 @router.callback_query(F.data.startswith("uno:join:"))
+@_serialize_game_action
 async def join_uno(callback: CallbackQuery, **kwargs):
     game_id = callback.data.split(":")[2]
     game = _GAMES.get(game_id)
@@ -387,6 +434,7 @@ async def join_uno(callback: CallbackQuery, **kwargs):
 
 
 @router.callback_query(F.data.startswith("uno:start:"))
+@_serialize_game_action
 async def start_uno(callback: CallbackQuery, **kwargs):
     game_id = callback.data.split(":")[2]
     game = _GAMES.get(game_id)
@@ -400,6 +448,7 @@ async def start_uno(callback: CallbackQuery, **kwargs):
 
 
 @router.callback_query(F.data.startswith("uno:play:"))
+@_serialize_game_action
 async def play_uno_card(callback: CallbackQuery, **kwargs):
     parts = callback.data.split(":")
     if len(parts) != 4:
@@ -468,6 +517,7 @@ async def play_uno_card(callback: CallbackQuery, **kwargs):
 
 
 @router.callback_query(F.data.startswith("uno:color:"))
+@_serialize_game_action
 async def choose_uno_color(callback: CallbackQuery, **kwargs):
     parts = callback.data.split(":")
     if len(parts) != 4:
@@ -498,6 +548,7 @@ async def choose_uno_color(callback: CallbackQuery, **kwargs):
 
 
 @router.callback_query(F.data.startswith("uno:draw:"))
+@_serialize_game_action
 async def draw_uno_card(callback: CallbackQuery, **kwargs):
     game_id = callback.data.split(":")[2]
     game = _GAMES.get(game_id)
@@ -523,6 +574,7 @@ async def draw_uno_card(callback: CallbackQuery, **kwargs):
 
 
 @router.callback_query(F.data.startswith("uno:pass:"))
+@_serialize_game_action
 async def pass_after_draw(callback: CallbackQuery, **kwargs):
     game_id = callback.data.split(":")[2]
     game = _GAMES.get(game_id)
@@ -541,6 +593,7 @@ async def pass_after_draw(callback: CallbackQuery, **kwargs):
 
 
 @router.callback_query(F.data.startswith("uno:call:"))
+@_serialize_game_action
 async def call_uno(callback: CallbackQuery, **kwargs):
     game_id = callback.data.split(":")[2]
     game = _GAMES.get(game_id)
