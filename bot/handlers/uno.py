@@ -119,7 +119,7 @@ def _hand_keyboard(game, user_id):
         builder.button(text="➕ Draw a card", callback_data=f"uno:draw:{game['id']}")
     if len(game["hands"].get(user_id, [])) == 1 and user_id in game.get("uno_pending", set()):
         builder.button(text="📣 UNO!", callback_data=f"uno:call:{game['id']}")
-    if not builder.buttons:
+    if not builder.export():
         return None
     return builder.as_markup()
 
