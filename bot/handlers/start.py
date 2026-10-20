@@ -27,6 +27,8 @@ COMMANDS_EN = (
     "  /quiz — quiz game\n"
     "  /wheel — wheel of fortune\n"
     "  /roulette — roulette\n"
+    "  /ludo — Ludo race against Alexa\n"
+    "  /bingo — Bingo number draw\n"
     "  /duel — duel\n\n"
     "🛡️ Group management:\n"
     "  /security — security settings\n"
