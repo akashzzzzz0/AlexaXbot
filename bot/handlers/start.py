@@ -102,14 +102,10 @@ async def _send_add_group_prompt(message: Message):
         photos = await message.bot.get_user_profile_photos(me.id, limit=1)
         if photos.total_count and photos.photos:
             profile_photo = photos.photos[0][-1].file_id
-            await message.answer_photo(
-                photo=profile_photo,
-                caption=safe_caption,
-                reply_markup=kb,
-                parse_mode=None,
-            )
-        else:
-            await message.answer(safe_caption, reply_markup=kb, parse_mode=None)
+            # Keep the interactive keyboard on a text message so all legacy
+            # callback handlers continue to work with their existing behavior.
+            await message.answer_photo(photo=profile_photo)
+        await message.answer(safe_caption, reply_markup=kb, parse_mode=None)
     except Exception as exc:
         logger.warning("Could not send ALEXA welcome with profile photo; retrying plain text", error=str(exc))
         # Last-resort fallback preserves the existing welcome text.
@@ -203,7 +199,7 @@ async def start_group_promotion(callback: CallbackQuery, **kwargs):
     try:
         markup = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="➕ Add Me to Your Group", url=f"https://t.me/{(await callback.bot.get_me()).username}?startgroup=true")],
-            [InlineKeyboardButton(text="◀️ Back to Main Menu", callback_data="menu:main")],
+            [InlineKeyboardButton(text="◀️ Back to Commands", callback_data="start:open")],
         ])
         if callback.message.photo:
             await callback.message.edit_caption(text, parse_mode="HTML", reply_markup=markup)
