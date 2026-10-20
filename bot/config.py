@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     # Gemini key is loaded from private runtime config; never commit a real key.
     GEMINI_API_KEY: str = ""
     API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-2.5-flash"
 
     WEBHOOK_URL: str = ""
     WEBHOOK_SECRET: str = "guardian_x_secret"
@@ -71,3 +72,18 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def get_gemini_api_key() -> str:
+    """Get Gemini key from private runtime settings or an ignored local key file."""
+    import os
+
+    key = (settings.GEMINI_API_KEY or settings.API_KEY or
+           os.getenv("GEMINI_API_KEY", "") or os.getenv("API_KEY", "")).strip()
+    if key:
+        return key
+    try:
+        from bot.gemini_secret import GEMINI_API_KEY
+        return str(GEMINI_API_KEY).strip()
+    except (ImportError, AttributeError, TypeError):
+        return ""
