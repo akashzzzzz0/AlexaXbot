@@ -892,3 +892,64 @@ class WarChallengeContribution(Base):
     group_id = Column(BigInteger, nullable=False)
     user_id = Column(BigInteger, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+
+class EmpireGuild(Base):
+    """A group empire with persistent progression independent of Wars seasons."""
+    __tablename__ = "empire_guilds"
+
+    group_id = Column(BigInteger, primary_key=True)
+    title = Column(String(256), nullable=False)
+    level = Column(Integer, default=1, nullable=False)
+    xp = Column(Integer, default=0, nullable=False)
+    registered_by = Column(BigInteger, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class EmpireContribution(Base):
+    """Limit each user to one empire contribution per group per UTC day."""
+    __tablename__ = "empire_contributions"
+    __table_args__ = (UniqueConstraint("group_id", "user_id", "day_key"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    group_id = Column(BigInteger, ForeignKey("empire_guilds.group_id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    day_key = Column(String(10), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class EliteProfile(Base):
+    """Free-to-earn Elite Club progression for a Telegram user."""
+    __tablename__ = "elite_profiles"
+
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    xp = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class EliteBadge(Base):
+    """Collectible VIP badges earned from vaults and milestones."""
+    __tablename__ = "elite_badges"
+    __table_args__ = (UniqueConstraint("user_id", "badge_code"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    badge_code = Column(String(32), nullable=False)
+    earned_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class VaultClaim(Base):
+    """One legendary vault opening per user per UTC day."""
+    __tablename__ = "ultra_vault_claims"
+    __table_args__ = (UniqueConstraint("user_id", "day_key"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    day_key = Column(String(10), nullable=False)
+    reward_type = Column(String(16), nullable=False)
+    reward_amount = Column(Integer, default=0, nullable=False)
+    badge_code = Column(String(32), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
