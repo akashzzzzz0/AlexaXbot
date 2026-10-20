@@ -91,6 +91,7 @@ async def configure_command_visibility(bot) -> None:
         ("war", "Multiverse Wars menu"), ("warmission", "View daily war mission"),
         ("waranswer", "Answer daily war mission"), ("warboard", "Weekly war leaderboard"),
         ("warresult", "View a group challenge result"),
+        ("worldrank", "All-time world group ranking"), ("mystery", "Open daily mystery reward"),
     ]
     admin_commands = public_commands + [
         ("security", "Group security panel"), ("settings", "Group settings"),
