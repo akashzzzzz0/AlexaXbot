@@ -5,10 +5,11 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from bot.database.models import Base, WarChallenge, WarSeasonScore
+from bot.database.models import Base, MysteryRewardClaim, User, Wallet, WarChallenge, WarSeasonScore
 from bot.services.multiverse_wars import (
     accept_challenge, create_challenge, daily_mission, leaderboard,
     register_guild, season_key, settle_expired_challenges, submit_answer,
+    world_leaderboard, claim_mystery_reward,
 )
 
 
@@ -104,6 +105,38 @@ class MultiverseWarsTests(unittest.IsolatedAsyncioTestCase):
             ))
             self.assertEqual(left.draws, 1)
             await session.commit()
+
+    async def test_world_ranking_sums_all_seasons(self):
+        async with self.factory() as session:
+            old = WarSeasonScore(group_id=-1001, season_key="2026-W40", points=30, wins=2, draws=0, losses=0)
+            current = await session.scalar(select(WarSeasonScore).where(
+                WarSeasonScore.group_id == -1001,
+                WarSeasonScore.season_key == season_key(self.now),
+            ))
+            if current is None:
+                current = WarSeasonScore(group_id=-1001, season_key=season_key(self.now), points=5, wins=1, draws=0, losses=0)
+                session.add(current)
+            session.add(old)
+            await session.commit()
+            rows = await world_leaderboard(session)
+            self.assertEqual(rows[0][0].group_id, -1001)
+            self.assertEqual(rows[0][1], 35)
+
+    async def test_mystery_reward_once_per_utc_day(self):
+        async with self.factory() as session:
+            session.add(User(id=999, first_name="Tester", telegram_id=999))
+            await session.commit()
+            first = await claim_mystery_reward(session, user_id=999, now=self.now)
+            self.assertEqual(first["status"], "claimed")
+            self.assertIn(first["amount"], (25, 50, 75, 100, 150, 250))
+            await session.commit()
+            second = await claim_mystery_reward(session, user_id=999, now=self.now)
+            self.assertEqual(second["status"], "already_claimed")
+            self.assertEqual(second["amount"], first["amount"])
+            wallet = await session.scalar(select(Wallet).where(Wallet.user_id == 999))
+            self.assertEqual(wallet.balance, first["amount"])
+            claims = (await session.execute(select(MysteryRewardClaim).where(MysteryRewardClaim.user_id == 999))).scalars().all()
+            self.assertEqual(len(claims), 1)
 
     async def test_cannot_challenge_unregistered_group_or_self(self):
         async with self.factory() as session:
