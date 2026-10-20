@@ -1,6 +1,7 @@
 """Owner-configurable, automatic Force Join enforcement."""
 import asyncio
 import time
+from html import escape
 
 from aiogram import Router, F
 from aiogram.dispatcher.event.bases import SkipHandler
@@ -270,7 +271,7 @@ async def enforce_force_join(message: Message, db_session: AsyncSession, **kwarg
         builder = InlineKeyboardBuilder()
         builder.button(text="📢 Join Required Channel / GC", url=setting.required_link)
         notice = await message.answer(
-            f"🔒 <a href=\"tg://user?id={message.from_user.id}\">{message.from_user.full_name}</a>, "
+            f"🔒 <a href=\"tg://user?id={message.from_user.id}\">{escape(message.from_user.full_name)}</a>, "
             "pehle required channel/group join karein. Join karne ke baad Alexa aglay message par automatically check karegi — Verify button ki zaroorat nahi.",
             parse_mode="HTML",
             reply_markup=builder.as_markup(),
