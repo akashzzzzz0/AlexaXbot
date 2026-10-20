@@ -87,7 +87,7 @@ async def _send_add_group_prompt(message: Message):
     )
     # Use ordinary Unicode emoji and plain text. This avoids invalid custom-emoji
     # entities and ensures /start does not depend on a profile-photo/document ID.
-    safe_caption = re.sub(r'<tg-emoji[^>]*>(.*?)</tg-emoji>', r'\\1', caption)
+    safe_caption = re.sub(r'<tg-emoji[^>]*>(.*?)</tg-emoji>', lambda match: match.group(1), caption)
     safe_caption = re.sub(r'</?b>', '', safe_caption)
     safe_caption = unescape(safe_caption)
     safe_caption = re.sub(r'<[^>]+>', '', safe_caption)
