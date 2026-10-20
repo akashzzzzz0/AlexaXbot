@@ -1,5 +1,5 @@
 from aiogram import Router
-from bot.handlers import start, security, moderation, economy, games, uno, duels, statistics, settings, help, affiliate, owner, welcome, tournaments, alexa_games, group_tools, community_shield, scam_review, ultra_vip, arena
+from bot.handlers import start, security, moderation, economy, games, uno, duels, statistics, settings, help, affiliate, owner, force_join, welcome, tournaments, alexa_games, group_tools, community_shield, scam_review, ultra_vip, arena
 from bot.handlers.auto_delete_middleware import StartMenuAutoDeleteMessageMiddleware, StartMenuAutoDeleteCallbackMiddleware
 
 
@@ -10,6 +10,8 @@ def get_main_router() -> Router:
     # Register command and feature routers before welcome's broad group-message
     # fallback. The fallback belongs last so it cannot intercept group commands
     # or callbacks intended for the other feature routers.
+    # Force-join guard must run before feature handlers so unjoined members cannot use commands either.
+    router.include_router(force_join.router)
     router.include_router(start.router)
     router.include_router(security.router)
     router.include_router(moderation.router)

@@ -100,6 +100,8 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 
 async def create_tables() -> None:
     from bot.database.models import Base
+    # Register Force Join model before create_all creates the schema.
+    from bot.database import force_join as _force_join_models  # noqa: F401
     _init_engine()
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
