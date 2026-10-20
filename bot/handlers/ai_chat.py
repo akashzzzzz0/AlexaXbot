@@ -31,6 +31,11 @@ async def is_alexa_trigger(message: Message) -> bool:
     if not text or not message.from_user or message.from_user.is_bot:
         return False
 
+    # In private chat, every ordinary text message starts/continues Alexa chat.
+    # Keep slash commands available to their existing feature handlers.
+    if message.chat.type == ChatType.PRIVATE:
+        return not text.startswith("/")
+
     replied = message.reply_to_message
     if replied and replied.from_user and replied.from_user.id == message.bot.id:
         return True
@@ -100,7 +105,7 @@ async def _ask_gemini(user_text: str, history: deque) -> str:
 
 
 @router.message(
-    F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}),
+    F.chat.type.in_({ChatType.PRIVATE, ChatType.GROUP, ChatType.SUPERGROUP}),
     F.text,
     is_alexa_trigger,
 )
