@@ -15,7 +15,7 @@ from bot.database.models import WarGuild, WarChallenge
 from bot.services.multiverse_wars import (
     accept_challenge, create_challenge, daily_mission, leaderboard,
     register_guild, season_key, get_score, settle_expired_challenges,
-    submit_answer,
+    submit_answer, world_leaderboard, claim_mystery_reward,
 )
 
 router = Router()
@@ -332,5 +332,55 @@ async def war_result(message: Message, db_session: AsyncSession = None, **kwargs
         f"🏰 {escape(left.title if left else str(challenge.challenger_group_id))}: {challenge.challenger_points} challenge points\n"
         f"🏰 {escape(right.title if right else str(challenge.opponent_group_id))}: {challenge.opponent_points} challenge points\n\n"
         f"{result_line}",
+        parse_mode="HTML",
+    )
+
+
+
+@router.message(Command("worldrank"))
+async def world_rank(message: Message, db_session: AsyncSession = None, **kwargs):
+    """Show all-time points accumulated by registered groups across seasons."""
+    if db_session is None:
+        await message.reply("🌍 World Ranking is temporarily unavailable.")
+        return
+    rows = await world_leaderboard(db_session, limit=10)
+    if not rows:
+        await message.reply("🌍 No groups are ranked yet. Group admins can start with /warregister.")
+        return
+    lines = ["🌍 <b>ALEXA WORLD RANKING</b>", "🏆 All-time points across every Wars season", ""]
+    medals = ("🥇", "🥈", "🥉")
+    for index, (guild, points) in enumerate(rows, 1):
+        mark = medals[index - 1] if index <= 3 else f"{index}."
+        lines.append(f"{mark} <b>{escape(guild.title)}</b> — {points} pts")
+    lines.append("\n⚔️ Earn more by completing /warmission and winning group challenges.")
+    await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("mystery"))
+async def mystery_reward(message: Message, db_session: AsyncSession = None, db_user=None, **kwargs):
+    """Claim a random virtual-coin reward once per UTC day."""
+    if not message.from_user or not db_user:
+        await message.reply("Open Alexa in a private chat and press /start first, then try /mystery again.")
+        return
+    if db_session is None:
+        await message.reply("🎁 Mystery Reward is temporarily unavailable.")
+        return
+    try:
+        result = await claim_mystery_reward(db_session, user_id=db_user.id)
+        await db_session.commit()
+    except Exception:
+        await db_session.rollback()
+        await message.reply("⚠️ The mystery reward could not be saved safely. Please try again.")
+        return
+    if result["status"] == "already_claimed":
+        await message.reply(
+            f"🎁 You already opened today's Mystery Reward and received {result['amount']} coins. Come back after the UTC daily reset."
+        )
+        return
+    await message.reply(
+        "🎁 <b>MYSTERY REWARD UNLOCKED!</b>\n\n"
+        f"✨ Surprise prize: <b>+{result['amount']} coins</b>\n"
+        f"💰 Your wallet balance: <b>{result['balance']} coins</b>\n\n"
+        "Come back tomorrow for another mystery box!",
         parse_mode="HTML",
     )
