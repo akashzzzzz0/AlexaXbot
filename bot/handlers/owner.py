@@ -1806,7 +1806,7 @@ async def owner_inbox_delete_message(callback: CallbackQuery, db_session: AsyncS
         await callback.answer("Not available.", show_alert=True)
         return
     try:
-        _, _, _, user_id_text, inbox_id_text = callback.data.split(":", 4)
+        _, _, user_id_text, inbox_id_text = callback.data.split(":")
         user_id, inbox_id = int(user_id_text), int(inbox_id_text)
     except (ValueError, IndexError):
         await callback.answer("Invalid message.", show_alert=True)
