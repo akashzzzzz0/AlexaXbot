@@ -50,15 +50,18 @@ def _detect_lang(tg_lang):
 async def _send_add_group_prompt(message: Message):
     me = await message.bot.get_me()
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Add me to your Group", url=f"https://t.me/{me.username}?startgroup=true")],
+        [InlineKeyboardButton(text="👑 Premium · 3 Months + ⭐ Stars", callback_data="affiliate:promo")],
+        [InlineKeyboardButton(text="🎁 My Referral Rewards", callback_data="affiliate:open")],
         [
-            InlineKeyboardButton(text="🔔 Updates", url="https://t.me/+X5aelUHksVRlODQ8"),
-            InlineKeyboardButton(text="❓ Help", callback_data="start:help"),
-            InlineKeyboardButton(text="💬 Discussion", url="https://t.me/+dGq9_BqdD5hjYzk0"),
+            InlineKeyboardButton(text="🎮 Games & Economy", callback_data="menu:games"),
+            InlineKeyboardButton(text="🛡️ Group Security", callback_data="menu:security"),
         ],
-        [
-            InlineKeyboardButton(text="⭐ Telegram Premium + Stars", callback_data="affiliate:promo"),
-        ],
+        [InlineKeyboardButton(text="🤖 AI Assistant", callback_data="menu:main")],
+        [InlineKeyboardButton(text="📚 Help & Commands", callback_data="start:help")],
+        [InlineKeyboardButton(text="➕ Add Me to Your Group", url=f"https://t.me/{me.username}?startgroup=true")],
+        [InlineKeyboardButton(text="💬 Discussion Group", url="https://t.me/+dGq9_BqdD5hjYzk0")],
+        [InlineKeyboardButton(text="📢 Updates Channel", url="https://t.me/+X5aelUHksVRlODQ8")],
+        [InlineKeyboardButton(text="📣 Free Group Promotion", callback_data="start:promotion")],
     ])
     user = message.from_user
     first_name = escape(user.first_name or "there") if user else "there"
@@ -95,11 +98,22 @@ async def _send_add_group_prompt(message: Message):
     safe_caption = re.sub(r'<[^>]+>', '', safe_caption)
 
     try:
+        # Reuse ALEXA's current Telegram profile photo when available.
+        photos = await message.bot.get_user_profile_photos(me.id, limit=1)
+        if photos.total_count and photos.photos:
+            profile_photo = photos.photos[0][-1].file_id
+            # Keep the interactive keyboard on a text message so all legacy
+            # callback handlers continue to work with their existing behavior.
+            await message.answer_photo(photo=profile_photo)
         await message.answer(safe_caption, reply_markup=kb, parse_mode=None)
     except Exception as exc:
-        logger.warning("Could not send ALEXA welcome with buttons; retrying plain text", error=str(exc))
-        # Last-resort fallback: no markup, no parse mode, no media.
-        await message.answer(safe_caption, parse_mode=None)
+        logger.warning("Could not send ALEXA welcome with profile photo; retrying plain text", error=str(exc))
+        # Last-resort fallback preserves the existing welcome text.
+        try:
+            await message.answer(safe_caption, reply_markup=kb, parse_mode=None)
+        except Exception as fallback_exc:
+            logger.warning("Could not send ALEXA welcome with buttons", error=str(fallback_exc))
+            await message.answer(safe_caption, parse_mode=None)
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, _: callable, db_session: AsyncSession = None, db_user=None, **kwargs):
@@ -167,6 +181,33 @@ async def start_help(callback: CallbackQuery, _: callable, **kwargs):
     except Exception as exc:
         logger.warning("Could not open ALEXA help menu", error=str(exc))
         await callback.answer("Please use /help to see commands.", show_alert=True)
+        return
+    await callback.answer()
+
+
+@router.callback_query(F.data == "start:promotion")
+async def start_group_promotion(callback: CallbackQuery, **kwargs):
+    text = (
+        "📣 <b>FREE GROUP PROMOTION</b>\n\n"
+        "Promote your Telegram group through ALEXA.\n\n"
+        "1. Add ALEXA to your Telegram group.\n"
+        "2. Give ALEXA the required administrator permissions.\n"
+        "3. Return to this DM and send <code>.done</code>.\n"
+        "4. Send your group link to ALEXA in this private chat.\n\n"
+        "ALEXA must be able to verify the group before a promotion can be reviewed."
+    )
+    try:
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Add Me to Your Group", url=f"https://t.me/{(await callback.bot.get_me()).username}?startgroup=true")],
+            [InlineKeyboardButton(text="◀️ Back to Commands", callback_data="start:open")],
+        ])
+        if callback.message.photo:
+            await callback.message.edit_caption(text, parse_mode="HTML", reply_markup=markup)
+        else:
+            await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+    except Exception as exc:
+        logger.warning("Could not open group promotion instructions", error=str(exc))
+        await callback.answer("Please open /start again.", show_alert=True)
         return
     await callback.answer()
 
