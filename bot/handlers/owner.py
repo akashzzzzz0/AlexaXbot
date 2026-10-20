@@ -1,4 +1,5 @@
 import asyncio
+import time
 from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery, Message, BotCommand, BotCommandScopeDefault, BotCommandScopeChat
 from aiogram.exceptions import TelegramRetryAfter, TelegramBadRequest, TelegramForbiddenError
@@ -8,7 +9,7 @@ from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from bot.database.models import User, Group, GroupMember, GroupSettings, ActionLog, SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig
+from bot.database.models import User, Group, GroupMember, GroupSettings, ActionLog, SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig, ScamReview
 from bot.keyboards.main_menu import back_button_kb
 from bot.config import settings
 from bot.utils.helpers import format_number
@@ -19,6 +20,7 @@ logger = structlog.get_logger()
 router = Router()
 
 _maintenance_mode = False
+_PROCESS_STARTED = time.monotonic()
 
 
 class OwnerStates(StatesGroup):
@@ -42,6 +44,7 @@ def owner_kb(_=None) -> object:
     # Global overview & analytics
     builder.button(text="🌐 Global Controls", callback_data="owner:global_controls")
     builder.button(text="📊 Statistics", callback_data="owner:stats")
+    builder.button(text="🩺 Bot Health Monitor", callback_data="owner:health")
     # Group network & rewards
     builder.button(text="👥 Groups • Activity • Links • Permissions", callback_data="owner:groups")
     builder.button(text="🎁 Affiliate / Referral", callback_data="owner:referrals")
@@ -53,7 +56,7 @@ def owner_kb(_=None) -> object:
     builder.button(text=f"{'🟢 Disable' if _maintenance_mode else '🔧 Enable'} Maintenance", callback_data="owner:maintenance")
     builder.button(text="👤 User List", callback_data="owner:users")
     builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
-    builder.adjust(2, 2, 2, 2, 2, 2)
+    builder.adjust(2, 2, 2, 2, 2, 2, 1)
     return builder.as_markup()
 
 
@@ -233,6 +236,51 @@ async def owner_settings(callback: CallbackQuery, _: callable, db_session: Async
         "Choose a control below. These controls are restricted to the configured bot owner.",
         parse_mode="HTML", reply_markup=builder.as_markup()
     )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner:health")
+async def owner_health(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Not available.", show_alert=True)
+        return
+    db_status = "🟢 Connected"
+    try:
+        await db_session.execute(select(1))
+        active_groups = await db_session.scalar(
+            select(func.count()).select_from(Group).where(Group.is_active.is_(True))
+        )
+        dm_users = await db_session.scalar(
+            select(func.count()).select_from(User).where(User.dm_started.is_(True))
+        )
+        pending_reviews = await db_session.scalar(
+            select(func.count()).select_from(ScamReview).where(ScamReview.status == "pending")
+        )
+    except Exception as exc:
+        await db_session.rollback()
+        db_status = "🔴 Check failed"
+        active_groups = dm_users = pending_reviews = 0
+        logger.warning("Owner health database check failed", error=str(exc))
+    uptime_seconds = max(0, int(time.monotonic() - _PROCESS_STARTED))
+    hours, remainder = divmod(uptime_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    uptime = f"{hours}h {minutes}m {seconds}s"
+    text = (
+        "🩺 <b>ALEXA BOT HEALTH MONITOR</b>\\n\\n"
+        "🟢 Process: <b>Running</b>\\n"
+        f"🗄️ Database: <b>{db_status}</b>\\n"
+        f"⏱️ Process uptime: <code>{uptime}</code>\\n"
+        f"👥 Active groups: <b>{format_number(active_groups or 0)}</b>\\n"
+        f"👤 DM starters: <b>{format_number(dm_users or 0)}</b>\\n"
+        f"🛡️ Pending scam reviews: <b>{format_number(pending_reviews or 0)}</b>\\n\\n"
+        "This is a live snapshot, not a guarantee of uninterrupted hosting. "
+        "The external /health endpoint remains available when the host keeps the process awake."
+    )
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔄 Refresh", callback_data="owner:health")
+    builder.button(text="◀️ Owner Panel", callback_data="owner:menu")
+    builder.adjust(2)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
     await callback.answer()
 
 
