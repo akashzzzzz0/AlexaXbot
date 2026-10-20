@@ -71,6 +71,9 @@ def build_help_text(_: callable) -> str:
         "⚔️ <b>Multiverse Wars</b>\n"
         "/war /warmission /waranswer /warboard /worldrank /mystery /warresult — missions, rankings and rewards\n"
         "/warregister /warleave /warchallenge /waraccept — group admin controls\n\n"
+        "🌌 <b>Ultra VIP Package</b>\n/empire — Global Empire ranking\n"
+        "/empirecreate — Create an Empire (group admins)\n/empirecontribute — Add daily Empire XP\n"
+        "/vip — Elite Club profile\n/vault — Open daily Legendary Vault\n/badges — View your collection\n\n"
         f"<i>{_('help_hint')}</i>"
     )
 
