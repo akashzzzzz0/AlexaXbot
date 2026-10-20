@@ -1,7 +1,7 @@
 import asyncio
 import time
 from aiogram import Router, F, Bot
-from aiogram.types import CallbackQuery, Message, BotCommand, BotCommandScopeDefault, BotCommandScopeChat
+from aiogram.types import CallbackQuery, Message, BotCommand, BotCommandScopeDefault, BotCommandScopeChat, ReplyParameters
 from aiogram.exceptions import TelegramRetryAfter, TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -1853,8 +1853,8 @@ async def _render_inbox_conversation(callback: CallbackQuery, db_session: AsyncS
     lines.extend(["", f"Username: <code>{sender_handle}</code>", f"User ID: <code>{user.id}</code>"])
     builder = InlineKeyboardBuilder()
     for item in reversed(messages):
+        builder.button(text=f"↩️ Reply to message #{item.id}", callback_data=f"owner:inbox_reply:{user_id}:{item.id}")
         builder.button(text=f"🗑️ Delete message #{item.id}", callback_data=f"owner:inbox_delete:{user_id}:{item.id}")
-    builder.button(text="↩️ Reply to User", callback_data=f"owner:inbox_reply:{user_id}")
     builder.button(text="🔄 Refresh Messages", callback_data=f"owner:inbox:{user_id}")
     builder.button(text="◀️ All User Messages", callback_data="owner:inbox")
     builder.button(text="👑 Owner Panel", callback_data="owner:menu")
@@ -1880,26 +1880,32 @@ async def owner_inbox_conversation(callback: CallbackQuery, db_session: AsyncSes
 
 
 @router.callback_query(F.data.startswith("owner:inbox_reply:"))
-async def owner_inbox_reply_start(callback: CallbackQuery, state: FSMContext, **kwargs):
+async def owner_inbox_reply_start(callback: CallbackQuery, state: FSMContext, db_session: AsyncSession, **kwargs):
     if not is_owner(callback.from_user.id) or not callback.message or callback.message.chat.type != "private":
         await callback.answer("Not available.", show_alert=True)
         return
     try:
-        user_id = int(callback.data.rsplit(":", 1)[1])
+        _, _, user_id_text, inbox_id_text = callback.data.split(":")
+        user_id, inbox_id = int(user_id_text), int(inbox_id_text)
     except (ValueError, IndexError):
-        await callback.answer("Invalid user.", show_alert=True)
+        await callback.answer("Invalid message.", show_alert=True)
+        return
+    item = await db_session.get(InboxMessage, inbox_id)
+    if not item or item.user_id != user_id:
+        await callback.answer("Message not found.", show_alert=True)
         return
     await state.set_state(OwnerStates.waiting_inbox_reply)
-    await state.update_data(inbox_reply_user_id=user_id)
+    await state.update_data(inbox_reply_user_id=user_id, inbox_reply_inbox_id=inbox_id)
     await callback.message.answer(
-        f"↩️ Send the reply for Telegram user <code>{user_id}</code>.\n"
-        "Send /cancel to stop. ALEXA will deliver your reply to that user.", parse_mode="HTML"
+        f"↩️ Replying to message #{inbox_id} from user <code>{user_id}</code>.\n"
+        "Send your reply now. It will be attached to that exact message in the user's chat.\n"
+        "Send /cancel to stop.", parse_mode="HTML"
     )
     await callback.answer()
 
 
 @router.message(OwnerStates.waiting_inbox_reply)
-async def owner_inbox_reply_send(message: Message, state: FSMContext, **kwargs):
+async def owner_inbox_reply_send(message: Message, state: FSMContext, db_session: AsyncSession, **kwargs):
     if not is_owner(message.from_user.id) or message.chat.type != "private":
         await state.clear()
         return
@@ -1910,8 +1916,16 @@ async def owner_inbox_reply_send(message: Message, state: FSMContext, **kwargs):
     data = await state.get_data()
     try:
         user_id = int(data.get("inbox_reply_user_id"))
-        await message.copy_to(chat_id=user_id)
-        await message.reply("✅ Reply sent through ALEXA.")
+        inbox_id = int(data.get("inbox_reply_inbox_id"))
+        item = await db_session.get(InboxMessage, inbox_id)
+        if not item or item.user_id != user_id:
+            await message.reply("❌ This inbox message no longer exists. Open the inbox and choose a message again.")
+            return
+        await message.copy_to(
+            chat_id=user_id,
+            reply_parameters=ReplyParameters(message_id=item.telegram_message_id, allow_sending_without_reply=True),
+        )
+        await message.reply(f"✅ Reply sent to message #{inbox_id} through ALEXA.")
     except TelegramForbiddenError:
         await message.reply("❌ ALEXA cannot message this user. They may have blocked the bot.")
     except Exception as exc:
