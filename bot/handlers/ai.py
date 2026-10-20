@@ -37,13 +37,18 @@ def _api_key() -> str:
 
 def _message_text(message: Message) -> str:
     text = (message.text or message.caption or "").strip()
+    replied = message.reply_to_message
     if text:
         # Remove the command and its arguments from the request body.
         parts = text.split(maxsplit=1)
         if parts and parts[0].startswith("/"):
-            return parts[1].strip() if len(parts) > 1 else ""
+            if len(parts) > 1 and parts[1].strip():
+                return parts[1].strip()
+            # Commands without arguments can operate on the replied-to message.
+            if replied:
+                return (replied.text or replied.caption or "").strip()
+            return ""
         return text
-    replied = message.reply_to_message
     if replied:
         return (replied.text or replied.caption or "").strip()
     return ""
@@ -162,8 +167,13 @@ async def translate_command(message: Message) -> None:
     if text:
         parts = text.split(maxsplit=1)
         if len(parts) < 2:
-            await message.reply("Usage: /translate <language> <text>, or reply to a message with /translate <language>.")
-            return
-        language, body = parts[0], parts[1]
+            language = parts[0]
+            replied = message.reply_to_message
+            body = ((replied.text or replied.caption or "").strip() if replied else "")
+            if not body:
+                await message.reply("Usage: /translate <language> <text>, or reply to a message with /translate <language>.")
+                return
+        else:
+            language, body = parts[0], parts[1]
         text = f"Translate the following text into {language}. Return only the translation:\n\n{body}"
     await _handle(message, text)
