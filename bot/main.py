@@ -124,7 +124,7 @@ async def configure_command_visibility(bot) -> None:
         ("withdraw", "Withdraw coins"), ("transfer", "Transfer coins"),
         ("referral", "Get referral link"), ("ref", "Get referral link"),
         ("achievements", "View achievements"), ("transactions", "View transactions"),
-        ("tx", "View transactions"), ("terms", "Premium Stars terms"),
+        ("tx", "View transactions"),
         ("stats", "View statistics"), ("gstats", "View group statistics"),
         ("security", "Group security panel"), ("settings", "Group settings"),
         ("setwelcome", "Set group welcome message"), ("ban", "Ban a member"),
