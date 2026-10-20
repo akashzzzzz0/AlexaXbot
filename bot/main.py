@@ -70,7 +70,7 @@ async def setup_database_with_retry(retries=5, delay=3):
 
 
 async def configure_command_visibility(bot) -> None:
-    """Show public commands to members and full group commands to chat administrators."""
+    """Keep game commands public; show full controls to group admins and owner in DM."""
     from bot.config import settings
     from aiogram.types import (
         BotCommand, BotCommandScopeDefault, BotCommandScopeChat,
@@ -78,76 +78,118 @@ async def configure_command_visibility(bot) -> None:
         BotCommandScopeAllChatAdministrators,
     )
 
+    # Normal members get game/everyday play commands only. Help can still show
+    # the complete command guide in private chat without exposing admin controls
+    # in the Telegram slash-command menu.
     public_commands = [
-        ("start", "Start ALEXA"), ("menu", "Open main menu"), ("help", "Show commands"),
-        ("language", "Choose language"), ("wallet", "View wallet"), ("bal", "View balance"),
-        ("daily", "Claim daily coins"), ("weekly", "Claim weekly coins"), ("monthly", "Claim monthly coins"),
-        ("terms", "Premium Stars payment terms"), ("referral", "Get referral link"), ("achievements", "View achievements"),
-        ("games", "Open games"), ("ludo", "Play Ludo race"), ("bingo", "Play Bingo"), ("dice", "Play dice"), ("rps", "Rock paper scissors"),
-        ("quiz", "Play quiz"), ("wheel", "Spin the wheel"), ("roulette", "Play roulette"), ("rullet", "Play roulette"),
-        ("cards", "Play cards"), ("uno", "Play UNO with group friends"), ("mines", "Play mines"), ("treasure", "Treasure hunt"),
-        ("numwar", "Number war"), ("stats", "View stats"), ("rank", "View your rank"),
-        ("leaders", "Top players"), ("items", "View your items"), ("pfp", "Profile photo"),
-        ("empire", "Multiverse Empire ranking"),
-        ("empirecontribute", "Contribute to your Empire"), ("vip", "View Elite Club status"), ("pro", "View VIP status"),
-        ("vault", "Open daily Legendary Vault"), ("badges", "View collectible badges"),
-        ("arena", "Open World Arena"), ("play", "Play a World Arena challenge"),
-        ("battle", "Challenge a player"),
+        ("start", "Start ALEXA"), ("help", "Open full command guide"),
+        ("menu", "Open main menu"), ("games", "Open games"),
+        ("dice", "Play dice"), ("rps", "Play Rock Paper Scissors"),
+        ("quiz", "Play quiz"), ("wheel", "Spin the wheel"),
+        ("numwar", "Play Number War"), ("cards", "Play card game"),
+        ("card", "Play card game"), ("uno", "Play multiplayer UNO"),
+        ("treasure", "Play treasure hunt"), ("mines", "Play mines"),
+        ("roulette", "Play roulette"), ("rullet", "Play roulette"),
+        ("ludo", "Play Ludo race"), ("bingo", "Play Bingo"),
+        ("duel", "Challenge a player"), ("arena", "Open World Arena"),
+        ("play", "Play an Arena challenge"), ("battle", "Challenge a player"),
+        ("arenadaily", "Claim Arena daily reward"), ("myrank", "View Arena rank"),
+        ("worldtop", "View world leaderboard"), ("grouprank", "View group rank"),
+        ("worldgroups", "View group leaderboard"),
+        ("bal", "View game balance"), ("kill", "Virtual game action"),
+        ("rob", "Try a virtual robbery"), ("revive", "Revive game profile"),
+        ("protect", "Buy virtual protection"), ("unprotect", "Remove protection"),
+        ("rank", "View your rank"), ("leaders", "View player leaderboard"),
+        ("topkill", "Top virtual kill scores"), ("toprich", "Richest players"),
+        ("toprob", "Top successful robs"), ("items", "View game items"),
+        ("task", "View game tasks"), ("bomb", "Play Bomb"), ("bluff", "Play Bluff"),
+        ("hack", "Play Hack"), ("pfp", "View profile photo"),
+        ("empire", "View Empire ranking"), ("empirecontribute", "Contribute Empire XP"),
+        ("vip", "View Elite Club status"), ("pro", "View VIP status"),
+        ("vault", "Open Legendary Vault"), ("badges", "View badges"),
+        ("war", "View/start Multiverse War"), ("warregister", "Register for a War"),
+        ("warleave", "Leave a War"), ("warmission", "View War mission"),
+        ("waranswer", "Answer a War mission"), ("warboard", "View War board"),
+        ("warchallenge", "Challenge a War"), ("waraccept", "Accept a War challenge"),
+        ("warresult", "View War result"), ("worldrank", "View world rank"),
+        ("mystery", "Play Mystery"),
     ]
+
     admin_commands = public_commands + [
+        ("language", "Choose language"), ("lang", "Choose language"),
+        ("wallet", "View wallet"), ("balance", "View balance"),
+        ("economy", "View economy"), ("eco", "View economy"),
+        ("daily", "Claim daily coins"), ("weekly", "Claim weekly coins"),
+        ("monthly", "Claim monthly coins"), ("deposit", "Deposit coins"),
+        ("withdraw", "Withdraw coins"), ("transfer", "Transfer coins"),
+        ("referral", "Get referral link"), ("ref", "Get referral link"),
+        ("achievements", "View achievements"), ("transactions", "View transactions"),
+        ("tx", "View transactions"), ("terms", "Premium Stars terms"),
+        ("stats", "View statistics"), ("gstats", "View group statistics"),
         ("security", "Group security panel"), ("settings", "Group settings"),
-        ("ban", "Ban a member"), ("unban", "Unban a member"), ("kick", "Kick a member"),
-        ("mute", "Mute a member"), ("unmute", "Unmute a member"), ("promote", "Promote a member"),
-        ("demote", "Demote a member"), ("warn", "Warn a member"), ("unwarn", "Remove warning"),
-        ("warns", "View warnings"), ("warnings", "View warnings"), ("resetwarns", "Reset warnings"),
-        ("del", "Delete a replied message"), ("pin", "Pin a message"), ("unpin", "Unpin a message"),
-        ("history", "Moderation history"), ("setflood", "Configure flood limit"),
+        ("setwelcome", "Set group welcome message"), ("ban", "Ban a member"),
+        ("unban", "Unban a member"), ("kick", "Kick a member"),
+        ("mute", "Mute a member"), ("unmute", "Unmute a member"),
+        ("promote", "Promote a member"), ("demote", "Demote a member"),
+        ("warn", "Warn a member"), ("unwarn", "Remove warning"),
+        ("warns", "View warnings"), ("warnings", "View warnings"),
+        ("resetwarn", "Reset warnings"), ("resetwarns", "Reset warnings"),
+        ("approvebio", "Approve bio link"), ("note", "Add a member note"),
+        ("del", "Delete a replied message"), ("purg", "Bulk-delete messages"),
+        ("pin", "Pin a message"), ("unpin", "Unpin a message"),
+        ("history", "View moderation history"), ("setflood", "Configure flood limit"),
         ("flood", "Show flood settings"), ("setfloodmode", "Set flood action"),
         ("clearflood", "Clear flood counters"), ("setrole", "Set member label"),
         ("clearrole", "Clear member label"), ("role", "Manage member labels"),
         ("lock", "Lock group content"), ("unlock", "Unlock group content"),
-        ("locks", "Open content locks"), ("locktypes", "Show lock types"),
+        ("locks", "List content locks"), ("locktypes", "List lock types"),
         ("rules", "Show group rules"), ("setrules", "Set group rules"),
         ("filter", "Add keyword auto-reply"), ("stopfilter", "Remove keyword filter"),
-        ("save", "Save a message"), ("get", "Get saved message"), ("clear", "Clear saved message"),
-        ("blocklist", "Show blocked keywords"), ("addblocklist", "Block a keyword"),
-        ("rmblocklist", "Unblock a keyword"), ("disablecmd", "Disable group command"),
-        ("enablecmd", "Enable group command"), ("disabledcmds", "List disabled commands"),
-        ("id", "Show IDs"), ("info", "Show user info"), ("admins", "List group admins"),
-        ("report", "Report a member"), ("grouppromo", "Group promotion tools"),
-        ("deposit", "Deposit coins"), ("withdraw", "Withdraw coins"), ("transfer", "Transfer coins"),
-        ("toprich", "Richest players"), ("topkill", "Top virtual kill scores"),
-        ("toprob", "Top successful robs"), ("protect", "Buy virtual protection"),
-        ("unprotect", "Remove protection"), ("kill", "Virtual game action"),
-        ("rob", "Virtual coin game"), ("revive", "Revive game profile"),
-        ("bluff", "Play bluff game"), ("hack", "Play hack game"), ("task", "View tasks"),
-        ("shield", "Configure Community Shield"), ("shieldreport", "Report suspected scam"),
-        ("shieldcheck", "Check Community Shield reports"),
-        ("scamreview", "Queue a scam review"), ("scamreviews", "List pending scam reviews"),
-        ("scamresolve", "Mark a scam review as reviewed"),
-        ("empirecreate", "Create this group Empire"),
+        ("save", "Save a message"), ("get", "Get saved message"),
+        ("clear", "Clear saved message"), ("blocklist", "Show blocked words"),
+        ("addblocklist", "Block a word"), ("rmblocklist", "Unblock a word"),
+        ("disablecmd", "Disable a group command"), ("enablecmd", "Enable a command"),
+        ("disabledcmds", "List disabled commands"), ("id", "Show IDs"),
+        ("info", "Show user info"), ("admins", "List group admins"),
+        ("report", "Report a member"), ("autodelete", "Configure auto-delete"),
+        ("grouppromo", "Group promotion tools"), ("shield", "Community Shield settings"),
+        ("shieldreport", "Report suspected scam"), ("shieldcheck", "Check scam reports"),
+        ("scamreview", "Queue scam review"), ("scamreviews", "List scam reviews"),
+        ("scamresolve", "Resolve scam review"), ("approve", "Approve a member"),
+        ("unapprove", "Remove member approval"), ("empirecreate", "Create group Empire"),
     ]
-    # Telegram allows at most 100 commands per scope. Keep the visible menu
-    # within the limit; all handlers/features remain available by typing commands.
-    admin_commands = admin_commands[:90]
-    public = [BotCommand(command=name, description=description) for name, description in public_commands]
-    admin = [BotCommand(command=name, description=description) for name, description in admin_commands]
+
+    # BotFather/Telegram accepts at most 100 commands in each scope. Keep every
+    # distinct command, and fail clearly in logs if a future addition exceeds it.
+    def to_bot_commands(items):
+        unique = {}
+        for name, description in items:
+            unique[name] = description
+        if len(unique) > 100:
+            raise ValueError(f"Command scope contains {len(unique)} commands; Telegram limit is 100")
+        return [BotCommand(command=name, description=description) for name, description in unique.items()]
+
+    public = to_bot_commands(public_commands)
+    admin = to_bot_commands(admin_commands)
     try:
-        # Normal members see only public commands. Telegram automatically applies
-        # the administrator scope to group admins and the group creator.
+        # Public/default, private chats and group chats all get the games menu.
         await bot.set_my_commands(public, scope=BotCommandScopeDefault())
         await bot.set_my_commands(public, scope=BotCommandScopeAllPrivateChats())
         await bot.set_my_commands(public, scope=BotCommandScopeAllGroupChats())
+        # Telegram automatically applies this scope to group admins and creators.
         await bot.set_my_commands(admin, scope=BotCommandScopeAllChatAdministrators())
         owner_id = settings.effective_owner_id
         if owner_id:
-            # Keep /owner out of Telegram's command menu; it remains available
-            # through its owner-only handler.
+            # The owner's private chat gets the full command menu; /owner remains hidden.
             await bot.set_my_commands(admin, scope=BotCommandScopeChat(chat_id=owner_id))
-        logger.info("Telegram command visibility configured", owner_id=settings.effective_owner_id or None)
+        logger.info(
+            "Telegram command visibility configured",
+            public_command_count=len(public),
+            admin_command_count=len(admin),
+            owner_id=settings.effective_owner_id or None,
+        )
     except Exception as exc:
         logger.warning("Could not configure command visibility", error=str(exc))
-
 
 
 async def on_startup(bot) -> None:
