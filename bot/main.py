@@ -92,9 +92,7 @@ async def configure_command_visibility(bot) -> None:
         ("empirecontribute", "Contribute to your Empire"), ("vip", "View Elite Club status"),
         ("vault", "Open daily Legendary Vault"), ("badges", "View collectible badges"),
         ("arena", "Open World Arena"), ("play", "Play a World Arena challenge"),
-        ("battle", "Challenge a player"), ("ai", "Ask Gemini AI"),
-        ("rewrite", "Rewrite text with AI"), ("translate", "Translate text with AI"),
-        ("summarize", "Summarize text with AI"),
+        ("battle", "Challenge a player"),
     ]
     admin_commands = public_commands + [
         ("security", "Group security panel"), ("settings", "Group settings"),
