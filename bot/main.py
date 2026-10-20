@@ -165,12 +165,44 @@ async def configure_command_visibility(bot) -> None:
         unique = {}
         for name, description in items:
             unique[name] = description
-        if len(unique) > 100:
-            raise ValueError(f"Command scope contains {len(unique)} commands; Telegram limit is 100")
-        return [BotCommand(command=name, description=description) for name, description in unique.items()]
+        commands = list(unique.items())
+        if len(commands) > 100:
+            logger.warning(
+                "Telegram command menu exceeds the 100-command limit; "
+                "remaining commands will still be available in /help",
+                total_commands=len(commands),
+                shown_commands=100,
+            )
+            commands = commands[:100]
+        return [BotCommand(command=name, description=description) for name, description in commands]
 
     public = to_bot_commands(public_commands)
-    admin = to_bot_commands(admin_commands)
+    # Telegram hard-limits each slash-command menu to 100 commands. Prioritize
+    # the most-used economy and group-admin controls, then include game commands.
+    # The complete command catalogue remains available through /help.
+    admin_priority = [
+        ("wallet", "View wallet"), ("daily", "Claim daily coins"),
+        ("weekly", "Claim weekly coins"), ("monthly", "Claim monthly coins"),
+        ("transfer", "Transfer coins"), ("referral", "Get referral link"),
+        ("achievements", "View achievements"), ("security", "Group security panel"),
+        ("settings", "Group settings"), ("ban", "Ban a member"),
+        ("unban", "Unban a member"), ("kick", "Kick a member"),
+        ("mute", "Mute a member"), ("unmute", "Unmute a member"),
+        ("promote", "Promote a member"), ("demote", "Demote a member"),
+        ("warn", "Warn a member"), ("unwarn", "Remove warning"),
+        ("warns", "View warnings"), ("resetwarns", "Reset warnings"),
+        ("del", "Delete a replied message"), ("purg", "Bulk-delete messages"),
+        ("pin", "Pin a message"), ("unpin", "Unpin a message"),
+        ("history", "Moderation history"), ("lock", "Lock group content"),
+        ("unlock", "Unlock group content"), ("locks", "List content locks"),
+        ("locktypes", "List lock types"), ("setflood", "Configure flood limit"),
+        ("flood", "Show flood settings"), ("setfloodmode", "Set flood action"),
+        ("clearflood", "Clear flood counters"), ("rules", "Show group rules"),
+        ("setrules", "Set group rules"), ("id", "Show IDs"),
+        ("info", "Show user info"), ("admins", "List group admins"),
+        ("report", "Report a member"),
+    ]
+    admin = to_bot_commands(admin_priority + admin_commands)
     try:
         # Public/default, private chats and group chats all get the games menu.
         await bot.set_my_commands(public, scope=BotCommandScopeDefault())
