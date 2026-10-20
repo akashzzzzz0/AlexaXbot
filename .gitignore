@@ -15,9 +15,11 @@ env/
 *.swp
 *.swo
 
-# Environment
+# Environment and private secrets
 .env
 .env.local
+bot/gemini_secret.py
+*secret*.local.py
 
 # Logs
 logs/
