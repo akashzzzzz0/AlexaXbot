@@ -80,23 +80,37 @@ def build_help_text(_: callable) -> str:
 
  
 def build_public_help_text(_: callable) -> str:
-    """Command list safe to show to ordinary group members."""
+    """Games-only command guide for ordinary group members."""
     return (
-        "❓ <b>ALEXA Help Center</b>\n\n"
-        "💰 <b>Economy</b>\n"
-        "/wallet — View wallet\n/daily — Claim daily reward\n"
-        "/weekly — Claim weekly reward\n/monthly — Claim monthly reward\n"
-        "/referral — Get referral link\n/achievements — View achievements\n\n"
-        "🎮 <b>Games</b>\n"
-        "/dice — Play dice\n/rps — Rock Paper Scissors\n/quiz — Play quiz\n"
-        "/wheel — Spin the wheel\n/numwar — Number War\n/cards — Card game\n/uno — Multiplayer UNO with private cards\n"
-        "/treasure — Treasure hunt\n/mines — Mines game\n/roulette — Roulette\n"
-        "/bal — View game balance\n/rank — View your rank\n/leaders — Top players\n"
-        "/items — View game items\n/pfp — View profile picture\n\n"
-        "🌌 <b>Ultra VIP Package</b>\n/empire — Global Empire ranking\n"
-        "/empirecreate — Create an Empire (group admins)\n/empirecontribute — Add daily Empire XP\n"
-        "/vip — Elite Club profile\n/vault — Open daily Legendary Vault\n/badges — View your collection\n\n"
-        "ℹ️ <b>Other</b>\n/language — Change language\n/stats — View statistics\n/help — Show help"
+        "🎮 <b>ALEXA Games Commands</b>\n\n"
+        "🎲 <b>Classic Games</b>\n"
+        "/games — Open games menu\n"
+        "/dice — Play dice\n/rps — Rock Paper Scissors\n"
+        "/quiz — Play quiz\n/wheel — Spin the wheel\n"
+        "/numwar — Play Number War\n/cards — Play card game\n"
+        "/card — Card game alias\n/uno — Multiplayer UNO (group game; cards in DM)\n"
+        "/treasure — Treasure hunt\n/mines — Play Mines\n"
+        "/roulette — Play roulette\n/rullet — Roulette alias\n"
+        "/ludo — Ludo race\n/bingo — Bingo\n/duel — Challenge a player\n\n"
+        "🪙 <b>Virtual Games & Player Stats</b>\n"
+        "/bal — Check game balance\n/kill — Virtual game action\n"
+        "/rob — Try a virtual robbery\n/revive — Revive game profile\n"
+        "/protect — Buy virtual protection\n/unprotect — Remove protection\n"
+        "/rank — Your rank\n/leaders — Player leaderboard\n"
+        "/topkill — Top kill scores\n/toprich — Richest players\n"
+        "/toprob — Top robbers\n/items — Game items\n/task — Game tasks\n"
+        "/bomb — Bomb game\n/bluff — Bluff game\n/hack — Hack game\n"
+        "/pfp — View profile photo\n\n"
+        "🏟️ <b>World Arena & Challenges</b>\n"
+        "/arena — Open World Arena\n/play — Play an Arena challenge\n"
+        "/arenadaily — Claim Arena daily reward\n/myrank — Arena rank\n"
+        "/worldtop — World leaderboard\n/grouprank — Group rank\n"
+        "/worldgroups — Group leaderboard\n/battle — Challenge a player\n"
+        "/war /warregister /warleave — War participation\n"
+        "/warmission /waranswer /warboard — War missions and board\n"
+        "/warchallenge /waraccept /warresult — War challenges and results\n"
+        "/worldrank /mystery — World rank and Mystery game\n\n"
+        "Use /help in Alexa's private chat for the complete command guide."
     )
 
 
@@ -110,6 +124,11 @@ async def _is_group_admin(bot, chat, user_id: int) -> bool:
         return False
 
 
+async def _has_full_help_access(bot, chat, user_id: int) -> bool:
+    # In private chat the user explicitly requested the full help catalogue.
+    return chat.type == "private" or await _is_group_admin(bot, chat, user_id)
+
+
 def help_menu_kb(is_admin: bool = False) -> InlineKeyboardMarkup:
     rows = []
     if is_admin:
@@ -117,11 +136,10 @@ def help_menu_kb(is_admin: bool = False) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🛡️ Moderation", callback_data="help:moderation"),
             InlineKeyboardButton(text="🔒 Security", callback_data="help:security"),
         ])
+    rows.append([InlineKeyboardButton(text="🎮 Games", callback_data="help:games")])
+    if is_admin:
+        rows.append([InlineKeyboardButton(text="💰 Economy", callback_data="help:economy")])
     rows.extend([
-        [
-            InlineKeyboardButton(text="🎮 Games", callback_data="help:games"),
-            InlineKeyboardButton(text="💰 Economy", callback_data="help:economy"),
-        ],
         [InlineKeyboardButton(text="📋 All Commands", callback_data="help:commands")],
         [InlineKeyboardButton(text="🏠 Main Menu", callback_data="menu:main")],
     ])
@@ -170,7 +188,7 @@ HELP_GUIDES = {
 
 @router.message(Command('help'))
 async def cmd_help(message: Message, _: callable, **kwargs):
-    is_admin = await _is_group_admin(message.bot, message.chat, message.from_user.id)
+    is_admin = await _has_full_help_access(message.bot, message.chat, message.from_user.id)
     text = build_help_text(_) if is_admin else build_public_help_text(_)
     await message.answer(
         text,
@@ -184,7 +202,7 @@ async def cmd_help(message: Message, _: callable, **kwargs):
 
 @router.callback_query(F.data == "menu:help")
 async def menu_help(callback: CallbackQuery, **kwargs):
-    is_admin = await _is_group_admin(callback.bot, callback.message.chat, callback.from_user.id)
+    is_admin = await _has_full_help_access(callback.bot, callback.message.chat, callback.from_user.id)
     # Remove the temporary /start welcome/menu and show role-appropriate help.
     try:
         await callback.message.delete()
@@ -201,7 +219,7 @@ async def menu_help(callback: CallbackQuery, **kwargs):
 @router.callback_query(F.data.startswith("help:"))
 async def help_section(callback: CallbackQuery, _: callable, **kwargs):
     section = callback.data
-    is_admin = await _is_group_admin(callback.bot, callback.message.chat, callback.from_user.id)
+    is_admin = await _has_full_help_access(callback.bot, callback.message.chat, callback.from_user.id)
     if section in ("help:moderation", "help:security") and not is_admin:
         await callback.answer("Admin help is visible only to group admins.", show_alert=True)
         return
