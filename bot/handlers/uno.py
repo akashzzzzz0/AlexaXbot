@@ -106,7 +106,13 @@ def _color_keyboard(game_id):
 def _hand_keyboard(game, user_id):
     builder = InlineKeyboardBuilder()
     is_turn = game["started"] and not game.get("pending_wild") and game["players"][game["current"]]["id"] == user_id
-    if is_turn:
+    drawn_index = game.get("drawn_pending", {}).get(user_id)
+    if is_turn and drawn_index is not None:
+        card = game["hands"][user_id][drawn_index]
+        builder.button(text=f"▶️ Play drawn: {_card_emoji(card)}"[:60], callback_data=f"uno:play:{game['id']}:{drawn_index}")
+        builder.button(text="⏭️ Pass turn", callback_data=f"uno:pass:{game['id']}")
+        builder.adjust(1, 1)
+    elif is_turn:
         for index, card in enumerate(game["hands"][user_id]):
             builder.button(text=_card_emoji(card)[:30], callback_data=f"uno:play:{game['id']}:{index}")
         builder.adjust(2)
@@ -116,6 +122,7 @@ def _hand_keyboard(game, user_id):
     if not builder.buttons:
         return None
     return builder.as_markup()
+
 
 
 def _render_hand_image(cards):
@@ -297,6 +304,7 @@ async def _begin_game(callback, game):
     game["started"] = True
     game["uno_pending"] = set()
     game["pending_wild"] = None
+    game["drawn_pending"] = {}
     game["dm_messages"] = {}
     try:
         for player in game["players"]:
@@ -334,7 +342,7 @@ async def _create_lobby(message: Message, creator_user=None):
         "players": [{"id": creator.id, "name": creator.full_name or creator.first_name or "Player"}],
         "hands": {}, "deck": [], "discard": [], "color": "R", "current": 0,
         "direction": 1, "started": False, "dm_messages": {}, "uno_pending": set(),
-        "pending_wild": None,
+        "pending_wild": None, "drawn_pending": {},
     }
     sent = await message.answer(
         _board_text(game, "🎮 Join the game, then the creator can start."),
@@ -414,10 +422,15 @@ async def play_uno_card(callback: CallbackQuery, **kwargs):
     except (ValueError, IndexError, KeyError):
         await callback.answer("That card is no longer in your hand. Refresh your DM.", show_alert=True)
         return
+    drawn_index = game.get("drawn_pending", {}).get(user_id)
+    if drawn_index is not None and index != drawn_index:
+        await callback.answer("After drawing, you can only play the card you just drew.", show_alert=True)
+        return
     if not _legal(game, card, user_id):
         await callback.answer("You can't play that card on the current colour/card.", show_alert=True)
         return
     await _penalize_uno(game, user_id)
+    game.get("drawn_pending", {}).pop(user_id, None)
     game["hands"][user_id].pop(index)
     game["discard"].append(card)
     if not game["hands"][user_id]:
@@ -497,9 +510,33 @@ async def draw_uno_card(callback: CallbackQuery, **kwargs):
         return
     await _penalize_uno(game, user_id)
     _draw_for(game, user_id, 1)
+    drawn_index = len(game["hands"][user_id]) - 1
+    if _legal(game, game["hands"][user_id][drawn_index], user_id):
+        game.setdefault("drawn_pending", {})[user_id] = drawn_index
+        await _update_board(callback.bot, game, f"➕ {escape(next(p['name'] for p in game['players'] if p['id'] == user_id))} drew a playable card and must play it or pass.")
+        await callback.answer("Playable card drawn — play it or pass.")
+    else:
+        _advance(game)
+        await _update_board(callback.bot, game, f"➕ {escape(next(p['name'] for p in game['players'] if p['id'] == user_id))} drew a card and passed.")
+        await callback.answer("Card drawn; turn passed.")
+    await _refresh_hands(callback.bot, game)
+
+
+@router.callback_query(F.data.startswith("uno:pass:"))
+async def pass_after_draw(callback: CallbackQuery, **kwargs):
+    game_id = callback.data.split(":")[2]
+    game = _GAMES.get(game_id)
+    user_id = callback.from_user.id
+    if not game or not game["started"] or game["players"][game["current"]]["id"] != user_id:
+        await callback.answer("It's not your turn.", show_alert=True)
+        return
+    if game.get("drawn_pending", {}).pop(user_id, None) is None:
+        await callback.answer("There is no drawn card to pass.", show_alert=True)
+        return
     _advance(game)
-    await _update_board(callback.bot, game, f"➕ {escape(next(p['name'] for p in game['players'] if p['id'] == user_id))} drew a card.")
-    await callback.answer("Card drawn.")
+    name = next((p["name"] for p in game["players"] if p["id"] == user_id), "Player")
+    await _update_board(callback.bot, game, f"⏭️ {escape(name)} passed after drawing.")
+    await callback.answer("Turn passed.")
     await _refresh_hands(callback.bot, game)
 
 
