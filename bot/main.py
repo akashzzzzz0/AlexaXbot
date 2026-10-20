@@ -88,6 +88,9 @@ async def configure_command_visibility(bot) -> None:
         ("cards", "Play cards"), ("mines", "Play mines"), ("treasure", "Treasure hunt"),
         ("numwar", "Number war"), ("stats", "View stats"), ("rank", "View your rank"),
         ("leaders", "Top players"), ("items", "View your items"), ("pfp", "Profile photo"),
+        ("war", "Multiverse Wars menu"), ("warmission", "View daily war mission"),
+        ("waranswer", "Answer daily war mission"), ("warboard", "Weekly war leaderboard"),
+        ("warresult", "View a group challenge result"),
     ]
     admin_commands = public_commands + [
         ("security", "Group security panel"), ("settings", "Group settings"),
@@ -120,6 +123,8 @@ async def configure_command_visibility(bot) -> None:
         ("shieldcheck", "Check Community Shield reports"),
         ("scamreview", "Queue a scam review"), ("scamreviews", "List pending scam reviews"),
         ("scamresolve", "Mark a scam review as reviewed"),
+        ("warregister", "Register this group for Wars"), ("warleave", "Leave Multiverse Wars"),
+        ("warchallenge", "Challenge another registered group"), ("waraccept", "Accept a group war challenge"),
     ]
     public = [BotCommand(command=name, description=description) for name, description in public_commands]
     admin = [BotCommand(command=name, description=description) for name, description in admin_commands]
