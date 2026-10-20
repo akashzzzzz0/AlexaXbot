@@ -48,6 +48,7 @@ def owner_kb(_=None) -> object:
     builder.button(text="🩺 Bot Health Monitor", callback_data="owner:health")
     # Group network & rewards
     builder.button(text="👥 Groups • Activity • Links • Permissions", callback_data="owner:groups")
+    builder.button(text="🔗 Force Join", callback_data="owner:forcejoin")
     builder.button(text="🎁 Affiliate / Referral", callback_data="owner:referrals")
     # Moderation & configuration
     builder.button(text="🔨 Ban All", callback_data="owner:banall")
@@ -58,7 +59,7 @@ def owner_kb(_=None) -> object:
     builder.button(text="👤 User List", callback_data="owner:users")
     builder.button(text="📩 User Messages", callback_data="owner:inbox")
     builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
-    builder.adjust(2, 2, 2, 2, 2, 2, 2)
+    builder.adjust(2, 2, 2, 2, 2, 2, 2, 1)
     return builder.as_markup()
 
 
