@@ -178,7 +178,7 @@ def _board_text(game, status=None):
         hand_count = len(game["hands"].get(player["id"], []))
         marker = " ⬅️ <b>TURN</b>" if game["started"] and index == game["current"] else ""
         lines.append(f"• {escape(player['name'])}: {hand_count} cards{marker}")
-    if not game["started"]:
+    if not game["started"] and not game.get("finished"):
         lines.extend(["", f"Players joined: <b>{len(game['players'])}/8</b>", "Creator: press Start when at least 2 players have joined."])
     elif game.get("pending_wild"):
         lines.extend(["", "🌈 Waiting for the active player to choose a colour."])
@@ -318,7 +318,7 @@ async def _begin_game(callback, game):
     await callback.answer("UNO started!")
 
 
-async def _create_lobby(message: Message):
+async def _create_lobby(message: Message, creator_user=None):
     if message.chat.type not in ("group", "supergroup"):
         await message.answer("Start UNO in a Telegram group with /uno. Your cards will be sent privately by ALEXA.")
         return
@@ -328,7 +328,7 @@ async def _create_lobby(message: Message):
             await message.reply("An UNO game is already active in this group.")
             return
     game_id = secrets.token_hex(3)
-    creator = message.from_user
+    creator = creator_user or message.from_user
     game = {
         "id": game_id, "group_id": message.chat.id, "creator_id": creator.id,
         "players": [{"id": creator.id, "name": creator.full_name or creator.first_name or "Player"}],
@@ -355,7 +355,7 @@ async def menu_uno(callback: CallbackQuery, **kwargs):
     if callback.message.chat.type not in ("group", "supergroup"):
         await callback.answer("Open the Games menu in your group, then choose UNO.", show_alert=True)
         return
-    await _create_lobby(callback.message)
+    await _create_lobby(callback.message, creator_user=callback.from_user)
     await callback.answer()
 
 
