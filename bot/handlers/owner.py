@@ -1800,16 +1800,28 @@ async def owner_inbox(callback: CallbackQuery, db_session: AsyncSession, **kwarg
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("owner:inbox:"))
-async def owner_inbox_conversation(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+@router.callback_query(F.data.startswith("owner:inbox_delete:"))
+async def owner_inbox_delete_message(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
     if not is_owner(callback.from_user.id) or not callback.message or callback.message.chat.type != "private":
         await callback.answer("Not available.", show_alert=True)
         return
     try:
-        user_id = int(callback.data.rsplit(":", 1)[1])
+        _, _, _, user_id_text, inbox_id_text = callback.data.split(":", 4)
+        user_id, inbox_id = int(user_id_text), int(inbox_id_text)
     except (ValueError, IndexError):
-        await callback.answer("Invalid user.", show_alert=True)
+        await callback.answer("Invalid message.", show_alert=True)
         return
+    item = await db_session.get(InboxMessage, inbox_id)
+    if not item or item.user_id != user_id:
+        await callback.answer("Message already removed.", show_alert=True)
+        return
+    await db_session.delete(item)
+    await db_session.commit()
+    await _render_inbox_conversation(callback, db_session, user_id)
+    await callback.answer("Message removed from Alexa inbox.")
+
+
+async def _render_inbox_conversation(callback: CallbackQuery, db_session: AsyncSession, user_id: int):
     user = await db_session.get(User, user_id)
     if not user:
         await callback.answer("User not found.", show_alert=True)
@@ -1820,45 +1832,51 @@ async def owner_inbox_conversation(callback: CallbackQuery, db_session: AsyncSes
     )).all()
     for item in messages:
         item.is_read = True
+    sender_name = escape(user.first_name or "User")
+    sender_handle = f"@{escape(user.username)}" if user.username else "No username"
+    lines = [
+        "📩 <b>USER CHAT</b>",
+        "━━━━━━━━━━━━━━━━━━",
+        f"👤 <b>{sender_name}</b>",
+        f"🔗 {sender_handle}  •  🆔 <code>{user.id}</code>",
+        "",
+    ]
+    if messages:
+        for item in reversed(messages):
+            body = (item.preview or f"[{item.content_type}]").strip()
+            if item.content_type != "text" and not body:
+                body = f"[{item.content_type}]"
+            stamp = item.created_at.strftime("%d %b %H:%M") if item.created_at else "time unknown"
+            lines.append(f"<b>{sender_name}:</b>\n{escape(body[:900])}\n<code>{escape(stamp)}</code>\n")
+    else:
+        lines.append("No saved messages from this user.")
+    lines.extend(["", f"Username: <code>{sender_handle}</code>", f"User ID: <code>{user.id}</code>"])
     builder = InlineKeyboardBuilder()
+    for item in reversed(messages):
+        builder.button(text=f"🗑️ Delete message #{item.id}", callback_data=f"owner:inbox_delete:{user_id}:{item.id}")
     builder.button(text="↩️ Reply to User", callback_data=f"owner:inbox_reply:{user_id}")
     builder.button(text="🔄 Refresh Messages", callback_data=f"owner:inbox:{user_id}")
     builder.button(text="◀️ All User Messages", callback_data="owner:inbox")
     builder.button(text="👑 Owner Panel", callback_data="owner:menu")
     builder.adjust(1)
     await callback.message.edit_text(
-        "📩 <b>USER CONVERSATION</b>\n━━━━━━━━━━━━━━━━━━\n"
-        f"👤 <b>{escape(user.first_name or 'User')}</b>"
-        f"{' (@' + escape(user.username) + ')' if user.username else ''}\n"
-        f"🆔 <code>{user.id}</code>\n"
-        f"Showing latest <b>{len(messages)}</b> saved messages below. Tap Reply to answer through ALEXA.",
-        parse_mode="HTML", reply_markup=builder.as_markup()
+        "\n".join(lines)[:3900],
+        parse_mode="HTML", reply_markup=builder.as_markup(), disable_web_page_preview=True
     )
-    for item in reversed(messages):
-        try:
-            # Put sender identity directly above every copied message, chat-style.
-            sender_name = escape(user.first_name or "User")
-            sender_handle = f"@{escape(user.username)}" if user.username else "No username"
-            await callback.bot.send_message(
-                chat_id=callback.from_user.id,
-                text=(
-                    "📩 <b>NEW USER MESSAGE</b>\n"
-                    f"👤 <b>{sender_name}</b>\n"
-                    f"🔗 {sender_handle}\n"
-                    f"🆔 <code>{user.id}</code>\n"
-                    f"🕒 {escape(item.created_at.strftime('%Y-%m-%d %H:%M UTC') if item.created_at else 'Time unavailable')}"
-                ),
-                parse_mode="HTML",
-            )
-            reply_kb = InlineKeyboardBuilder()
-            reply_kb.button(text="↩️ Reply to this user", callback_data=f"owner:inbox_reply:{user_id}")
-            await callback.bot.copy_message(
-                chat_id=callback.from_user.id, from_chat_id=user_id,
-                message_id=item.telegram_message_id, reply_markup=reply_kb.as_markup()
-            )
-        except Exception as exc:
-            logger.warning("Could not copy saved user message to owner inbox", user_id=user_id, message_id=item.telegram_message_id, error=str(exc))
-    await callback.answer("Conversation opened.")
+
+
+@router.callback_query(F.data.startswith("owner:inbox:"))
+async def owner_inbox_conversation(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id) or not callback.message or callback.message.chat.type != "private":
+        await callback.answer("Not available.", show_alert=True)
+        return
+    try:
+        user_id = int(callback.data.rsplit(":", 1)[1])
+    except (ValueError, IndexError):
+        await callback.answer("Invalid user.", show_alert=True)
+        return
+    await _render_inbox_conversation(callback, db_session, user_id)
+    await callback.answer("Messages refreshed.")
 
 
 @router.callback_query(F.data.startswith("owner:inbox_reply:"))
