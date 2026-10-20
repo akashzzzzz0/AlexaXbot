@@ -85,7 +85,7 @@ async def configure_command_visibility(bot) -> None:
         ("terms", "Premium Stars payment terms"), ("referral", "Get referral link"), ("achievements", "View achievements"),
         ("games", "Open games"), ("dice", "Play dice"), ("rps", "Rock paper scissors"),
         ("quiz", "Play quiz"), ("wheel", "Spin the wheel"), ("roulette", "Play roulette"),
-        ("cards", "Play cards"), ("mines", "Play mines"), ("treasure", "Treasure hunt"),
+        ("cards", "Play cards"), ("uno", "Play UNO with group friends"), ("mines", "Play mines"), ("treasure", "Treasure hunt"),
         ("numwar", "Number war"), ("stats", "View stats"), ("rank", "View your rank"),
         ("leaders", "Top players"), ("items", "View your items"), ("pfp", "Profile photo"),
         ("war", "Multiverse Wars menu"), ("warmission", "View daily war mission"),
