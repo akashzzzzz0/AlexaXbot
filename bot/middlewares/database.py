@@ -3,7 +3,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Message, CallbackQuery, Update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from bot.database.models import User, Group, GroupMember, SecuritySettings, GroupDisabledCommand
+from bot.database.models import User, Group, GroupMember, SecuritySettings, GroupDisabledCommand, InboxMessage
 import structlog
 
 logger = structlog.get_logger()
@@ -137,6 +137,24 @@ class DatabaseMiddleware(BaseMiddleware):
                             data["db_member"] = member
                     except Exception as e:
                         logger.warning("Could not load group data from DB", error=str(e))
+
+                # Save private messages from non-owner users for the owner-only inbox.
+                # Only metadata is stored; the original message stays in the user's chat.
+                if isinstance(event, Update) and event.message and event.message.chat.type == "private" and user and not user.is_bot:
+                    try:
+                        from bot.handlers.owner import is_owner
+                        if not is_owner(user.id):
+                            incoming = event.message
+                            preview = incoming.text or incoming.caption or f"[{incoming.content_type}]"
+                            session.add(InboxMessage(
+                                user_id=user.id,
+                                telegram_message_id=incoming.message_id,
+                                content_type=str(incoming.content_type),
+                                preview=preview[:1000],
+                                is_read=False,
+                            ))
+                    except Exception as inbox_error:
+                        logger.warning("Could not save private message to owner inbox", user_id=user.id, error=str(inbox_error))
 
                 # Emergency lockdown must run before command routers, not only in the catch-all handler.
                 if isinstance(event, Update) and chat and chat.type in ("group", "supergroup") and data.get("group_security") and data["group_security"].emergency_mode and user and not user.is_bot:
