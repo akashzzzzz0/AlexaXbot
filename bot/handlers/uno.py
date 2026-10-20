@@ -386,7 +386,9 @@ async def _create_lobby(message: Message, creator_user=None):
     game = {
         "id": game_id, "group_id": message.chat.id, "creator_id": creator.id,
         "players": [{"id": creator.id, "name": creator.full_name or creator.first_name or "Player"}],
-        "hands": {}, "deck": [], "discard": [], "color": "R", "current": 0,
+        # A lobby board renders the top-card row before the game starts.
+        # Seed a harmless placeholder card; _begin_game replaces it at startup.
+        "hands": {}, "deck": [], "discard": [("R", "0")], "color": "R", "current": 0,
         "direction": 1, "started": False, "dm_messages": {}, "uno_pending": set(),
         "pending_wild": None, "drawn_pending": {},
     }
