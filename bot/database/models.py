@@ -953,3 +953,95 @@ class VaultClaim(Base):
     reward_amount = Column(Integer, default=0, nullable=False)
     badge_code = Column(String(32), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ArenaProfile(Base):
+    """Global World Arena profile keyed by Telegram user ID."""
+    __tablename__ = "arena_profiles"
+
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    xp = Column(Integer, default=0, nullable=False)
+    total_games = Column(Integer, default=0, nullable=False)
+    wins = Column(Integer, default=0, nullable=False)
+    badges = Column(JSON, default=list, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class ArenaScoreEvent(Base):
+    """Append-only, idempotent ledger for XP earned in each group or private chat."""
+    __tablename__ = "arena_score_events"
+    __table_args__ = (
+        UniqueConstraint("event_key", name="uq_arena_score_event_key"),
+        Index("ix_arena_score_user", "user_id"),
+        Index("ix_arena_score_group", "group_id"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_key = Column(String(128), nullable=False)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    group_id = Column(BigInteger, nullable=True)
+    mode = Column(String(24), nullable=False)
+    xp_delta = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ArenaGroup(Base):
+    """Per-group World Arena switch; new groups are enabled by default."""
+    __tablename__ = "arena_groups"
+
+    group_id = Column(BigInteger, primary_key=True)
+    title = Column(String(256), nullable=False)
+    enabled = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class ArenaSession(Base):
+    """Single-player quiz or daily-mission session."""
+    __tablename__ = "arena_sessions"
+
+    id = Column(String(32), primary_key=True)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    group_id = Column(BigInteger, nullable=True, index=True)
+    challenge_type = Column(String(16), nullable=False, default="quiz")
+    prompt = Column(Text, nullable=False)
+    options = Column(JSON, nullable=False)
+    correct_index = Column(Integer, nullable=False)
+    day_key = Column(String(10), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    resolved = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ArenaDailyClaim(Base):
+    """One daily mission attempt per Telegram user per UTC day."""
+    __tablename__ = "arena_daily_claims"
+    __table_args__ = (UniqueConstraint("user_id", "day_key", name="uq_arena_daily_user_day"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    day_key = Column(String(10), nullable=False)
+    completed = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ArenaBattle(Base):
+    """Head-to-head question battle between two users in a Telegram group."""
+    __tablename__ = "arena_battles"
+
+    id = Column(String(32), primary_key=True)
+    challenger_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    opponent_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    group_id = Column(BigInteger, nullable=False, index=True)
+    prompt = Column(Text, nullable=False)
+    options = Column(JSON, nullable=False)
+    correct_index = Column(Integer, nullable=False)
+    challenger_answer = Column(Integer, nullable=True)
+    opponent_answer = Column(Integer, nullable=True)
+    challenger_answered_at = Column(DateTime(timezone=True), nullable=True)
+    opponent_answered_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    resolved = Column(Boolean, default=False, nullable=False)
+    winner_id = Column(BigInteger, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
