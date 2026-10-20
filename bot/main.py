@@ -118,6 +118,8 @@ async def configure_command_visibility(bot) -> None:
         ("bluff", "Play bluff game"), ("hack", "Play hack game"), ("task", "View tasks"),
         ("shield", "Configure Community Shield"), ("shieldreport", "Report suspected scam"),
         ("shieldcheck", "Check Community Shield reports"),
+        ("scamreview", "Queue a scam review"), ("scamreviews", "List pending scam reviews"),
+        ("scamresolve", "Mark a scam review as reviewed"),
     ]
     public = [BotCommand(command=name, description=description) for name, description in public_commands]
     admin = [BotCommand(command=name, description=description) for name, description in admin_commands]

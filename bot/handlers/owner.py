@@ -1,4 +1,5 @@
 import asyncio
+import time
 from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery, Message, BotCommand, BotCommandScopeDefault, BotCommandScopeChat
 from aiogram.exceptions import TelegramRetryAfter, TelegramBadRequest, TelegramForbiddenError
@@ -8,7 +9,7 @@ from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from bot.database.models import User, Group, GroupMember, GroupSettings, ActionLog, SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig
+from bot.database.models import User, Group, GroupMember, GroupSettings, ActionLog, SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig, ScamReview
 from bot.keyboards.main_menu import back_button_kb
 from bot.config import settings
 from bot.utils.helpers import format_number
@@ -19,6 +20,7 @@ logger = structlog.get_logger()
 router = Router()
 
 _maintenance_mode = False
+_PROCESS_STARTED = time.monotonic()
 
 
 class OwnerStates(StatesGroup):
@@ -42,6 +44,7 @@ def owner_kb(_=None) -> object:
     # Global overview & analytics
     builder.button(text="🌐 Global Controls", callback_data="owner:global_controls")
     builder.button(text="📊 Statistics", callback_data="owner:stats")
+    builder.button(text="🩺 Bot Health Monitor", callback_data="owner:health")
     # Group network & rewards
     builder.button(text="👥 Groups • Activity • Links • Permissions", callback_data="owner:groups")
     builder.button(text="🎁 Affiliate / Referral", callback_data="owner:referrals")
@@ -53,7 +56,7 @@ def owner_kb(_=None) -> object:
     builder.button(text=f"{'🟢 Disable' if _maintenance_mode else '🔧 Enable'} Maintenance", callback_data="owner:maintenance")
     builder.button(text="👤 User List", callback_data="owner:users")
     builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
-    builder.adjust(2, 2, 2, 2, 2, 2)
+    builder.adjust(2, 2, 2, 2, 2, 2, 1)
     return builder.as_markup()
 
 
@@ -236,6 +239,51 @@ async def owner_settings(callback: CallbackQuery, _: callable, db_session: Async
     await callback.answer()
 
 
+@router.callback_query(F.data == "owner:health")
+async def owner_health(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Not available.", show_alert=True)
+        return
+    db_status = "🟢 Connected"
+    try:
+        await db_session.execute(select(1))
+        active_groups = await db_session.scalar(
+            select(func.count()).select_from(Group).where(Group.is_active.is_(True))
+        )
+        dm_users = await db_session.scalar(
+            select(func.count()).select_from(User).where(User.dm_started.is_(True))
+        )
+        pending_reviews = await db_session.scalar(
+            select(func.count()).select_from(ScamReview).where(ScamReview.status == "pending")
+        )
+    except Exception as exc:
+        await db_session.rollback()
+        db_status = "🔴 Check failed"
+        active_groups = dm_users = pending_reviews = 0
+        logger.warning("Owner health database check failed", error=str(exc))
+    uptime_seconds = max(0, int(time.monotonic() - _PROCESS_STARTED))
+    hours, remainder = divmod(uptime_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    uptime = f"{hours}h {minutes}m {seconds}s"
+    text = (
+        "🩺 <b>ALEXA BOT HEALTH MONITOR</b>\n\n"
+        "🟢 Process: <b>Running</b>\n"
+        f"🗄️ Database: <b>{db_status}</b>\n"
+        f"⏱️ Process uptime: <code>{uptime}</code>\n"
+        f"👥 Active groups: <b>{format_number(active_groups or 0)}</b>\n"
+        f"👤 DM starters: <b>{format_number(dm_users or 0)}</b>\n"
+        f"🛡️ Pending scam reviews: <b>{format_number(pending_reviews or 0)}</b>\n\n"
+        "This is a live snapshot, not a guarantee of uninterrupted hosting. "
+        "The external /health endpoint remains available when the host keeps the process awake."
+    )
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔄 Refresh", callback_data="owner:health")
+    builder.button(text="◀️ Owner Panel", callback_data="owner:menu")
+    builder.adjust(2)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
+    await callback.answer()
+
+
 @router.callback_query(F.data == "owner:stats")
 async def owner_stats(callback: CallbackQuery, _: callable, db_session: AsyncSession, **kwargs):
     if not is_owner(callback.from_user.id):
@@ -349,7 +397,7 @@ async def _render_owner_security(callback: CallbackQuery, session: AsyncSession,
         "Configure this group's security independently. Changes save to this group only."
     )
     await callback.message.edit_text(
-        f"🛡️ <b>{escape(title)} — {escape(group.title)}</b>\\n\\n{description}\\n\\n"
+        f"🛡️ <b>{escape(title)} — {escape(group.title)}</b>\n\n{description}\n\n"
         "🟢 ON  •  🔴 OFF",
         parse_mode="HTML",
         reply_markup=_owner_security_kb(group_id, security, locks=locks),
@@ -590,11 +638,11 @@ async def owner_global_controls(callback: CallbackQuery, _: callable, db_session
     builder.button(text="◀️ Owner Panel", callback_data="owner:menu")
     builder.adjust(1)
     await callback.message.edit_text(
-        "🌐 <b>GLOBAL CONTROLS</b>\\n\\n"
-        f"Active groups: <b>{format_number(len(groups))}</b>\\n"
-        f"Anti-Spam enabled: <b>{format_number(anti_spam_on)}</b> groups\\n"
-        f"Anti-Flood enabled: <b>{format_number(anti_flood_on)}</b> groups\\n"
-        f"Emergency Lockdown enabled: <b>{format_number(emergency_on)}</b> groups\\n\\n"
+        "🌐 <b>GLOBAL CONTROLS</b>\n\n"
+        f"Active groups: <b>{format_number(len(groups))}</b>\n"
+        f"Anti-Spam enabled: <b>{format_number(anti_spam_on)}</b> groups\n"
+        f"Anti-Flood enabled: <b>{format_number(anti_flood_on)}</b> groups\n"
+        f"Emergency Lockdown enabled: <b>{format_number(emergency_on)}</b> groups\n\n"
         "⚠️ Changes below apply to every active registered group. Lockdown requires Delete Messages permission.",
         parse_mode="HTML", reply_markup=builder.as_markup()
     )
@@ -673,14 +721,14 @@ async def owner_known_bans(callback: CallbackQuery, db_session: AsyncSession, **
     members = result.scalars().all()
     if not members:
         text = (
-            f"🔓 <b>Known Bans — {escape(group.title)}</b>\\n\\n"
+            f"🔓 <b>Known Bans — {escape(group.title)}</b>\n\n"
             "No members marked as banned in ALEXA's database. Telegram does not provide bots a complete list of every banned member, "
             "so use <b>Unban by User ID</b> for bans not recorded here."
         )
     else:
         text = (
-            f"🔓 <b>Known Bans — {escape(group.title)}</b>\\n\\n"
-            f"Showing up to {len(members)} member(s) recorded as banned by ALEXA. Tap a member to unban.\\n"
+            f"🔓 <b>Known Bans — {escape(group.title)}</b>\n\n"
+            f"Showing up to {len(members)} member(s) recorded as banned by ALEXA. Tap a member to unban.\n"
             "For bans not in this database, use Unban by User ID."
         )
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=_known_bans_kb(group_id, members))
@@ -707,8 +755,8 @@ async def owner_unban_by_id_start(callback: CallbackQuery, state: FSMContext, db
     await state.set_state(OwnerStates.waiting_unban_user_id)
     await state.update_data(unban_group_id=group_id)
     await callback.message.answer(
-        f"🆔 <b>Unban Member — {escape(group.title)}</b>\\n\\n"
-        "Send the member's numeric Telegram User ID. Username alone cannot be used by Telegram's unban API.\\n"
+        f"🆔 <b>Unban Member — {escape(group.title)}</b>\n\n"
+        "Send the member's numeric Telegram User ID. Username alone cannot be used by Telegram's unban API.\n"
         "Send /cancel to cancel.",
         parse_mode="HTML",
     )
@@ -795,8 +843,8 @@ async def owner_unmute_by_id_start(callback: CallbackQuery, state: FSMContext, d
     await state.set_state(OwnerStates.waiting_unmute_user_id)
     await state.update_data(unmute_group_id=group_id)
     await callback.message.answer(
-        f"🔇 <b>Unmute Member — {escape(group.title)}</b>\\n\\n"
-        "Send the member's numeric Telegram User ID. Username alone cannot be used for this action.\\n"
+        f"🔇 <b>Unmute Member — {escape(group.title)}</b>\n\n"
+        "Send the member's numeric Telegram User ID. Username alone cannot be used for this action.\n"
         "Send /cancel to cancel.",
         parse_mode="HTML",
     )
@@ -923,9 +971,9 @@ async def owner_unban_known_member(callback: CallbackQuery, db_session: AsyncSes
         )
         members = result.scalars().all()
         await callback.message.edit_text(
-            f"🔓 <b>Known Bans — {escape(group.title)}</b>\\n\\n"
+            f"🔓 <b>Known Bans — {escape(group.title)}</b>\n\n"
             + (
-                f"Showing up to {len(members)} member(s) recorded as banned by ALEXA.\\n"
+                f"Showing up to {len(members)} member(s) recorded as banned by ALEXA.\n"
                 "For bans not in this database, use Unban by User ID."
                 if members else
                 "No members marked as banned in ALEXA's database. Use Unban by User ID for other bans."
@@ -1689,7 +1737,7 @@ async def process_broadcast(message: Message, _: callable, db_session: AsyncSess
         except Exception: failed += 1
         await asyncio.sleep(0.05)
     await state.clear()
-    await message.reply(f"📨 <b>DM Broadcast Result</b>\\n\\nSent: <b>{sent}</b>\\nFailed: <b>{failed}</b>", parse_mode="HTML")
+    await message.reply(f"📨 <b>DM Broadcast Result</b>\n\nSent: <b>{sent}</b>\nFailed: <b>{failed}</b>", parse_mode="HTML")
 
 
 @router.callback_query(F.data == "owner:broadcast")
@@ -1697,7 +1745,7 @@ async def start_broadcast(callback: CallbackQuery, _: callable, state: FSMContex
     if not is_owner(callback.from_user.id):
         await callback.answer("Not available.", show_alert=True)
         return
-    await callback.message.answer("📨 <b>DM Broadcast</b>\\nSend the message to every recorded user who has started ALEXA in private.\\n\\nSend /cancel to stop.", parse_mode="HTML")
+    await callback.message.answer("📨 <b>DM Broadcast</b>\nSend the message to every recorded user who has started ALEXA in private.\n\nSend /cancel to stop.", parse_mode="HTML")
     await state.set_state(OwnerStates.waiting_broadcast)
     await callback.answer()
 
