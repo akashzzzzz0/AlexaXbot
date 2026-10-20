@@ -14,6 +14,7 @@ def build_help_text(_: callable) -> str:
         f"❓ <b>{_('help_center_title')}</b>\n"
         f"💰 <b>{_('help_section_economy')}</b>\n"
         f"/wallet — {_('help_cmd_wallet')}\n"
+        "/balance /economy /eco — wallet/economy aliases\n"
         f"/daily — {_('help_cmd_daily')}\n"
         f"/weekly — {_('help_cmd_weekly')}\n"
         f"/monthly — {_('help_cmd_monthly')}\n"
@@ -21,12 +22,15 @@ def build_help_text(_: callable) -> str:
         f"/withdraw — {_('help_cmd_withdraw')}\n"
         f"/transfer — {_('help_cmd_transfer')}\n"
         f"/referral — {_('help_cmd_referral')}\n"
-        f"/achievements — {_('help_cmd_achievements')}\n\n"
+        "/ref — referral alias\n"
+        f"/achievements — {_('help_cmd_achievements')}\n"
+        "/transactions /tx — transaction history\n\n"
         f"🎮 <b>{_('help_section_games')}</b>\n"
         f"/dice — {_('help_cmd_dice')}\n"
         f"/rps — {_('help_cmd_rps')}\n"
         f"/quiz — {_('help_cmd_quiz')}\n"
         f"/wheel — {_('help_cmd_wheel')}\n"
+        "/games — Open games menu\n"
         f"/numwar — {_('help_cmd_numwar')}\n"
         f"/cards — {_('help_cmd_cards')}\n"
         "/uno — Start a multiplayer UNO game in a group; cards are sent privately\n"
@@ -62,18 +66,24 @@ def build_help_text(_: callable) -> str:
         "/blocklist /addblocklist /rmblocklist — blocked words\n"
         "/rules /setrules /report /admins /id /info — group utilities\n"
         "/disablecmd /enablecmd /disabledcmds — command controls\n"
+        "/approve /unapprove /approvebio — member and bio approvals\n"
+        "/note /autodelete /setwelcome — extra group tools\n"
         "/grouppromo — admin announcement/promotion in this group\n\n"
         "🪙 <b>Virtual games</b>\n"
         "/bal /kill /rob /revive /protect /unprotect /rank /leaders\n"
-        "/items /task /bomb /bluff /card /hack /toprich /topkill /toprob /pfp\n\n"
+        "/items /task /bomb /bluff /card /hack /toprich /topkill /toprob /pfp\n"
+        "/duel — Challenge another player\n\n"
+        "🛡️ <b>Community Shield & Scam Review</b>\n"
+        "/shield /shieldreport /shieldcheck — Community Shield tools\n"
+        "/scamreview /scamreviews /scamresolve — scam review queue\n\n"
         "🏟️ <b>World Arena & Wars</b>\n"
         "/arena /play /arenadaily /myrank /worldtop /grouprank /worldgroups /battle\n"
         "/war /warregister /warleave /warmission /waranswer /warboard\n"
         "/warchallenge /waraccept /warresult /worldrank /mystery\n\n"
         "🧰 <b>More group tools</b>\n"
         "/approve /unapprove /approvebio /note /autodelete /setwelcome\n"
-        "/transactions /tx — transaction history\n"
-        "/duel — challenge a player\n\n"
+        "/resetwarn — warning reset alias\n"
+        "/empirecreate — Create a group Empire (admins)\n\n"
         f"⚙️ <b>{_('help_section_settings')}</b>\n"
         f"/settings — {_('help_cmd_settings')}\n\n"
         f"ℹ️ <b>{_('help_section_other')}</b>\n"
@@ -136,8 +146,11 @@ async def _is_group_admin(bot, chat, user_id: int) -> bool:
 
 
 async def _has_full_help_access(bot, chat, user_id: int) -> bool:
-    # In private chat the user explicitly requested the full help catalogue.
-    return chat.type == "private" or await _is_group_admin(bot, chat, user_id)
+    # In private chat, and for the configured bot owner, show the full catalogue.
+    from bot.config import settings
+    if chat.type == "private" or user_id == settings.effective_owner_id:
+        return True
+    return await _is_group_admin(bot, chat, user_id)
 
 
 def help_menu_kb(is_admin: bool = False) -> InlineKeyboardMarkup:
