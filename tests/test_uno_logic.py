@@ -22,7 +22,7 @@ class UnoRulesTests(unittest.TestCase):
         self.assertIn("Red 0", board)
         self.assertIn("Players joined", board)
 
-    def test_group_turn_keyboard_shows_current_players_cards_in_group(self):
+    def test_group_turn_keyboard_uses_private_inline_picker(self):
         game = {
             "id": "abc123",
             "players": [{"id": 10, "name": "A"}, {"id": 20, "name": "B"}],
@@ -35,12 +35,10 @@ class UnoRulesTests(unittest.TestCase):
         buttons = [button for row in keyboard.inline_keyboard for button in row]
         callbacks = [button.callback_data for button in buttons]
         labels = [button.text for button in buttons]
-        self.assertIn("uno:play:abc123:0", callbacks)
-        self.assertIn("uno:play:abc123:1", callbacks)
-        self.assertIn("uno:draw:abc123", callbacks)
-        self.assertTrue(any("🔴 3" in label for label in labels))
-        self.assertTrue(any("🌈" in label for label in labels))
-        self.assertNotIn("uno:play:abc123:2", callbacks)
+        self.assertEqual(callbacks, [None])
+        self.assertEqual(labels, ["🎴 Make your choice"])
+        self.assertEqual(buttons[0].switch_inline_query_current_chat, "uno_abc123_10")
+        self.assertFalse(any("🔴 3" in label or "🌈" in label for label in labels))
 
     def test_board_announces_next_player_and_make_your_choice(self):
         game = {
@@ -54,6 +52,7 @@ class UnoRulesTests(unittest.TestCase):
         self.assertIn("Next player:", board)
         self.assertIn("Player B", board)
         self.assertIn("Make your choice", board)
+        self.assertIn("only you can see your cards", board)
 
     def test_deck_has_standard_108_cards(self):
         deck = uno._make_deck()
