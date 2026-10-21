@@ -529,6 +529,12 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
             await db_session.rollback()
             logger.exception("Could not initialize group security settings", group_id=message.chat.id)
             return
+    # Never moderate ALEXA's own outbound messages. This guard must run
+    # BEFORE emergency lockdown and link/content locks, otherwise the bot can
+    # delete its own links/promotions when those protections are enabled.
+    if message.from_user and message.from_user.is_bot and message.from_user.id == message.bot.id:
+        return
+
     # Emergency lockdown is enforced for every incoming group message.
     # Group admins/creator are exempt; all other messages are deleted while ON.
     if group_security.emergency_mode and message.from_user:
