@@ -55,6 +55,12 @@ class UnoRulesTests(unittest.TestCase):
         self.assertIn("Player B", board)
         self.assertIn("Make your choice", board)
 
+    def test_hand_image_renders_each_card_face(self):
+        image_buffer = uno._render_hand_image([("R", "7"), ("Y", "+2"), ("W", "Wild")])
+        self.assertEqual(image_buffer.name, "alexa_uno_hand.png")
+        self.assertEqual(image_buffer.read(8), b"\x89PNG\r\n\x1a\n")
+        self.assertGreater(len(image_buffer.getvalue()), 1000)
+
     def test_deck_has_standard_108_cards(self):
         deck = uno._make_deck()
         self.assertEqual(len(deck), 108)
