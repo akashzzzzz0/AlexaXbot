@@ -246,16 +246,14 @@ def _group_turn_keyboard(game):
     builder = InlineKeyboardBuilder()
     drawn_index = game.get("drawn_pending", {}).get(user_id)
     hand = game["hands"].get(user_id, [])
-    if not game.get("choice_open") and drawn_index is None:
-        builder.button(
-            text="🎴 Make your choice",
-            switch_inline_query_current_chat=f"uno_{game['id']}",
-        )
-        _add_uno_call_buttons(builder, game)
-        builder.adjust(1)
-        return builder.as_markup()
-    # Hand images and selection buttons appear only after Make your choice is tapped.
-    return None
+    button_text = "🎴 Choose drawn card" if drawn_index is not None else "🎴 Make your choice"
+    builder.button(
+        text=button_text,
+        switch_inline_query_current_chat=f"uno_{game['id']}",
+    )
+    _add_uno_call_buttons(builder, game)
+    builder.adjust(1)
+    return builder.as_markup()
 
 
 def _board_text(game, status=None):
@@ -289,8 +287,6 @@ async def _update_board(bot, game, status=None):
     if not game.get("started") and not game.get("finished"):
         keyboard = _lobby_keyboard(game["id"])
     elif game.get("finished"):
-        keyboard = None
-    elif game.get("choice_open"):
         keyboard = None
     else:
         keyboard = _group_turn_keyboard(game)
