@@ -124,7 +124,7 @@ def build_public_help_text(_: callable) -> str:
         "/arenadaily — Claim Arena daily reward\n/myrank — Arena rank\n"
         "/worldtop — World leaderboard\n/grouprank — Group rank\n"
         "/worldgroups — Group leaderboard\n/battle — Challenge a player\n"
-        "/worldrank /mystery — World rank and Mystery game\n"
+        ""
         "/empire — Empire ranking\n/empirecontribute — Contribute Empire XP\n"
         "/vip /pro — VIP status\n/vault — Legendary Vault\n/badges — View badges\n\n"
         "/help — Show the games command guide\n"
