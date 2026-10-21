@@ -87,7 +87,7 @@ async def configure_command_visibility(bot) -> None:
         ("dice", "Play dice"), ("rps", "Play Rock Paper Scissors"),
         ("quiz", "Play quiz"), ("wheel", "Spin the wheel"),
         ("numwar", "Play Number War"), ("cards", "Play card game"),
-        ("card", "Play card game"), ("uno", "Play multiplayer UNO"),
+        ("card", "Play card game"), ("uno", "Play multiplayer UNO"), ("unorestart", "Restart active UNO game"),
         ("treasure", "Play treasure hunt"), ("mines", "Play mines"),
         ("roulette", "Play roulette"), ("rullet", "Play roulette"),
         ("ludo", "Play Ludo race"), ("bingo", "Play Bingo"),
