@@ -66,12 +66,12 @@ async def _send_mention_batches(message: Message, mentions: list[str], text: str
     # Stay comfortably below Telegram's 4096-character message limit.
     suffix = (" " + escape(text.strip())) if text.strip() else ""
     chunks = []
-    current = heading + suffix + "\\n\\n"
+    current = heading + suffix + "\n\n"
     for mention in mentions:
         piece = mention + " "
         if len(current) + len(piece) > 3500 and current.strip():
             chunks.append(current.rstrip())
-            current = heading + suffix + "\\n\\n"
+            current = heading + suffix + "\n\n"
         current += piece
     if current.strip():
         chunks.append(current.rstrip())
@@ -119,7 +119,7 @@ async def tag_all_members(message: Message, db_session: AsyncSession, **kwargs):
     await _send_mention_batches(message, mentions, custom_text, "📣 <b>Tag All</b>")
 
 
-@router.message(F.text.regexp(r"(?i)^@tagall(?:\\s|$)"))
+@router.message(F.text.regexp(r"(?i)^@tagall(?:\s|$)"))
 async def tag_all_members_alias(message: Message, db_session: AsyncSession, **kwargs):
     # Text alias: @tagall Uth jao sab
     if message.chat.type not in ("group", "supergroup"):
