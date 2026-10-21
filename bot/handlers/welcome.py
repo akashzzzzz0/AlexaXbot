@@ -11,7 +11,7 @@ from bot.database.models import (
 )
 from bot.services.security_service import (
     check_message_violations, is_raid_detected, create_captcha_challenge,
-    contains_link, count_mentions, count_hashtags
+    contains_link, contains_non_alexa_link, count_mentions, count_hashtags
 )
 from bot.services.moderation_service import mute_user, ban_user, kick_user, warn_user, log_action
 from bot.services.user_service import add_xp
@@ -259,7 +259,7 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
         try:
             profile = await event.bot.get_chat(user.id)
             bio = getattr(profile, "bio", None) or ""
-            if bio and contains_link(bio):
+            if bio and contains_non_alexa_link(bio):
                 config = await db_session.scalar(
                     select(BioLinkProtectionConfig).where(BioLinkProtectionConfig.group_id == chat.id)
                 )
