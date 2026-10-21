@@ -22,7 +22,22 @@ class UnoRulesTests(unittest.TestCase):
         self.assertIn("Red 0", board)
         self.assertIn("Players joined", board)
 
-    def test_group_turn_keyboard_shows_current_players_cards_in_group(self):
+    def test_group_board_keeps_hand_hidden_until_make_your_choice(self):
+        game = {
+            "id": "abc123",
+            "players": [{"id": 10, "name": "A"}, {"id": 20, "name": "B"}],
+            "hands": {10: [("R", "3"), ("W", "Wild")], 20: [("B", "9")]},
+            "discard": [("R", "0")], "color": "R", "current": 0,
+            "direction": 1, "started": True, "finished": False, "choice_open": False,
+            "uno_pending": set(), "drawn_pending": {}, "pending_wild": None,
+        }
+        keyboard = uno._group_turn_keyboard(game)
+        callbacks = [button.callback_data for row in keyboard.inline_keyboard for button in row]
+        self.assertIn("uno:choose:abc123", callbacks)
+        self.assertNotIn("uno:play:abc123:0", callbacks)
+        self.assertNotIn("uno:select:abc123:0", callbacks)
+
+    def test_hand_picker_requires_separate_selection_and_play(self):
         game = {
             "id": "abc123",
             "players": [{"id": 10, "name": "A"}, {"id": 20, "name": "B"}],
@@ -30,17 +45,19 @@ class UnoRulesTests(unittest.TestCase):
             "discard": [("R", "0")], "color": "R", "current": 0,
             "direction": 1, "started": True, "finished": False, "choice_open": True,
             "uno_pending": set(), "drawn_pending": {}, "pending_wild": None,
+            "selected_card_index": None,
         }
-        keyboard = uno._group_turn_keyboard(game)
-        buttons = [button for row in keyboard.inline_keyboard for button in row]
-        callbacks = [button.callback_data for button in buttons]
-        labels = [button.text for button in buttons]
-        self.assertIn("uno:play:abc123:0", callbacks)
-        self.assertIn("uno:play:abc123:1", callbacks)
-        self.assertIn("uno:draw:abc123", callbacks)
-        self.assertTrue(any("🔴 3" in label for label in labels))
-        self.assertTrue(any("🌈" in label for label in labels))
-        self.assertNotIn("uno:play:abc123:2", callbacks)
+        keyboard = uno._hand_picker_keyboard(game)
+        callbacks = [button.callback_data for row in keyboard.inline_keyboard for button in row]
+        self.assertIn("uno:select:abc123:0", callbacks)
+        self.assertIn("uno:select:abc123:1", callbacks)
+        self.assertIn("uno:confirm:abc123", callbacks)
+        self.assertNotIn("uno:play:abc123:0", callbacks)
+
+    def test_hand_image_renders_card_faces(self):
+        image_file = uno._render_hand_image([("R", "7"), ("Y", "+2"), ("W", "Wild")])
+        self.assertEqual(image_file.filename, "alexa_uno_hand.png")
+        self.assertTrue(image_file.data.startswith(b"\x89PNG\r\n\x1a\n"))
 
     def test_board_announces_next_player_and_make_your_choice(self):
         game = {
