@@ -124,9 +124,10 @@ def _group_detail_kb(group_id: int):
     builder.button(text="🆔 Unban by User ID", callback_data=f"owner:unbanid:{group_id}")
     builder.button(text="🔇 Unmute by User ID", callback_data=f"owner:unmuteid:{group_id}")
     builder.button(text="🔨 Ban All", callback_data=f"owner:banall:{group_id}")
+    builder.button(text="🚪 Remove Alexa from Group", callback_data=f"owner:leave_group:{group_id}")
     builder.button(text="🔄 Refresh", callback_data=f"owner:group:{group_id}")
     builder.button(text="◀️ Groups", callback_data="owner:groups")
-    builder.adjust(1, 1, 1, 1, 2, 2, 1)
+    builder.adjust(1, 1, 1, 1, 2, 2, 1, 1, 2)
     return builder.as_markup()
 
 
@@ -327,6 +328,82 @@ async def owner_groups(callback: CallbackQuery, _: callable, db_session: AsyncSe
             reply_markup=_group_list_kb(groups, "group"),
         )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner:leave_group:"))
+async def owner_leave_group_prompt(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id) or not callback.message or callback.message.chat.type != "private":
+        await callback.answer("Not available.", show_alert=True)
+        return
+    try:
+        group_id = int(callback.data.rsplit(":", 1)[1])
+    except (ValueError, IndexError):
+        await callback.answer("Invalid group.", show_alert=True)
+        return
+    group = await db_session.get(Group, group_id)
+    if not group or not group.is_active:
+        await callback.answer("Group is not active/registered.", show_alert=True)
+        return
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🚪 Yes, make Alexa leave", callback_data=f"owner:leave_confirm:{group_id}")
+    builder.button(text="❌ Cancel", callback_data=f"owner:group:{group_id}")
+    builder.adjust(1, 1)
+    await callback.message.edit_text(
+        "⚠️ <b>REMOVE ALEXA FROM GROUP?</b>\n\n"
+        f"Group: <b>{escape(group.title or 'Untitled')}</b>\n"
+        f"Group ID: <code>{group.id}</code>\n\n"
+        "Alexa will leave this group. Its active status will be removed from the Owner Panel list. "
+        "You can add Alexa back to the group later.",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner:leave_confirm:"))
+async def owner_leave_group_confirm(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id) or not callback.message or callback.message.chat.type != "private":
+        await callback.answer("Not available.", show_alert=True)
+        return
+    try:
+        group_id = int(callback.data.rsplit(":", 1)[1])
+    except (ValueError, IndexError):
+        await callback.answer("Invalid group.", show_alert=True)
+        return
+    group = await db_session.get(Group, group_id)
+    if not group or not group.is_active:
+        await callback.answer("Group is not active/registered.", show_alert=True)
+        return
+    group_title = group.title or str(group.id)
+    try:
+        await callback.bot.leave_chat(chat_id=group_id)
+    except Exception as exc:
+        logger.warning("Owner requested bot leave but Telegram rejected it", group_id=group_id, error=str(exc))
+        await callback.answer("Alexa could not leave. Check bot membership and try again.", show_alert=True)
+        return
+    group.is_active = False
+    try:
+        await db_session.commit()
+    except Exception as exc:
+        await db_session.rollback()
+        logger.error("Alexa left group but database status update failed", group_id=group_id, error=str(exc))
+        await callback.message.edit_text(
+            f"⚠️ Alexa left <b>{escape(group_title)}</b>, but the active-group record could not be updated. "
+            "Refresh the group list and check the database.",
+            parse_mode="HTML",
+            reply_markup=back_button_kb(None, "owner:groups"),
+        )
+        await callback.answer("Alexa left; database update needs checking.", show_alert=True)
+        return
+    await callback.message.edit_text(
+        f"✅ <b>Alexa has left the group</b>\n\n"
+        f"Group: <b>{escape(group_title)}</b>\n"
+        f"ID: <code>{group_id}</code>\n\n"
+        "This group has been removed from the active-group list.",
+        parse_mode="HTML",
+        reply_markup=back_button_kb(None, "owner:groups"),
+    )
+    await callback.answer("Alexa left the selected group.")
 
 
 @router.callback_query(F.data.startswith("owner:group:"))
