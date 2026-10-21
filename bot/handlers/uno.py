@@ -153,6 +153,12 @@ def _group_turn_keyboard(game):
     builder = InlineKeyboardBuilder()
     drawn_index = game.get("drawn_pending", {}).get(user_id)
     hand = game["hands"].get(user_id, [])
+    if not game.get("choice_open") and drawn_index is None:
+        builder.button(text="🎴 Make your choice", callback_data=f"uno:choose:{game['id']}")
+        if len(hand) == 1 and user_id in game.get("uno_pending", set()):
+            builder.button(text="📣 UNO!", callback_data=f"uno:call:{game['id']}")
+        builder.adjust(1)
+        return builder.as_markup()
     if drawn_index is not None and 0 <= drawn_index < len(hand):
         card = hand[drawn_index]
         builder.button(text=f"▶️ Play drawn: {_card_emoji(card)}"[:60],
@@ -238,7 +244,8 @@ def _board_text(game, status=None):
         lines.extend(["", "🌈 Waiting for the active player to choose a colour."])
     else:
         player = game["players"][game["current"]]
-        lines.extend(["", f"🎯 Next player: <b>{escape(player['name'])}</b>", "👇 <b>Make your choice</b> — tap a card button below."])
+        prompt = "👇 Choose a card below." if game.get("choice_open") else "👇 Tap <b>Make your choice</b> to reveal the cards in this group."
+        lines.extend(["", f"🎯 Next player: <b>{escape(player['name'])}</b>", prompt])
     return "\n".join(lines)
 
 
@@ -266,6 +273,7 @@ async def _refresh_hands(bot, game, status=None):
 
 def _advance(game, steps=1):
     game["current"] = (game["current"] + game["direction"] * steps) % len(game["players"])
+    game["choice_open"] = False
 
 
 async def _finish(bot, game, winner_id):
@@ -305,6 +313,7 @@ async def _begin_game(callback, game):
     game["direction"] = 1
     game["started"] = True
     game["finished"] = False
+    game["choice_open"] = False
     game["uno_pending"] = set()
     game["pending_wild"] = None
     game["drawn_pending"] = {}
@@ -389,6 +398,26 @@ async def start_uno(callback: CallbackQuery, **kwargs):
         await callback.answer("Only the player who created this lobby can start it.", show_alert=True)
         return
     await _begin_game(callback, game)
+
+
+@router.callback_query(F.data.startswith("uno:choose:"))
+@_serialize_game_action
+async def choose_uno_cards(callback: CallbackQuery, **kwargs):
+    game_id = callback.data.split(":")[2]
+    game = _GAMES.get(game_id)
+    if not game or not game.get("started"):
+        await callback.answer("This UNO game has ended.", show_alert=True)
+        return
+    if game.get("pending_wild"):
+        await callback.answer("Choose a colour first.", show_alert=True)
+        return
+    if game["players"][game["current"]]["id"] != callback.from_user.id:
+        await callback.answer("It's not your turn.", show_alert=True)
+        return
+    game["choice_open"] = True
+    player = game["players"][game["current"]]
+    await _update_board(callback.bot, game, f"🎴 <b>{escape(player['name'])}</b>, choose a card below.")
+    await callback.answer("Your cards are shown in the group.")
 
 
 @router.callback_query(F.data.startswith("uno:play:"))
@@ -508,6 +537,7 @@ async def draw_uno_card(callback: CallbackQuery, **kwargs):
     drawn_index = len(game["hands"][user_id]) - 1
     if _legal(game, game["hands"][user_id][drawn_index], user_id):
         game.setdefault("drawn_pending", {})[user_id] = drawn_index
+        game["choice_open"] = True
         await _update_board(callback.bot, game, f"➕ {escape(next(p['name'] for p in game['players'] if p['id'] == user_id))} drew a playable card and must play it or pass.")
         await callback.answer("Playable card drawn — play it or pass.")
     else:
