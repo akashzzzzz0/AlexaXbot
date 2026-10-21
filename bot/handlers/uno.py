@@ -129,7 +129,12 @@ def _hand_picker_keyboard(game):
     selected = game.get("selected_card_index")
     drawn_index = game.get("drawn_pending", {}).get(user_id)
     builder = InlineKeyboardBuilder()
-    indices = [drawn_index] if drawn_index is not None else list(range(len(hand)))
+    candidate_indices = [drawn_index] if drawn_index is not None else list(range(len(hand)))
+    # Only offer legal cards: selecting a private photo result immediately posts it to the group.
+    indices = [
+        index for index in candidate_indices
+        if index is not None and 0 <= index < len(hand) and _legal(game, hand[index], player["id"])
+    ]
     for index in indices:
         if index is None or not 0 <= index < len(hand):
             continue
