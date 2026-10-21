@@ -118,7 +118,7 @@ def _color_keyboard(game_id):
     ]])
 
 
-def _add_uno_call_buttons(builder, game):def _add_uno_call_buttons(builder, game):
+def _add_uno_call_buttons(builder, game):
     for player in game["players"]:
         if player["id"] in game.get("uno_pending", set()):
             builder.button(
@@ -161,7 +161,7 @@ def _group_turn_keyboard(game):
     return builder.as_markup()
 
 
-def _board_text(game, status=None):def _board_text(game, status=None):
+def _board_text(game, status=None):
     top = game["discard"][-1]
     lines = ["🃏 <b>ALEXA UNO</b>"]
     if status:
