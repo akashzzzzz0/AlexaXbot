@@ -33,7 +33,6 @@ def build_help_text(_: callable) -> str:
         "/games — Open games menu\n"
         f"/numwar — {_('help_cmd_numwar')}\n"
         f"/cards — {_('help_cmd_cards')}\n"
-        "/uno — Start a multiplayer UNO game in a group; cards are sent privately\n"
         f"/treasure — {_('help_cmd_treasure')}\n"
         f"/mines — {_('help_cmd_mines')}\n"
         f"/roulette — {_('help_cmd_roulette')}\n"
