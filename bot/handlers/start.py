@@ -59,13 +59,13 @@ async def _send_add_group_prompt(message: Message):
     first_name = escape(user.first_name or "there") if user else "there"
     username_line = f"👤 @{escape(user.username)}\n" if user and user.username else ""
     caption = (
-        f"👋 Welcome, {first_name}!\\n\\n"
-        "🛡️ <b>GROUP SECURITY</b>\\n"
-        "Anti-spam • Smart locks • Moderation\\n\\n"
-        "🎮 <b>GAMES & REWARDS</b>\\n"
-        "Games • Economy • Referral rewards\\n\\n"
-        "🤖 <b>SMART AI ASSISTANT</b>\\n"
-        "Friendly chat and useful group tools\\n\\n"
+        f"👋 Welcome, {first_name}!\n\n"
+        "🛡️ <b>GROUP SECURITY</b>\n"
+        "Anti-spam • Smart locks • Moderation\n\n"
+        "🎮 <b>GAMES & REWARDS</b>\n"
+        "Games • Economy • Referral rewards\n\n"
+        "🤖 <b>SMART AI ASSISTANT</b>\n"
+        "Friendly chat and useful group tools\n\n"
         "➕ Add ALEXA to your group and grant admin permissions to enable protection and management."
     )
     # Use ordinary Unicode emoji and plain text. This avoids invalid custom-emoji
