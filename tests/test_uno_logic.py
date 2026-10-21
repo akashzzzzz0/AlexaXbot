@@ -54,6 +54,23 @@ class UnoRulesTests(unittest.TestCase):
         self.assertIn("uno:confirm:abc123", callbacks)
         self.assertNotIn("uno:play:abc123:0", callbacks)
 
+    def test_hand_picker_button_labels_do_not_reveal_card_faces(self):
+        game = {
+            "id": "abc123",
+            "players": [{"id": 10, "name": "A"}, {"id": 20, "name": "B"}],
+            "hands": {10: [("R", "3"), ("W", "Wild"), ("Y", "+2")], 20: [("B", "9")]},
+            "discard": [("R", "0")], "color": "R", "current": 0,
+            "direction": 1, "started": True, "finished": False, "choice_open": True,
+            "uno_pending": set(), "drawn_pending": {}, "pending_wild": None,
+            "selected_card_index": None,
+        }
+        keyboard = uno._hand_picker_keyboard(game)
+        labels = [button.text for row in keyboard.inline_keyboard for button in row]
+        self.assertIn("🃏 Card #1", labels)
+        self.assertIn("🃏 Card #2", labels)
+        self.assertIn("🃏 Card #3", labels)
+        self.assertFalse(any("Red" in label or "Wild" in label or "+2" in label for label in labels))
+
     def test_hand_image_renders_card_faces(self):
         image_file = uno._render_hand_image([("R", "7"), ("Y", "+2"), ("W", "Wild")])
         self.assertEqual(image_file.filename, "alexa_uno_hand.png")
