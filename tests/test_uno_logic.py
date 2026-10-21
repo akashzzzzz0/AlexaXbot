@@ -35,9 +35,9 @@ class UnoRulesTests(unittest.TestCase):
         buttons = [button for row in keyboard.inline_keyboard for button in row]
         callbacks = [button.callback_data for button in buttons]
         labels = [button.text for button in buttons]
-        self.assertEqual(callbacks, [None])
-        self.assertEqual(labels, ["🎴 Make your choice"])
-        self.assertEqual(buttons[0].switch_inline_query_current_chat, "uno_abc123_10")
+        self.assertEqual(callbacks, ["uno:hand:abc123"])
+        self.assertEqual(labels, ["🎴 Make Your Choice"])
+        self.assertIsNone(buttons[0].switch_inline_query_current_chat)
         self.assertFalse(any("🔴 3" in label or "🌈" in label for label in labels))
 
     def test_board_announces_next_player_and_make_your_choice(self):
