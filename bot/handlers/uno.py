@@ -567,7 +567,47 @@ async def private_uno_card_results(query: InlineQuery, **kwargs):
                 InlineKeyboardButton(text="✖️ Cancel", callback_data=f"uno:inlinecancel:{game_id}:{player['id']}")
             ]]),
         ))
+    action_text = "⏭️ Pass turn" if drawn_index is not None else "➕ Draw a card"
+    action_id = "pass" if drawn_index is not None else "draw"
+    results.append(InlineQueryResultArticle(
+        id=f"{game_id}_{player['id']}_{action_id}",
+        title=action_text,
+        description="Finish your turn action",
+        input_message_content=InputTextMessageContent(
+            message_text=f"🎴 <b>{escape(player['name'])}</b> chose: {action_text}.",
+            parse_mode="HTML",
+        ),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(
+                text=action_text,
+                callback_data=f"uno:inlineaction:{game_id}:{player['id']}:{action_id}",
+            )
+        ]]),
+    ))
     await query.answer(results, cache_time=0, is_personal=True)
+
+
+@router.callback_query(F.data.startswith("uno:inlineaction:"))
+async def inline_uno_action(callback: CallbackQuery, **kwargs):
+    parts = callback.data.split(":")
+    if len(parts) != 5:
+        await callback.answer("Invalid turn action.", show_alert=True)
+        return
+    game_id, expected_user, action = parts[2], parts[3], parts[4]
+    game = _GAMES.get(game_id)
+    if not game or not game.get("started"):
+        await callback.answer("This game has ended.", show_alert=True)
+        return
+    if callback.from_user.id != int(expected_user) or game["players"][game["current"]]["id"] != callback.from_user.id:
+        await callback.answer("It's not your turn.", show_alert=True)
+        return
+    callback.data = f"uno:{action}:{game_id}"
+    if action == "draw":
+        await draw_uno_card(callback)
+    elif action == "pass":
+        await pass_after_draw(callback)
+    else:
+        await callback.answer("Unknown turn action.", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("uno:inlinecancel:"))
@@ -591,7 +631,6 @@ async def cancel_inline_uno_card(callback: CallbackQuery, **kwargs):
 
 
 @router.callback_query(F.data.startswith("uno:inlineplay:"))
-@_serialize_game_action
 async def play_inline_uno_card(callback: CallbackQuery, **kwargs):
     parts = callback.data.split(":")
     if len(parts) != 5:
