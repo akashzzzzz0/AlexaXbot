@@ -9,6 +9,7 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
+    InlineQuery, ChosenInlineResult, InlineQueryResultArticle, InputTextMessageContent,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -128,36 +129,19 @@ def _add_uno_call_buttons(builder, game):
 
 
 def _group_turn_keyboard(game):
-    """Render the active player's hand as public group buttons, never DM buttons."""
+    """Offer a private inline card picker; never publish a player's hand."""
     if not game.get("started") or game.get("finished"):
         return None
     if game.get("pending_wild"):
         return _color_keyboard(game["id"])
     player = game["players"][game["current"]]
-    user_id = player["id"]
     builder = InlineKeyboardBuilder()
-    drawn_index = game.get("drawn_pending", {}).get(user_id)
-    hand = game["hands"].get(user_id, [])
-    if not game.get("choice_open") and drawn_index is None:
-        builder.button(text="🎴 Make your choice", callback_data=f"uno:choose:{game['id']}")
-        _add_uno_call_buttons(builder, game)
-        builder.adjust(1)
-        return builder.as_markup()
-    if drawn_index is not None and 0 <= drawn_index < len(hand):
-        card = hand[drawn_index]
-        builder.button(text=f"▶️ Play drawn: {_card_emoji(card)}"[:60],
-                       callback_data=f"uno:play:{game['id']}:{drawn_index}")
-        builder.button(text="⏭️ Pass turn", callback_data=f"uno:pass:{game['id']}")
-        builder.adjust(1, 1)
-    else:
-        for index, card in enumerate(hand):
-            builder.button(text=_card_emoji(card)[:30],
-                           callback_data=f"uno:play:{game['id']}:{index}")
-        builder.adjust(2)
-        builder.button(text="➕ Draw a card", callback_data=f"uno:draw:{game['id']}")
+    builder.button(
+        text="🎴 Make your choice",
+        switch_inline_query_current_chat=f"uno_{game['id']}_{player['id']}",
+    )
     _add_uno_call_buttons(builder, game)
-    if not builder.export():
-        return None
+    builder.adjust(1)
     return builder.as_markup()
 
 
@@ -183,7 +167,7 @@ def _board_text(game, status=None):
         lines.extend(["", "🌈 Waiting for the active player to choose a colour."])
     else:
         player = game["players"][game["current"]]
-        prompt = "👇 Choose a card below." if game.get("choice_open") else "👇 Tap <b>Make your choice</b> to reveal the cards in this group."
+        prompt = "👇 Tap <b>Make your choice</b>; only you can see your cards before playing."
         lines.extend(["", f"🎯 Next player: <b>{escape(player['name'])}</b>", prompt])
     return "\n".join(lines)
 
@@ -351,10 +335,141 @@ async def choose_uno_cards(callback: CallbackQuery, **kwargs):
     if game["players"][game["current"]]["id"] != callback.from_user.id:
         await callback.answer("It's not your turn.", show_alert=True)
         return
-    game["choice_open"] = True
-    player = game["players"][game["current"]]
-    await _update_board(callback.bot, game, f"🎴 <b>{escape(player['name'])}</b>, choose a card below.")
-    await callback.answer("Your cards are shown in the group.")
+    await callback.answer("Use Make your choice to open your private card picker.")
+
+
+@router.inline_query()
+async def uno_private_card_picker(query: InlineQuery):
+    """Return only the current player's cards in their personal inline results."""
+    parts = (query.query or "").strip().split("_")
+    if len(parts) != 3 or parts[0] != "uno":
+        return
+    game = _GAMES.get(parts[1])
+    try:
+        user_id = int(parts[2])
+    except ValueError:
+        return
+    if not game or not game.get("started") or user_id != query.from_user.id:
+        return
+    if game.get("pending_wild") or game["players"][game["current"]]["id"] != user_id:
+        return
+    hand = game["hands"].get(user_id, [])
+    drawn_index = game.get("drawn_pending", {}).get(user_id)
+    results = []
+    for index, card in enumerate(hand):
+        if drawn_index is not None and index != drawn_index:
+            continue
+        if not _legal(game, card, user_id):
+            continue
+        label = _card_emoji(card)
+        results.append(InlineQueryResultArticle(
+            id=f"{game['id']}:{user_id}:{index}:{secrets.token_hex(3)}",
+            title=f"Play {label}",
+            description="Only you see this card picker",
+            input_message_content=InputTextMessageContent(
+                message_text=f"🃏 {escape(query.from_user.full_name or query.from_user.first_name or 'Player')} played {escape(label)}"
+            ),
+        ))
+    if drawn_index is not None:
+        results.append(InlineQueryResultArticle(
+            id=f"{game['id']}:{user_id}:pass:{secrets.token_hex(3)}",
+            title="⏭️ Pass turn",
+            description="Keep the card you drew and end your turn",
+            input_message_content=InputTextMessageContent(
+                message_text=f"⏭️ {escape(query.from_user.full_name or query.from_user.first_name or 'Player')} passed"
+            ),
+        ))
+    if not results:
+        results.append(InlineQueryResultArticle(
+            id=f"{game['id']}:{user_id}:draw:{secrets.token_hex(3)}",
+            title="➕ Draw a card",
+            description="No playable card in your hand",
+            input_message_content=InputTextMessageContent(
+                message_text=f"➕ {escape(query.from_user.full_name or query.from_user.first_name or 'Player')} draws a card"
+            ),
+        ))
+    await query.answer(results, cache_time=0, is_personal=True, switch_pm_text="Open ALEXA", switch_pm_parameter="start")
+
+
+@router.chosen_inline_result()
+async def uno_card_chosen(chosen: ChosenInlineResult):
+    """Apply a selected private-picker result after Telegram posts it to the group."""
+    parts = (chosen.result_id or "").split(":")
+    if len(parts) != 4:
+        return
+    game_id, raw_user, action, nonce = parts
+    try:
+        user_id = int(raw_user)
+    except ValueError:
+        return
+    game = _GAMES.get(game_id)
+    if not game:
+        return
+    lock = game.setdefault("_action_lock", asyncio.Lock())
+    async with lock:
+        if not game.get("started") or chosen.from_user.id != user_id:
+            return
+        if game["players"][game["current"]]["id"] != user_id or game.get("pending_wild"):
+            return
+        player = next((p for p in game["players"] if p["id"] == user_id), None)
+        if not player:
+            return
+        if action == "draw":
+            await _penalize_uno(game, user_id)
+            _draw_for(game, user_id, 1)
+            drawn_index = len(game["hands"][user_id]) - 1
+            if _legal(game, game["hands"][user_id][drawn_index], user_id):
+                game.setdefault("drawn_pending", {})[user_id] = drawn_index
+                await _update_board(chosen.bot, game, f"➕ {escape(player['name'])} drew a playable card.")
+            else:
+                game.get("drawn_pending", {}).pop(user_id, None)
+                _advance(game)
+                await _update_board(chosen.bot, game, f"➕ {escape(player['name'])} drew a card and passed.")
+            return
+        if action == "pass":
+            if user_id not in game.get("drawn_pending", {}):
+                return
+            game["drawn_pending"].pop(user_id, None)
+            _advance(game)
+            await _update_board(chosen.bot, game, f"⏭️ {escape(player['name'])} passed.")
+            return
+        try:
+            index = int(action)
+            card = game["hands"][user_id][index]
+        except (ValueError, IndexError, KeyError):
+            return
+        drawn_index = game.get("drawn_pending", {}).get(user_id)
+        if drawn_index is not None and index != drawn_index:
+            return
+        if not _legal(game, card, user_id):
+            return
+        await _penalize_uno(game, user_id)
+        game.get("drawn_pending", {}).pop(user_id, None)
+        game["hands"][user_id].pop(index)
+        game["discard"].append(card)
+        if not game["hands"][user_id]:
+            await _finish(chosen.bot, game, user_id)
+            return
+        if len(game["hands"][user_id]) == 1:
+            game["uno_pending"].add(user_id)
+        if card[0] == "W":
+            game["pending_wild"] = {"user_id": user_id, "value": card[1]}
+            await _update_board(chosen.bot, game, f"🌈 {escape(player['name'])} played {escape(_card_name(card))}; choose a colour.")
+            return
+        game["color"] = card[0]
+        value = card[1]
+        if value == "Reverse":
+            game["direction"] *= -1
+            _advance(game, 2 if len(game["players"]) == 2 else 1)
+        elif value == "Skip":
+            _advance(game, 2)
+        elif value == "+2":
+            next_index = (game["current"] + game["direction"]) % len(game["players"])
+            _draw_for(game, game["players"][next_index]["id"], 2)
+            _advance(game, 2)
+        else:
+            _advance(game)
+        await _update_board(chosen.bot, game, f"🃏 {escape(player['name'])} played {_card_emoji(card)}.")
 
 
 @router.callback_query(F.data.startswith("uno:play:"))
