@@ -20,7 +20,7 @@ from bot.config import get_gemini_api_key, settings
 router = Router(name="alexa_ai_chat")
 _conversations = defaultdict(lambda: deque(maxlen=12))
 _HISTORY_DB = Path("alexa_chat_history.db")
-_HISTORY_LIMIT = 12
+_HISTORY_LIMIT = 30
 
 
 def _history_db_init() -> None:
@@ -70,7 +70,7 @@ def _history_db_save(chat_id: int, user_id: int, user_text: str, answer: str) ->
         db.execute(
             "DELETE FROM alexa_chat_history WHERE chat_id = ? AND user_id = ? "
             "AND id NOT IN (SELECT id FROM alexa_chat_history "
-            "WHERE chat_id = ? AND user_id = ? ORDER BY id DESC LIMIT 60)",
+            "WHERE chat_id = ? AND user_id = ? ORDER BY id DESC LIMIT 300)",
             (chat_id, user_id, chat_id, user_id),
         )
 
