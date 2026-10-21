@@ -431,6 +431,7 @@ async def _restart_existing_game(message: Message):
         await message.reply("At least 2 players must join before restarting UNO.")
         return
 
+    await _remove_choice_message(message.bot, game)
     game["deck"] = _make_deck()
     game["hands"] = {
         player["id"]: [game["deck"].pop() for _ in range(7)]
@@ -448,6 +449,8 @@ async def _restart_existing_game(message: Message):
     game["started"] = True
     game["finished"] = False
     game["choice_open"] = False
+    game["selected_card_index"] = None
+    game["choice_message_id"] = None
     game["uno_pending"] = set()
     game["pending_wild"] = None
     game["drawn_pending"] = {}
