@@ -52,9 +52,6 @@ async def is_alexa_trigger(message: Message) -> bool:
             return False
         return True
 
-    if _ALEXA_PREFIX_RE.match(text):
-        return True
-
     if _bot_username is None:
         try:
             me = await message.bot.get_me()
@@ -199,4 +196,8 @@ async def alexa_ai_chat(message: Message) -> None:
         await message.reply(html.escape(answer))
     except Exception:
         # Telegram reply failures should not interrupt bot polling.
-        pass
+        pass    if _ALEXA_PREFIX_RE.match(text):
+        return True
+
+
+
