@@ -152,7 +152,7 @@ async def configure_command_visibility(bot) -> None:
         ("disablecmd", "Disable a group command"), ("enablecmd", "Enable a command"),
         ("disabledcmds", "List disabled commands"), ("id", "Show IDs"),
         ("info", "Show user info"), ("admins", "List group admins"),
-        ("report", "Report a member"), ("autodelete", "Configure auto-delete"),
+        ("report", "Report a member"), ("tagall", "Mention all saved group members"), ("admin", "Mention group admins"), ("autodelete", "Configure auto-delete"),
         ("grouppromo", "Group promotion tools"), ("shield", "Community Shield settings"),
         ("shieldreport", "Report suspected scam"), ("shieldcheck", "Check scam reports"),
         ("scamreview", "Queue scam review"), ("scamreviews", "List scam reviews"),
