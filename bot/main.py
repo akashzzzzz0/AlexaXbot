@@ -194,7 +194,7 @@ async def configure_command_visibility(bot) -> None:
         ("warns", "View warnings"), ("resetwarns", "Reset warnings"),
         ("del", "Delete a replied message"), ("purg", "Bulk-delete messages"),
         ("pin", "Pin a message"), ("unpin", "Unpin a message"),
-        ("history", "Moderation history"), ("lock", "Lock group content"),
+        ("history", "Moderation history"), ("tagall", "Mention all saved members"), ("admin", "Mention group admins"), ("lock", "Lock group content"),
         ("unlock", "Unlock group content"), ("locks", "List content locks"),
         ("locktypes", "List lock types"), ("setflood", "Configure flood limit"),
         ("flood", "Show flood settings"), ("setfloodmode", "Set flood action"),
