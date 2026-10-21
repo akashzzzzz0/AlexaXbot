@@ -8,7 +8,7 @@ from html import escape
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import (
-    Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
+    Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -53,6 +53,39 @@ def _card_emoji(card):
     if color == "W":
         return "🌈" if value == "Wild" else "🌈 +4"
     return f"{COLORS[color][2]} {value}"
+
+
+def _render_card_image(card):
+    """Create a compact UNO-style PNG for the group when a card is played."""
+    from io import BytesIO
+    from PIL import Image, ImageDraw, ImageFont
+
+    color, value = card
+    palette = {
+        "R": (220, 48, 48),
+        "G": (30, 145, 78),
+        "B": (35, 112, 210),
+        "Y": (238, 190, 30),
+        "W": (104, 72, 180),
+    }
+    bg = palette.get(color, palette["W"])
+    image = Image.new("RGB", (420, 600), (28, 35, 48))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((22, 18, 398, 582), radius=34, fill=bg, outline="white", width=8)
+    draw.ellipse((55, 145, 365, 455), fill=(255, 255, 255), outline=(245, 245, 245), width=4)
+    try:
+        font_large = ImageFont.truetype("DejaVuSans.ttf", 92)
+        font_small = ImageFont.truetype("DejaVuSans.ttf", 30)
+    except Exception:
+        font_large = ImageFont.load_default()
+        font_small = ImageFont.load_default()
+    label = {"Skip": "SKIP", "Reverse": "REVERSE", "+2": "+2", "+4": "+4", "Wild": "WILD"}.get(value, value)
+    draw.text((210, 290), label, fill=bg, font=font_large, anchor="mm", stroke_width=1)
+    draw.text((48, 35), label, fill="white", font=font_small)
+    draw.text((280, 520), label, fill="white", font=font_small)
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    return BufferedInputFile(buffer.getvalue(), filename="alexa_uno_card.png")
 
 
 def _make_deck():
@@ -445,6 +478,18 @@ async def play_uno_card(callback: CallbackQuery, **kwargs):
     game.get("drawn_pending", {}).pop(user_id, None)
     game["hands"][user_id].pop(index)
     game["discard"].append(card)
+    # Telegram inline buttons cannot contain images, so post the played card as a
+    # group photo while keeping the live board and Make your choice buttons intact.
+    try:
+        await callback.bot.send_photo(
+            chat_id=game["group_id"],
+            photo=_render_card_image(card),
+            caption=f"🃏 <b>{escape(next(p['name'] for p in game['players'] if p['id'] == user_id))}</b> played <b>{escape(_card_name(card))}</b>.",
+            parse_mode="HTML",
+        )
+    except Exception:
+        # A missing Pillow install or photo-send failure must never break game turns.
+        pass
     if not game["hands"][user_id]:
         await callback.answer("UNO!")
         await _finish(callback.bot, game, user_id)
