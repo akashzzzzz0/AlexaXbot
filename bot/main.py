@@ -107,8 +107,7 @@ async def configure_command_visibility(bot) -> None:
         ("hack", "Play Hack"), ("pfp", "View profile photo"),
         ("empire", "View Empire ranking"), ("empirecontribute", "Contribute Empire XP"),
         ("vip", "View Elite Club status"), ("pro", "View VIP status"),
-        ("vault", "Open Legendary Vault"), ("badges", "View badges"), ("worldrank", "View world rank"),
-        ("mystery", "Play Mystery"),
+        ("vault", "Open Legendary Vault"), ("badges", "View badges"),
     ]
 
     admin_commands = public_commands + [
