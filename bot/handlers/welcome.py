@@ -510,6 +510,18 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
     if message.text and message.text.lstrip().startswith("/"):
         raise SkipHandler
 
+    # Telegram's automatic forwards from a connected channel are not regular
+    # member posts. Exempt them before Bio Link Protection, Anti-Link, warning
+    # counters, and generic content locks so Alexa never deletes/mutes these
+    # channel announcements. Ordinary members' messages remain fully moderated.
+    if getattr(message, "is_automatic_forward", False):
+        logger.debug(
+            "Skipping moderation for automatic forward from connected channel",
+            chat_id=message.chat.id,
+            message_id=message.message_id,
+        )
+        return
+
     # Resolve group/security directly as a fallback if middleware did not inject them.
     # This prevents the link-protection handler from silently skipping messages.
     if not db_group:
