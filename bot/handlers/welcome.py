@@ -604,7 +604,25 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
         if group_security.lock_text and message.text and not message.caption:
             locked_reason = "text"
         elif group_security.lock_links and contains_link(content):
-            locked_reason = "links"
+            # Always exempt group admins/creator from link-only locks.
+            # Other content locks still apply to admins, and regular members
+            # retain the existing link moderation behavior.
+            sender_is_admin = False
+            try:
+                member_status = await message.bot.get_chat_member(
+                    message.chat.id, message.from_user.id
+                )
+                sender_status = str(getattr(member_status.status, "value", member_status.status))
+                sender_is_admin = sender_status in ("administrator", "creator", "owner")
+            except Exception as exc:
+                logger.debug(
+                    "Could not verify link sender role for link lock",
+                    chat_id=message.chat.id,
+                    user_id=message.from_user.id,
+                    error=str(exc),
+                )
+            if not sender_is_admin:
+                locked_reason = "links"
         elif group_security.lock_photos and message.photo:
             locked_reason = "photos"
         elif group_security.lock_videos and (message.video or message.video_note):
