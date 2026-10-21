@@ -230,6 +230,21 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
                 logger.warning("Anti-bot could not remove joining bot", chat_id=chat.id, user_id=user.id, error=str(exc))
         return
 
+    # Admin/creator profile bios are always exempt from bio-link protection.
+    # This is automatic and does not require a command.
+    joining_user_is_admin = False
+    try:
+        member_status = await event.bot.get_chat_member(chat.id, user.id)
+        status_value = str(getattr(member_status.status, "value", member_status.status))
+        joining_user_is_admin = status_value in ("administrator", "creator", "owner")
+    except Exception as exc:
+        logger.debug(
+            "Could not verify joining member role for bio-link exemption",
+            chat_id=chat.id,
+            user_id=user.id,
+            error=str(exc),
+        )
+
     # Bio-link protection has its own persistent moderation switch. For groups
     # without an explicit choice yet, preserve the previous anti-link-linked behavior.
     bio_setting = await db_session.scalar(
@@ -240,7 +255,7 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
         else bool(security and security.anti_link)
     )
     # Telegram may not expose bios for every joining member, so this is best-effort.
-    if bio_protection_enabled:
+    if bio_protection_enabled and not joining_user_is_admin:
         try:
             profile = await event.bot.get_chat(user.id)
             bio = getattr(profile, "bio", None) or ""
@@ -594,35 +609,35 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
     # Do not return early when a regular user record is missing: content locks
     # must still be enforced for every incoming group message.
 
+    # Resolve admin status once for link exemptions. Admin links are exempt
+    # automatically (no command/configuration); non-admin behavior is unchanged.
+    sender_is_admin = False
+    if message.from_user:
+        try:
+            member_status = await message.bot.get_chat_member(
+                message.chat.id, message.from_user.id
+            )
+            sender_status = str(getattr(member_status.status, "value", member_status.status))
+            sender_is_admin = sender_status in ("administrator", "creator", "owner")
+        except Exception as exc:
+            logger.debug(
+                "Could not verify sender role for automatic admin link exemption",
+                chat_id=message.chat.id,
+                user_id=message.from_user.id,
+                error=str(exc),
+            )
+
     # Enforce each content lock independently before other moderation branches.
-    # This makes a single lock affect only its matching content type; Lock ALL
-    # simply enables every field in the same set. Slash commands were routed to
-    # their command handlers above and are intentionally not treated as locked text.
+    # Admin messages containing links bypass only text/link locks; other content
+    # locks (photos, videos, etc.) still apply as usual.
     if message.from_user:
         content = message.text or message.caption or ""
+        admin_link_message = sender_is_admin and contains_link(content)
         locked_reason = None
-        if group_security.lock_text and message.text and not message.caption:
+        if group_security.lock_text and message.text and not message.caption and not admin_link_message:
             locked_reason = "text"
-        elif group_security.lock_links and contains_link(content):
-            # Always exempt group admins/creator from link-only locks.
-            # Other content locks still apply to admins, and regular members
-            # retain the existing link moderation behavior.
-            sender_is_admin = False
-            try:
-                member_status = await message.bot.get_chat_member(
-                    message.chat.id, message.from_user.id
-                )
-                sender_status = str(getattr(member_status.status, "value", member_status.status))
-                sender_is_admin = sender_status in ("administrator", "creator", "owner")
-            except Exception as exc:
-                logger.debug(
-                    "Could not verify link sender role for link lock",
-                    chat_id=message.chat.id,
-                    user_id=message.from_user.id,
-                    error=str(exc),
-                )
-            if not sender_is_admin:
-                locked_reason = "links"
+        elif group_security.lock_links and contains_link(content) and not sender_is_admin:
+            locked_reason = "links"
         elif group_security.lock_photos and message.photo:
             locked_reason = "photos"
         elif group_security.lock_videos and (message.video or message.video_note):
