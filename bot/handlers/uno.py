@@ -550,6 +550,13 @@ async def private_uno_card_results(query: InlineQuery, **kwargs):
             id=f"{game_id}_{player['id']}_{index}",
             title=f"{emoji}  {name}",
             description=status,
+            thumbnail_url=(
+                "https://alexa-bot.fadehost.app/uno/card/"
+                f"{card[0]}/"
+                f"{ {'+2': 'plus2', '+4': 'plus4', 'Wild': 'wild', 'Skip': 'skip', 'Reverse': 'reverse'}.get(card[1], card[1]) }"
+            ),
+            thumbnail_width=105,
+            thumbnail_height=150,
             input_message_content=InputTextMessageContent(
                 message_text=f"🎴 <b>{escape(player['name'])}</b> selected <b>{escape(name)}</b>. Confirm to play it.",
                 parse_mode="HTML",
