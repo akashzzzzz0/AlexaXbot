@@ -539,7 +539,12 @@ async def private_uno_card_results(query: InlineQuery, **kwargs):
         return
     hand = game["hands"].get(player["id"], [])
     drawn_index = game.get("drawn_pending", {}).get(player["id"])
-    indices = [drawn_index] if drawn_index is not None else list(range(len(hand)))
+    candidate_indices = [drawn_index] if drawn_index is not None else list(range(len(hand)))
+    # Only offer legal cards because choosing a photo result posts it to the group immediately.
+    indices = [
+        index for index in candidate_indices
+        if index is not None and 0 <= index < len(hand) and _legal(game, hand[index], player["id"])
+    ]
     results = []
     for index in indices:
         if index is None or not 0 <= index < len(hand):
@@ -610,14 +615,14 @@ async def chosen_private_uno_card(result: ChosenInlineResult, bot: Bot, **kwargs
         try:
             card = game["hands"][user_id][index]
         except (IndexError, KeyError):
-            await _update_board(result.bot, game, "⚠️ That card is no longer in your hand. Open Make your choice again.")
+            await _update_board(bot, game, "⚠️ That card is no longer in your hand. Open Make your choice again.")
             return
         drawn_index = game.get("drawn_pending", {}).get(user_id)
         if drawn_index is not None and index != drawn_index:
-            await _update_board(result.bot, game, "⚠️ After drawing, you can only play the card you just drew.")
+            await _update_board(bot, game, "⚠️ After drawing, you can only play the card you just drew.")
             return
         if not _legal(game, card, user_id):
-            await _update_board(result.bot, game, "⚠️ That card cannot be played on the current colour/card.")
+            await _update_board(bot, game, "⚠️ That card cannot be played on the current colour/card.")
             return
         await _penalize_uno(game, user_id)
         game.get("drawn_pending", {}).pop(user_id, None)
@@ -627,14 +632,14 @@ async def chosen_private_uno_card(result: ChosenInlineResult, bot: Bot, **kwargs
         game["discard"].append(card)
         player_name = next(p["name"] for p in game["players"] if p["id"] == user_id)
         if not game["hands"][user_id]:
-            await _finish(result.bot, game, user_id)
+            await _finish(bot, game, user_id)
             return
         if len(game["hands"][user_id]) == 1:
             game["uno_pending"].add(user_id)
         if card[0] == "W":
             game["pending_wild"] = {"user_id": user_id, "value": card[1]}
             await _update_board(
-                result.bot, game,
+                bot, game,
                 f"🌈 {escape(player_name)} played {escape(_card_name(card))}. Choose a colour."
             )
             return
@@ -651,8 +656,8 @@ async def chosen_private_uno_card(result: ChosenInlineResult, bot: Bot, **kwargs
             _advance(game, 2)
         else:
             _advance(game)
-        await _update_board(result.bot, game, f"🃏 {escape(player_name)} played {_card_emoji(card)}.")
-        await _refresh_hands(result.bot, game)
+        await _update_board(bot, game, f"🃏 {escape(player_name)} played {_card_emoji(card)}.")
+        await _refresh_hands(bot, game)
 
 
 @router.callback_query(F.data.startswith("uno:inlineaction:"))
