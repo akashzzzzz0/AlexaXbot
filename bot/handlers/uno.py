@@ -2,6 +2,7 @@
 import asyncio
 import random
 import secrets
+import io
 from functools import wraps
 from html import escape
 
@@ -9,8 +10,10 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
+    InlineQuery, ChosenInlineResult, InlineQueryResultArticle, InputTextMessageContent,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from PIL import Image, ImageDraw, ImageFont
 
 router = Router()
 _GAMES = {}
@@ -128,36 +131,58 @@ def _add_uno_call_buttons(builder, game):
 
 
 def _group_turn_keyboard(game):
-    """Render the active player's hand as public group buttons, never DM buttons."""
+    """Keep card and colour choices private; group shows only the action button."""
     if not game.get("started") or game.get("finished"):
         return None
-    if game.get("pending_wild"):
-        return _color_keyboard(game["id"])
-    player = game["players"][game["current"]]
-    user_id = player["id"]
     builder = InlineKeyboardBuilder()
-    drawn_index = game.get("drawn_pending", {}).get(user_id)
-    hand = game["hands"].get(user_id, [])
-    if not game.get("choice_open") and drawn_index is None:
-        builder.button(text="🎴 Make your choice", callback_data=f"uno:choose:{game['id']}")
-        _add_uno_call_buttons(builder, game)
-        builder.adjust(1)
-        return builder.as_markup()
-    if drawn_index is not None and 0 <= drawn_index < len(hand):
-        card = hand[drawn_index]
-        builder.button(text=f"▶️ Play drawn: {_card_emoji(card)}"[:60],
-                       callback_data=f"uno:play:{game['id']}:{drawn_index}")
-        builder.button(text="⏭️ Pass turn", callback_data=f"uno:pass:{game['id']}")
-        builder.adjust(1, 1)
-    else:
-        for index, card in enumerate(hand):
-            builder.button(text=_card_emoji(card)[:30],
-                           callback_data=f"uno:play:{game['id']}:{index}")
-        builder.adjust(2)
-        builder.button(text="➕ Draw a card", callback_data=f"uno:draw:{game['id']}")
+    builder.button(text="🎴 Make Your Choice", callback_data=f"uno:hand:{game['id']}")
     _add_uno_call_buttons(builder, game)
-    if not builder.export():
-        return None
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def _render_hand_image(hand):
+    """Render the player's actual UNO-style card faces for private viewing."""
+    card_w, card_h, gap = 150, 220, 14
+    columns = min(4, max(1, len(hand)))
+    rows = (len(hand) + columns - 1) // columns
+    image = Image.new("RGB", (columns * card_w + (columns + 1) * gap, rows * card_h + (rows + 1) * gap), "#176B48")
+    draw = ImageDraw.Draw(image)
+    try:
+        font = ImageFont.truetype("DejaVuSans-Bold.ttf", 24)
+        small = ImageFont.truetype("DejaVuSans-Bold.ttf", 15)
+    except OSError:
+        font = small = ImageFont.load_default()
+    fills = {"R": "#e53935", "G": "#168447", "B": "#1976d2", "Y": "#f4c20d", "W": "#222222"}
+    for i, (color, value) in enumerate(hand):
+        x, y = gap + (i % columns) * (card_w + gap), gap + (i // columns) * (card_h + gap)
+        fill = fills.get(color, "#222222")
+        draw.rounded_rectangle((x, y, x + card_w, y + card_h), radius=18, fill=fill, outline="white", width=5)
+        draw.ellipse((x + 15, y + 35, x + card_w - 15, y + card_h - 35), fill="white")
+        label = "WILD" if value == "Wild" else str(value)
+        bbox = draw.textbbox((0, 0), label, font=font)
+        draw.text((x + (card_w - bbox[2] + bbox[0]) / 2, y + (card_h - bbox[3] + bbox[1]) / 2), label, fill=fill, font=font)
+        draw.text((x + 8, y + 8), _card_emoji((color, value)), fill="white", font=small)
+        draw.text((x + 8, y + card_h - 25), f"#{i + 1}", fill="white", font=small)
+    output = io.BytesIO()
+    image.save(output, format="PNG")
+    output.seek(0)
+    output.name = "uno_cards.png"
+    return output
+
+
+def _private_hand_keyboard(game, user_id):
+    builder = InlineKeyboardBuilder()
+    hand = game["hands"].get(user_id, [])
+    drawn_index = game.get("drawn_pending", {}).get(user_id)
+    for index, card in enumerate(hand):
+        if (drawn_index is None or drawn_index == index) and _legal(game, card, user_id):
+            builder.button(text=f"▶️ Play {_card_emoji(card)}", callback_data=f"uno:privateplay:{game['id']}:{index}")
+    if drawn_index is None:
+        builder.button(text="➕ Draw card", callback_data=f"uno:privatedraw:{game['id']}")
+    else:
+        builder.button(text="⏭️ Pass turn", callback_data=f"uno:privatepass:{game['id']}")
+    builder.adjust(1)
     return builder.as_markup()
 
 
@@ -183,7 +208,7 @@ def _board_text(game, status=None):
         lines.extend(["", "🌈 Waiting for the active player to choose a colour."])
     else:
         player = game["players"][game["current"]]
-        prompt = "👇 Choose a card below." if game.get("choice_open") else "👇 Tap <b>Make your choice</b> to reveal the cards in this group."
+        prompt = "👇 Tap <b>Make your choice</b>; only you can see your cards before playing."
         lines.extend(["", f"🎯 Next player: <b>{escape(player['name'])}</b>", prompt])
     return "\n".join(lines)
 
@@ -351,10 +376,302 @@ async def choose_uno_cards(callback: CallbackQuery, **kwargs):
     if game["players"][game["current"]]["id"] != callback.from_user.id:
         await callback.answer("It's not your turn.", show_alert=True)
         return
-    game["choice_open"] = True
-    player = game["players"][game["current"]]
-    await _update_board(callback.bot, game, f"🎴 <b>{escape(player['name'])}</b>, choose a card below.")
-    await callback.answer("Your cards are shown in the group.")
+    await callback.answer("Use Make your choice to open your private card picker.")
+
+
+@router.callback_query(F.data.startswith("uno:hand:"))
+async def open_private_hand(callback: CallbackQuery):
+    parts = callback.data.split(":")
+    game = _GAMES.get(parts[2]) if len(parts) == 3 else None
+    user_id = callback.from_user.id
+    if not game or not game.get("started") or game["players"][game["current"]]["id"] != user_id:
+        await callback.answer("It's not your turn or the game has ended.", show_alert=True)
+        return
+    try:
+        if game.get("pending_wild"):
+            pending = game["pending_wild"]
+            if pending["user_id"] != user_id:
+                await callback.answer("Only the player who played Wild can choose its colour.", show_alert=True)
+                return
+            builder = InlineKeyboardBuilder()
+            for color, (name, _, emoji) in COLORS.items():
+                builder.button(text=f"{emoji} {name}", callback_data=f"uno:privatecolor:{game['id']}:{color}")
+            builder.adjust(2)
+            await callback.bot.send_message(user_id, "🌈 Choose the colour for your Wild card:", reply_markup=builder.as_markup())
+        else:
+            hand = game["hands"].get(user_id, [])
+            await callback.bot.send_photo(user_id, _render_hand_image(hand), caption="🎴 Your UNO cards — tap a Play button below.", reply_markup=_private_hand_keyboard(game, user_id))
+        await callback.answer("Private card chooser opened.")
+    except Exception:
+        await callback.answer("Open ALEXA in private chat and send /start first.", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("uno:privateplay:"))
+@_serialize_game_action
+async def play_private_uno_card(callback: CallbackQuery, **kwargs):
+    parts = callback.data.split(":")
+    game = _GAMES.get(parts[2]) if len(parts) == 4 else None
+    user_id = callback.from_user.id
+    if not game or not game.get("started") or game["players"][game["current"]]["id"] != user_id or game.get("pending_wild"):
+        await callback.answer("It's not your turn or the game has ended.", show_alert=True)
+        return
+    try:
+        index = int(parts[3])
+        card = game["hands"][user_id][index]
+    except (ValueError, IndexError, KeyError):
+        await callback.answer("Card changed; open the chooser again.", show_alert=True)
+        return
+    drawn_index = game.get("drawn_pending", {}).get(user_id)
+    if (drawn_index is not None and index != drawn_index) or not _legal(game, card, user_id):
+        await callback.answer("That card cannot be played now.", show_alert=True)
+        return
+    player = next(p for p in game["players"] if p["id"] == user_id)
+    await _penalize_uno(game, user_id)
+    game.get("drawn_pending", {}).pop(user_id, None)
+    game["hands"][user_id].pop(index)
+    game["discard"].append(card)
+    if not game["hands"][user_id]:
+        await _finish(callback.bot, game, user_id)
+        await callback.answer("You won UNO!")
+        return
+    if len(game["hands"][user_id]) == 1:
+        game["uno_pending"].add(user_id)
+    if card[0] == "W":
+        game["pending_wild"] = {"user_id": user_id, "value": card[1]}
+        await _update_board(callback.bot, game, f"🌈 {escape(player['name'])} played {_card_emoji(card)}; choose a colour privately.")
+        builder = InlineKeyboardBuilder()
+        for color, (name, _, emoji) in COLORS.items():
+            builder.button(text=f"{emoji} {name}", callback_data=f"uno:privatecolor:{game['id']}:{color}")
+        builder.adjust(2)
+        await callback.bot.send_message(user_id, "🌈 Choose the colour for your Wild card:", reply_markup=builder.as_markup())
+        await callback.answer("Wild card played.")
+        return
+    game["color"] = card[0]
+    value = card[1]
+    if value == "Reverse":
+        game["direction"] *= -1
+        _advance(game, 2 if len(game["players"]) == 2 else 1)
+    elif value == "Skip":
+        _advance(game, 2)
+    elif value == "+2":
+        next_index = (game["current"] + game["direction"]) % len(game["players"])
+        _draw_for(game, game["players"][next_index]["id"], 2)
+        _advance(game, 2)
+    else:
+        _advance(game)
+    await _update_board(callback.bot, game, f"🃏 {escape(player['name'])} played {_card_emoji(card)}.")
+    await callback.answer("Card played!")
+    try:
+        await callback.message.edit_caption(caption="✅ Card played. Check the UNO board in your group.")
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data.startswith("uno:privatecolor:"))
+@_serialize_game_action
+async def choose_private_uno_color(callback: CallbackQuery, **kwargs):
+    parts = callback.data.split(":")
+    game = _GAMES.get(parts[2]) if len(parts) == 4 else None
+    color, user_id = parts[3] if len(parts) == 4 else "", callback.from_user.id
+    pending = game.get("pending_wild") if game else None
+    if not game or not game.get("started") or not pending or pending["user_id"] != user_id or color not in COLORS:
+        await callback.answer("Colour choice is no longer available.", show_alert=True)
+        return
+    game["color"] = color
+    value = pending["value"]
+    game["pending_wild"] = None
+    if value == "+4":
+        next_index = (game["current"] + game["direction"]) % len(game["players"])
+        _draw_for(game, game["players"][next_index]["id"], 4)
+        _advance(game, 2)
+    else:
+        _advance(game)
+    await _update_board(callback.bot, game, f"🌈 Colour changed to {COLORS[color][0]}.")
+    await callback.answer(f"{COLORS[color][0]} selected!")
+    try:
+        await callback.message.edit_text(f"✅ Colour selected: {COLORS[color][0]}. Check the group board.")
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data.startswith("uno:privatedraw:"))
+@_serialize_game_action
+async def draw_private_uno_card(callback: CallbackQuery, **kwargs):
+    parts = callback.data.split(":")
+    game = _GAMES.get(parts[2]) if len(parts) == 3 else None
+    user_id = callback.from_user.id
+    if not game or not game.get("started") or game["players"][game["current"]]["id"] != user_id or game.get("pending_wild"):
+        await callback.answer("It's not your turn.", show_alert=True)
+        return
+    await _penalize_uno(game, user_id)
+    _draw_for(game, user_id, 1)
+    drawn_index = len(game["hands"][user_id]) - 1
+    if _legal(game, game["hands"][user_id][drawn_index], user_id):
+        game.setdefault("drawn_pending", {})[user_id] = drawn_index
+        await _update_board(callback.bot, game, "➕ A playable card was drawn; play it or pass.")
+    else:
+        _advance(game)
+        await _update_board(callback.bot, game, "➕ A card was drawn; turn passed.")
+    await callback.answer("Card drawn.")
+    try:
+        await callback.bot.send_photo(user_id, _render_hand_image(game["hands"].get(user_id, [])), caption="🎴 Your updated UNO cards:", reply_markup=_private_hand_keyboard(game, user_id))
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data.startswith("uno:privatepass:"))
+@_serialize_game_action
+async def pass_private_uno_turn(callback: CallbackQuery, **kwargs):
+    parts = callback.data.split(":")
+    game = _GAMES.get(parts[2]) if len(parts) == 3 else None
+    user_id = callback.from_user.id
+    if not game or not game.get("started") or game["players"][game["current"]]["id"] != user_id:
+        await callback.answer("It's not your turn.", show_alert=True)
+        return
+    if game.get("drawn_pending", {}).pop(user_id, None) is None:
+        await callback.answer("No drawn card to pass.", show_alert=True)
+        return
+    _advance(game)
+    await _update_board(callback.bot, game, "⏭️ Player passed after drawing.")
+    await callback.answer("Turn passed.")
+    try:
+        await callback.message.edit_caption(caption="⏭️ Turn passed. Check the UNO board in your group.")
+    except Exception:
+        pass
+
+
+@router.inline_query()
+async def uno_private_card_picker(query: InlineQuery):
+    """Return only the current player's cards in their personal inline results."""
+    parts = (query.query or "").strip().split("_")
+    if len(parts) != 3 or parts[0] != "uno":
+        return
+    game = _GAMES.get(parts[1])
+    try:
+        user_id = int(parts[2])
+    except ValueError:
+        return
+    if not game or not game.get("started") or user_id != query.from_user.id:
+        return
+    if game.get("pending_wild") or game["players"][game["current"]]["id"] != user_id:
+        return
+    hand = game["hands"].get(user_id, [])
+    drawn_index = game.get("drawn_pending", {}).get(user_id)
+    results = []
+    for index, card in enumerate(hand):
+        if drawn_index is not None and index != drawn_index:
+            continue
+        if not _legal(game, card, user_id):
+            continue
+        label = _card_emoji(card)
+        results.append(InlineQueryResultArticle(
+            id=f"{game['id']}:{user_id}:{index}:{secrets.token_hex(3)}",
+            title=f"Play {label}",
+            description="Only you see this card picker",
+            input_message_content=InputTextMessageContent(
+                message_text=f"🃏 {escape(query.from_user.full_name or query.from_user.first_name or 'Player')} played {escape(label)}"
+            ),
+        ))
+    if drawn_index is not None:
+        results.append(InlineQueryResultArticle(
+            id=f"{game['id']}:{user_id}:pass:{secrets.token_hex(3)}",
+            title="⏭️ Pass turn",
+            description="Keep the card you drew and end your turn",
+            input_message_content=InputTextMessageContent(
+                message_text=f"⏭️ {escape(query.from_user.full_name or query.from_user.first_name or 'Player')} passed"
+            ),
+        ))
+    if not results:
+        results.append(InlineQueryResultArticle(
+            id=f"{game['id']}:{user_id}:draw:{secrets.token_hex(3)}",
+            title="➕ Draw a card",
+            description="No playable card in your hand",
+            input_message_content=InputTextMessageContent(
+                message_text=f"➕ {escape(query.from_user.full_name or query.from_user.first_name or 'Player')} draws a card"
+            ),
+        ))
+    await query.answer(results, cache_time=0, is_personal=True, switch_pm_text="Open ALEXA", switch_pm_parameter="start")
+
+
+@router.chosen_inline_result()
+async def uno_card_chosen(chosen: ChosenInlineResult, bot):
+    """Apply a selected private-picker result after Telegram posts it to the group."""
+    parts = (chosen.result_id or "").split(":")
+    if len(parts) != 4:
+        return
+    game_id, raw_user, action, nonce = parts
+    try:
+        user_id = int(raw_user)
+    except ValueError:
+        return
+    game = _GAMES.get(game_id)
+    if not game:
+        return
+    lock = game.setdefault("_action_lock", asyncio.Lock())
+    async with lock:
+        if not game.get("started") or chosen.from_user.id != user_id:
+            return
+        if game["players"][game["current"]]["id"] != user_id or game.get("pending_wild"):
+            return
+        player = next((p for p in game["players"] if p["id"] == user_id), None)
+        if not player:
+            return
+        if action == "draw":
+            await _penalize_uno(game, user_id)
+            _draw_for(game, user_id, 1)
+            drawn_index = len(game["hands"][user_id]) - 1
+            if _legal(game, game["hands"][user_id][drawn_index], user_id):
+                game.setdefault("drawn_pending", {})[user_id] = drawn_index
+                await _update_board(bot, game, f"➕ {escape(player['name'])} drew a playable card.")
+            else:
+                game.get("drawn_pending", {}).pop(user_id, None)
+                _advance(game)
+                await _update_board(bot, game, f"➕ {escape(player['name'])} drew a card and passed.")
+            return
+        if action == "pass":
+            if user_id not in game.get("drawn_pending", {}):
+                return
+            game["drawn_pending"].pop(user_id, None)
+            _advance(game)
+            await _update_board(bot, game, f"⏭️ {escape(player['name'])} passed.")
+            return
+        try:
+            index = int(action)
+            card = game["hands"][user_id][index]
+        except (ValueError, IndexError, KeyError):
+            return
+        drawn_index = game.get("drawn_pending", {}).get(user_id)
+        if drawn_index is not None and index != drawn_index:
+            return
+        if not _legal(game, card, user_id):
+            return
+        await _penalize_uno(game, user_id)
+        game.get("drawn_pending", {}).pop(user_id, None)
+        game["hands"][user_id].pop(index)
+        game["discard"].append(card)
+        if not game["hands"][user_id]:
+            await _finish(bot, game, user_id)
+            return
+        if len(game["hands"][user_id]) == 1:
+            game["uno_pending"].add(user_id)
+        if card[0] == "W":
+            game["pending_wild"] = {"user_id": user_id, "value": card[1]}
+            await _update_board(bot, game, f"🌈 {escape(player['name'])} played {escape(_card_name(card))}; choose a colour.")
+            return
+        game["color"] = card[0]
+        value = card[1]
+        if value == "Reverse":
+            game["direction"] *= -1
+            _advance(game, 2 if len(game["players"]) == 2 else 1)
+        elif value == "Skip":
+            _advance(game, 2)
+        elif value == "+2":
+            next_index = (game["current"] + game["direction"]) % len(game["players"])
+            _draw_for(game, game["players"][next_index]["id"], 2)
+            _advance(game, 2)
+        else:
+            _advance(game)
+        await _update_board(bot, game, f"🃏 {escape(player['name'])} played {_card_emoji(card)}.")
 
 
 @router.callback_query(F.data.startswith("uno:play:"))
