@@ -481,6 +481,7 @@ async def play_uno_card(callback: CallbackQuery, **kwargs):
         return
     if len(game["hands"][user_id]) == 1:
         game["uno_pending"].add(user_id)
+    await _remove_choice_message(callback.bot, game)
     if card[0] == "W":
         game["pending_wild"] = {"user_id": user_id, "value": card[1]}
         await _update_board(callback.bot, game, f"🌈 {escape(next(p['name'] for p in game['players'] if p['id'] == user_id))} played {escape(_card_name(card))} and must choose a colour.")
@@ -504,7 +505,6 @@ async def play_uno_card(callback: CallbackQuery, **kwargs):
         _advance(game, 2)
     else:
         _advance(game)
-    await _remove_choice_message(callback.bot, game)
     await _update_board(callback.bot, game, f"🃏 Played {_card_emoji(card)}.")
     await callback.answer("Card played!")
     await _refresh_hands(callback.bot, game)
@@ -564,6 +564,23 @@ async def draw_uno_card(callback: CallbackQuery, **kwargs):
         game.setdefault("drawn_pending", {})[user_id] = drawn_index
         game["choice_open"] = True
         await _update_board(callback.bot, game, f"➕ {escape(next(p['name'] for p in game['players'] if p['id'] == user_id))} drew a playable card and must play it or pass.")
+        builder = InlineKeyboardBuilder()
+        card = game["hands"][user_id][drawn_index]
+        builder.button(text=f"▶️ Play drawn: {_card_emoji(card)}"[:60],
+                       callback_data=f"uno:play:{game['id']}:{drawn_index}")
+        builder.button(text="⏭️ Pass turn", callback_data=f"uno:pass:{game['id']}")
+        builder.adjust(1, 1)
+        try:
+            sent = await callback.bot.send_photo(
+                chat_id=game["group_id"], photo=_render_hand_image(game["hands"][user_id]),
+                caption=f"🎴 <b>{escape(next(p['name'] for p in game['players'] if p['id'] == user_id))}'s cards</b> — play the drawn card or pass.\n"
+                        f"⚠️ Cards are visible to everyone in this group.",
+                parse_mode="HTML", reply_markup=builder.as_markup(),
+            )
+            game["choice_message_id"] = sent.message_id
+        except Exception:
+            game["choice_open"] = False
+            await _update_board(callback.bot, game, "⚠️ Could not show the drawn card picker.")
         await callback.answer("Playable card drawn — play it or pass.")
     else:
         _advance(game)
