@@ -2,6 +2,7 @@
 import asyncio
 import random
 import secrets
+import io
 from functools import wraps
 from html import escape
 
@@ -11,6 +12,7 @@ from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from PIL import Image, ImageDraw, ImageFont
 
 router = Router()
 _GAMES = {}
@@ -127,6 +129,42 @@ def _add_uno_call_buttons(builder, game):
             )
 
 
+def _render_hand_image(hand):
+    """Render UNO-style card faces for the active player's hand in the group."""
+    card_w, card_h, gap = 132, 190, 12
+    columns = min(4, max(1, len(hand)))
+    rows = (len(hand) + columns - 1) // columns
+    image = Image.new("RGB", (columns * card_w + (columns + 1) * gap,
+                              rows * card_h + (rows + 1) * gap), "#176B48")
+    draw = ImageDraw.Draw(image)
+    try:
+        font = ImageFont.truetype("DejaVuSans-Bold.ttf", 28)
+        small = ImageFont.truetype("DejaVuSans-Bold.ttf", 13)
+    except OSError:
+        font = small = ImageFont.load_default()
+    fills = {"R": "#e53935", "G": "#168447", "B": "#1976d2", "Y": "#f4c20d", "W": "#242424"}
+    for i, (color, value) in enumerate(hand):
+        x = gap + (i % columns) * (card_w + gap)
+        y = gap + (i // columns) * (card_h + gap)
+        fill = fills.get(color, "#242424")
+        draw.rounded_rectangle((x, y, x + card_w, y + card_h), radius=16,
+                               fill=fill, outline="white", width=4)
+        draw.ellipse((x + 13, y + 32, x + card_w - 13, y + card_h - 32), fill="white")
+        label = "WILD +4" if value == "+4" else ("WILD" if value == "Wild" else str(value).upper())
+        bbox = draw.textbbox((0, 0), label, font=font)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        draw.text((x + (card_w - tw) / 2, y + (card_h - th) / 2 - bbox[1]),
+                  label, fill=fill, font=font)
+        draw.text((x + 7, y + 7), f"#{i + 1}", fill="white", font=small)
+        draw.text((x + 7, y + card_h - 22), _card_emoji((color, value))[:18],
+                  fill="white", font=small)
+    output = io.BytesIO()
+    image.save(output, format="PNG")
+    output.seek(0)
+    output.name = "alexa_uno_hand.png"
+    return output
+
+
 def _group_turn_keyboard(game):
     """Render the active player's hand as public group buttons, never DM buttons."""
     if not game.get("started") or game.get("finished"):
@@ -193,6 +231,9 @@ async def _update_board(bot, game, status=None):
         keyboard = _lobby_keyboard(game["id"])
     elif game.get("finished"):
         keyboard = None
+    elif game.get("choice_open"):
+        # The actual card picker (with the card-face image) is a separate group message.
+        keyboard = None
     else:
         keyboard = _group_turn_keyboard(game)
     try:
@@ -203,6 +244,16 @@ async def _update_board(bot, game, status=None):
         )
     except Exception:
         pass
+
+
+async def _remove_choice_message(bot, game):
+    """Remove the old public card picker after a move so stale buttons cannot be reused."""
+    message_id = game.pop("choice_message_id", None)
+    if message_id:
+        try:
+            await bot.delete_message(chat_id=game["group_id"], message_id=message_id)
+        except Exception:
+            pass
 
 
 async def _refresh_hands(bot, game, status=None):
@@ -353,8 +404,38 @@ async def choose_uno_cards(callback: CallbackQuery, **kwargs):
         return
     game["choice_open"] = True
     player = game["players"][game["current"]]
-    await _update_board(callback.bot, game, f"🎴 <b>{escape(player['name'])}</b>, choose a card below.")
-    await callback.answer("Your cards are shown in the group.")
+    hand = game["hands"].get(callback.from_user.id, [])
+    if not hand:
+        await callback.answer("Your hand is empty.", show_alert=True)
+        return
+    drawn_index = game.get("drawn_pending", {}).get(callback.from_user.id)
+    if drawn_index is not None and 0 <= drawn_index < len(hand):
+        builder = InlineKeyboardBuilder()
+        card = hand[drawn_index]
+        builder.button(text=f"▶️ Play drawn: {_card_emoji(card)}"[:60],
+                       callback_data=f"uno:play:{game['id']}:{drawn_index}")
+        builder.button(text="⏭️ Pass turn", callback_data=f"uno:pass:{game['id']}")
+        builder.adjust(1, 1)
+        keyboard = builder.as_markup()
+    else:
+        keyboard = _group_turn_keyboard(game)
+    await _update_board(callback.bot, game, f"🎴 <b>{escape(player['name'])}</b>, make your choice!")
+    try:
+        sent = await callback.bot.send_photo(
+            chat_id=game["group_id"],
+            photo=_render_hand_image(hand),
+            caption=f"🎴 <b>{escape(player['name'])}'s cards</b> — tap a card button below.\n"
+                    f"⚠️ Cards are visible to everyone in this group.",
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+        game["choice_message_id"] = sent.message_id
+    except Exception:
+        game["choice_open"] = False
+        await _update_board(callback.bot, game, "⚠️ Could not show the card image. Please tap Make your choice again.")
+        await callback.answer("Could not show cards; try again.", show_alert=True)
+        return
+    await callback.answer("Cards shown in the group.")
 
 
 @router.callback_query(F.data.startswith("uno:play:"))
@@ -389,8 +470,10 @@ async def play_uno_card(callback: CallbackQuery, **kwargs):
         await callback.answer("You can't play that card on the current colour/card.", show_alert=True)
         return
     await _penalize_uno(game, user_id)
+    await _remove_choice_message(callback.bot, game)
     game.get("drawn_pending", {}).pop(user_id, None)
     game["hands"][user_id].pop(index)
+    game["choice_open"] = False
     game["discard"].append(card)
     if not game["hands"][user_id]:
         await callback.answer("UNO!")
@@ -421,6 +504,7 @@ async def play_uno_card(callback: CallbackQuery, **kwargs):
         _advance(game, 2)
     else:
         _advance(game)
+    await _remove_choice_message(callback.bot, game)
     await _update_board(callback.bot, game, f"🃏 Played {_card_emoji(card)}.")
     await callback.answer("Card played!")
     await _refresh_hands(callback.bot, game)
@@ -443,6 +527,8 @@ async def choose_uno_color(callback: CallbackQuery, **kwargs):
     if pending["user_id"] != user_id or color not in COLORS:
         await callback.answer("Only the player who played Wild can choose its colour.", show_alert=True)
         return
+    await _remove_choice_message(callback.bot, game)
+    game["choice_open"] = False
     game["color"] = color
     value = pending["value"]
     game["pending_wild"] = None
@@ -470,6 +556,8 @@ async def draw_uno_card(callback: CallbackQuery, **kwargs):
         await callback.answer("It's not your turn.", show_alert=True)
         return
     await _penalize_uno(game, user_id)
+    await _remove_choice_message(callback.bot, game)
+    game["choice_open"] = False
     _draw_for(game, user_id, 1)
     drawn_index = len(game["hands"][user_id]) - 1
     if _legal(game, game["hands"][user_id][drawn_index], user_id):
@@ -496,6 +584,7 @@ async def pass_after_draw(callback: CallbackQuery, **kwargs):
     if game.get("drawn_pending", {}).pop(user_id, None) is None:
         await callback.answer("There is no drawn card to pass.", show_alert=True)
         return
+    await _remove_choice_message(callback.bot, game)
     _advance(game)
     name = next((p["name"] for p in game["players"] if p["id"] == user_id), "Player")
     await _update_board(callback.bot, game, f"⏭️ {escape(name)} passed after drawing.")
