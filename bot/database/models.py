@@ -800,33 +800,6 @@ class ScamReview(Base):
 
 
 
-class WarGuild(Base):
-    """A Telegram group enrolled in ALEXA Multiverse Wars."""
-    __tablename__ = "war_guilds"
-
-    group_id = Column(BigInteger, primary_key=True)
-    title = Column(String(256), nullable=False)
-    username = Column(String(64), nullable=True)
-    registered_by = Column(BigInteger, nullable=False)
-    is_active = Column(Boolean, default=True, nullable=False)
-    registered_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
-class WarSeasonScore(Base):
-    """Per-group score for an ISO-week season."""
-    __tablename__ = "war_season_scores"
-    __table_args__ = (UniqueConstraint("group_id", "season_key"),)
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    group_id = Column(BigInteger, nullable=False, index=True)
-    season_key = Column(String(16), nullable=False, index=True)
-    points = Column(Integer, default=0, nullable=False)
-    wins = Column(Integer, default=0, nullable=False)
-    draws = Column(Integer, default=0, nullable=False)
-    losses = Column(Integer, default=0, nullable=False)
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
-
 class MysteryRewardClaim(Base):
     """One mystery reward claim per user per UTC day."""
     __tablename__ = "mystery_reward_claims"
@@ -837,62 +810,6 @@ class MysteryRewardClaim(Base):
     day_key = Column(String(10), nullable=False)
     reward_amount = Column(Integer, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
-class WarContribution(Base):
-    """One daily mission attempt record per group member."""
-    __tablename__ = "war_contributions"
-    __table_args__ = (
-        UniqueConstraint("group_id", "user_id", "day_key"),
-        Index("ix_war_contributions_group_day", "group_id", "day_key"),
-    )
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    group_id = Column(BigInteger, nullable=False)
-    user_id = Column(BigInteger, nullable=False)
-    day_key = Column(String(10), nullable=False)
-    attempts = Column(Integer, default=0, nullable=False)
-    completed = Column(Boolean, default=False, nullable=False)
-    points = Column(Integer, default=0, nullable=False)
-    submitted_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
-class WarChallenge(Base):
-    """A timed, cross-group challenge."""
-    __tablename__ = "war_challenges"
-    __table_args__ = (
-        Index("ix_war_challenges_status_ends", "status", "ends_at"),
-    )
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    challenger_group_id = Column(BigInteger, nullable=False)
-    opponent_group_id = Column(BigInteger, nullable=False)
-    season_key = Column(String(16), nullable=False)
-    status = Column(String(16), default="pending", nullable=False)
-    challenger_points = Column(Integer, default=0, nullable=False)
-    opponent_points = Column(Integer, default=0, nullable=False)
-    winner_group_id = Column(BigInteger, nullable=True)
-    created_by = Column(BigInteger, nullable=False)
-    accepted_by = Column(BigInteger, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    accepted_at = Column(DateTime(timezone=True), nullable=True)
-    ends_at = Column(DateTime(timezone=True), nullable=True)
-    resolved_at = Column(DateTime(timezone=True), nullable=True)
-
-
-class WarChallengeContribution(Base):
-    """Prevents one member farming multiple points in the same challenge."""
-    __tablename__ = "war_challenge_contributions"
-    __table_args__ = (
-        UniqueConstraint("challenge_id", "group_id", "user_id"),
-    )
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    challenge_id = Column(Integer, ForeignKey("war_challenges.id", ondelete="CASCADE"), nullable=False)
-    group_id = Column(BigInteger, nullable=False)
-    user_id = Column(BigInteger, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
 
 
 class EmpireGuild(Base):
