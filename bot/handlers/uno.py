@@ -82,15 +82,20 @@ def _draw(game, count=1):
 
 
 def _draw_for(game, user_id, count=1):
+    """Draw up to count cards and return the number actually drawn."""
+    drawn = 0
     for _ in range(count):
         if not game["deck"]:
-            top = game["discard"][-1:] 
+            top = game["discard"][-1:]
             recyclable = game["discard"][:-1]
             random.shuffle(recyclable)
             game["deck"] = recyclable
             game["discard"] = top
-        if game["deck"]:
-            game["hands"][user_id].append(game["deck"].pop())
+        if not game["deck"]:
+            break
+        game["hands"][user_id].append(game["deck"].pop())
+        drawn += 1
+    return drawn
 
 
 def _legal(game, card, user_id):
@@ -289,9 +294,57 @@ async def _create_lobby(message: Message, creator_user=None):
     _GROUP_GAME[message.chat.id] = game_id
 
 
+async def _restart_existing_game(message: Message):
+    if message.chat.type not in ("group", "supergroup"):
+        await message.answer("Use /unorestart inside the group where UNO is running.")
+        return
+    game_id = _GROUP_GAME.get(message.chat.id)
+    game = _GAMES.get(game_id) if game_id else None
+    if not game:
+        await message.reply("There is no active UNO game to restart. Use /uno to create one.")
+        return
+    if not message.from_user or message.from_user.id != game["creator_id"]:
+        await message.reply("Only the player who created this UNO game can restart it.")
+        return
+    if len(game["players"]) < 2:
+        await message.reply("At least 2 players must join before restarting UNO.")
+        return
+
+    game["deck"] = _make_deck()
+    game["hands"] = {
+        player["id"]: [game["deck"].pop() for _ in range(7)]
+        for player in game["players"]
+    }
+    first_number = next(
+        (index for index, card in enumerate(game["deck"])
+         if card[0] in COLORS and card[1].isdigit()),
+        None,
+    )
+    game["discard"] = [game["deck"].pop(first_number)] if first_number is not None else [("R", "0")]
+    game["color"] = game["discard"][-1][0]
+    game["current"] = 0
+    game["direction"] = 1
+    game["started"] = True
+    game["finished"] = False
+    game["choice_open"] = False
+    game["uno_pending"] = set()
+    game["pending_wild"] = None
+    game["drawn_pending"] = {}
+    await _update_board(message.bot, game, "🔄 UNO restarted! Same players, fresh cards.")
+    
+
 @router.message(Command("uno"))
 async def cmd_uno(message: Message, **kwargs):
+    args = (message.text or "").split(maxsplit=1)
+    if len(args) > 1 and args[1].strip().lower() in {"restart", "reset"}:
+        await _restart_existing_game(message)
+        return
     await _create_lobby(message)
+
+
+@router.message(Command("unorestart"))
+async def cmd_unorestart(message: Message, **kwargs):
+    await _restart_existing_game(message)
 
 
 @router.callback_query(F.data == "game:uno")
@@ -470,7 +523,11 @@ async def draw_uno_card(callback: CallbackQuery, **kwargs):
         await callback.answer("It's not your turn.", show_alert=True)
         return
     await _penalize_uno(game, user_id)
+    before_count = len(game["hands"].get(user_id, []))
     _draw_for(game, user_id, 1)
+    if len(game["hands"].get(user_id, [])) == before_count:
+        await callback.answer("No cards remain in the draw pile. Try playing a legal card.", show_alert=True)
+        return
     drawn_index = len(game["hands"][user_id]) - 1
     if _legal(game, game["hands"][user_id][drawn_index], user_id):
         game.setdefault("drawn_pending", {})[user_id] = drawn_index
