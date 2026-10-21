@@ -2,10 +2,13 @@
 
 ALEXA stays silent on missing keys, API errors, or network failures.
 """
+import asyncio
 import html
 import re
+import sqlite3
 import time
 from collections import defaultdict, deque
+from pathlib import Path
 
 import httpx
 from aiogram import F, Router
@@ -16,6 +19,61 @@ from bot.config import get_gemini_api_key, settings
 
 router = Router(name="alexa_ai_chat")
 _conversations = defaultdict(lambda: deque(maxlen=12))
+_HISTORY_DB = Path("alexa_chat_history.db")
+_HISTORY_LIMIT = 12
+
+
+def _history_db_init() -> None:
+    """Create a small persistent store so chat context survives bot restarts."""
+    with sqlite3.connect(_HISTORY_DB, timeout=10) as db:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS alexa_chat_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                role TEXT NOT NULL CHECK(role IN ('user', 'model')),
+                message TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_alexa_history_chat_user_id "
+            "ON alexa_chat_history(chat_id, user_id, id)"
+        )
+
+
+def _history_db_load(chat_id: int, user_id: int) -> list[tuple[str, str]]:
+    _history_db_init()
+    with sqlite3.connect(_HISTORY_DB, timeout=10) as db:
+        rows = db.execute(
+            "SELECT role, message FROM alexa_chat_history "
+            "WHERE chat_id = ? AND user_id = ? ORDER BY id DESC LIMIT ?",
+            (chat_id, user_id, _HISTORY_LIMIT),
+        ).fetchall()
+    return [(role, message) for role, message in reversed(rows)]
+
+
+def _history_db_save(chat_id: int, user_id: int, user_text: str, answer: str) -> None:
+    _history_db_init()
+    with sqlite3.connect(_HISTORY_DB, timeout=10) as db:
+        db.executemany(
+            "INSERT INTO alexa_chat_history (chat_id, user_id, role, message) "
+            "VALUES (?, ?, ?, ?)",
+            [
+                (chat_id, user_id, "user", user_text[:4000]),
+                (chat_id, user_id, "model", answer[:4000]),
+            ],
+        )
+        # Keep recent context only; old chats still inform the latest saved window.
+        db.execute(
+            "DELETE FROM alexa_chat_history WHERE chat_id = ? AND user_id = ? "
+            "AND id NOT IN (SELECT id FROM alexa_chat_history "
+            "WHERE chat_id = ? AND user_id = ? ORDER BY id DESC LIMIT 60)",
+            (chat_id, user_id, chat_id, user_id),
+        )
+
 # A user who addresses Alexa keeps a short, per-chat conversation window.
 # This lets follow-up messages work without repeatedly tagging/replying to her.
 _active_until = {}
@@ -197,6 +255,12 @@ async def alexa_ai_chat(message: Message) -> None:
         _active_until[key] = time.monotonic() + _SESSION_SECONDS
     history = _conversations[key]
     try:
+        # Reload from disk every turn: previous chats survive restarts and deployments.
+        persisted_history = await asyncio.to_thread(
+            _history_db_load, message.chat.id, message.from_user.id
+        )
+        history.clear()
+        history.extend(persisted_history)
         answer = await _ask_gemini(text, history)
     except (httpx.HTTPError, ValueError, TypeError):
         return
@@ -209,6 +273,13 @@ async def alexa_ai_chat(message: Message) -> None:
 
     history.append(("user", text))
     history.append(("model", answer))
+    try:
+        await asyncio.to_thread(
+            _history_db_save, message.chat.id, message.from_user.id, text, answer
+        )
+    except Exception:
+        # Chat should still work if the history file is temporarily unavailable.
+        pass
     try:
         await message.reply(html.escape(answer))
     except Exception:
