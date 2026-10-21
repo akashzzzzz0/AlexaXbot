@@ -78,7 +78,7 @@ def build_help_text(_: callable) -> str:
         "🛡️ <b>Community Shield & Scam Review</b>\n"
         "/shield /shieldreport /shieldcheck — Community Shield tools\n"
         "/scamreview /scamreviews /scamresolve — scam review queue\n\n"
-        "🏟️ <b>World Arena</b>\\n"\n        "/arena /play /arenadaily /myrank /worldtop /grouprank /worldgroups /battle /worldrank /mystery\\n\\n"\n        "🧰 <b>More group tools</b>\n"
+        "🏟️ <b>World Arena</b>\\n"\n        "/arena /play /arenadaily /myrank /worldtop /grouprank /worldgroups /battle\\n\\n"\n        "🧰 <b>More group tools</b>\n"
         "/approve /unapprove /approvebio /note /autodelete /setwelcome\n"
         "/resetwarn — warning reset alias\n"
         "/empirecreate — Create a group Empire (admins)\n\n"
