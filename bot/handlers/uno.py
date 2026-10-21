@@ -5,7 +5,7 @@ import secrets
 from functools import wraps
 from html import escape
 
-from aiogram import Router, F
+from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile,
@@ -580,7 +580,7 @@ async def private_uno_card_results(query: InlineQuery, **kwargs):
 
 
 @router.chosen_inline_result()
-async def chosen_private_uno_card(result: ChosenInlineResult, **kwargs):
+async def chosen_private_uno_card(result: ChosenInlineResult, bot: Bot, **kwargs):
     """Apply a card immediately when the active player taps its private photo result."""
     parts = (result.result_id or "").split("_")
     if len(parts) != 3:
@@ -600,7 +600,7 @@ async def chosen_private_uno_card(result: ChosenInlineResult, **kwargs):
         if not game.get("started") or game.get("finished"):
             return
         if game["players"][game["current"]]["id"] != user_id or game.get("pending_wild"):
-            await _update_board(result.bot, game, "⚠️ That card choice is no longer valid. Use Make your choice again.")
+            await _update_board(bot, game, "⚠️ That card choice is no longer valid. Use Make your choice again.")
             return
         try:
             card = game["hands"][user_id][index]
