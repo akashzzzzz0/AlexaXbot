@@ -392,7 +392,7 @@ async def uno_private_card_picker(query: InlineQuery):
 
 
 @router.chosen_inline_result()
-async def uno_card_chosen(chosen: ChosenInlineResult):
+async def uno_card_chosen(chosen: ChosenInlineResult, bot):
     """Apply a selected private-picker result after Telegram posts it to the group."""
     parts = (chosen.result_id or "").split(":")
     if len(parts) != 4:
@@ -420,18 +420,18 @@ async def uno_card_chosen(chosen: ChosenInlineResult):
             drawn_index = len(game["hands"][user_id]) - 1
             if _legal(game, game["hands"][user_id][drawn_index], user_id):
                 game.setdefault("drawn_pending", {})[user_id] = drawn_index
-                await _update_board(chosen.bot, game, f"➕ {escape(player['name'])} drew a playable card.")
+                await _update_board(bot, game, f"➕ {escape(player['name'])} drew a playable card.")
             else:
                 game.get("drawn_pending", {}).pop(user_id, None)
                 _advance(game)
-                await _update_board(chosen.bot, game, f"➕ {escape(player['name'])} drew a card and passed.")
+                await _update_board(bot, game, f"➕ {escape(player['name'])} drew a card and passed.")
             return
         if action == "pass":
             if user_id not in game.get("drawn_pending", {}):
                 return
             game["drawn_pending"].pop(user_id, None)
             _advance(game)
-            await _update_board(chosen.bot, game, f"⏭️ {escape(player['name'])} passed.")
+            await _update_board(bot, game, f"⏭️ {escape(player['name'])} passed.")
             return
         try:
             index = int(action)
@@ -448,13 +448,13 @@ async def uno_card_chosen(chosen: ChosenInlineResult):
         game["hands"][user_id].pop(index)
         game["discard"].append(card)
         if not game["hands"][user_id]:
-            await _finish(chosen.bot, game, user_id)
+            await _finish(bot, game, user_id)
             return
         if len(game["hands"][user_id]) == 1:
             game["uno_pending"].add(user_id)
         if card[0] == "W":
             game["pending_wild"] = {"user_id": user_id, "value": card[1]}
-            await _update_board(chosen.bot, game, f"🌈 {escape(player['name'])} played {escape(_card_name(card))}; choose a colour.")
+            await _update_board(bot, game, f"🌈 {escape(player['name'])} played {escape(_card_name(card))}; choose a colour.")
             return
         game["color"] = card[0]
         value = card[1]
@@ -469,7 +469,7 @@ async def uno_card_chosen(chosen: ChosenInlineResult):
             _advance(game, 2)
         else:
             _advance(game)
-        await _update_board(chosen.bot, game, f"🃏 {escape(player['name'])} played {_card_emoji(card)}.")
+        await _update_board(bot, game, f"🃏 {escape(player['name'])} played {_card_emoji(card)}.")
 
 
 @router.callback_query(F.data.startswith("uno:play:"))
