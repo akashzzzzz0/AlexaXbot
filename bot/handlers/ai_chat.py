@@ -77,6 +77,9 @@ async def is_alexa_trigger(message: Message) -> bool:
         ):
             return False
 
+    if _ALEXA_PREFIX_RE.match(text):
+        return True
+
     # In groups, don't respond to generic greetings on their own. Require
     # an explicit Alexa address, a reply to Alexa, or a short follow-up in an
     # already active one-to-one conversation with Alexa.
@@ -196,8 +199,5 @@ async def alexa_ai_chat(message: Message) -> None:
         await message.reply(html.escape(answer))
     except Exception:
         # Telegram reply failures should not interrupt bot polling.
-        pass    if _ALEXA_PREFIX_RE.match(text):
-        return True
-
-
+        pass
 
