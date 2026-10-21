@@ -406,6 +406,8 @@ async def choose_uno_cards(callback: CallbackQuery, **kwargs):
     player = game["players"][game["current"]]
     hand = game["hands"].get(callback.from_user.id, [])
     if not hand:
+        game["choice_open"] = False
+        await _update_board(callback.bot, game)
         await callback.answer("Your hand is empty.", show_alert=True)
         return
     drawn_index = game.get("drawn_pending", {}).get(callback.from_user.id)
@@ -481,7 +483,6 @@ async def play_uno_card(callback: CallbackQuery, **kwargs):
         return
     if len(game["hands"][user_id]) == 1:
         game["uno_pending"].add(user_id)
-    await _remove_choice_message(callback.bot, game)
     if card[0] == "W":
         game["pending_wild"] = {"user_id": user_id, "value": card[1]}
         await _update_board(callback.bot, game, f"🌈 {escape(next(p['name'] for p in game['players'] if p['id'] == user_id))} played {escape(_card_name(card))} and must choose a colour.")
