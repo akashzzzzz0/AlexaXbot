@@ -1,4 +1,4 @@
-""""Natural, context-aware Alexa conversation for DMs and addressed group messages."""
+"""Natural, context-aware Alexa conversation for DMs and addressed group messages."""
 import logging
 import re
 from collections import defaultdict, deque
@@ -18,10 +18,10 @@ _conversations = defaultdict(lambda: deque(maxlen=12))
 _bot_username = None
 
 _GREETING_RE = re.compile(
-    r"^\\s*(?:hi+|hello+|helo+|hey+|salam|assalamualaikum|aoa)(?:\\b.*)?$",
+    r"^\s*(?:hi+|hello+|helo+|hey+|salam|assalamualaikum|aoa)(?:\b.*)?$",
     re.IGNORECASE,
 )
-_ALEXA_PREFIX_RE = re.compile(r"^\\s*alexa\\b[\\s,!:.-]*(.*)$", re.IGNORECASE)
+_ALEXA_PREFIX_RE = re.compile(r"^\s*alexa\b[\s,!:.-]*(.*)$", re.IGNORECASE)
 
 
 async def is_alexa_trigger(message: Message) -> bool:
@@ -55,7 +55,7 @@ async def is_alexa_trigger(message: Message) -> bool:
             _bot_username = ""
 
     if _bot_username and re.search(
-        rf"(?<!\\w)@{re.escape(_bot_username)}\\b", text, re.IGNORECASE
+        rf"(?<!\w)@{re.escape(_bot_username)}\b", text, re.IGNORECASE
     ):
         return True
 
@@ -71,7 +71,7 @@ def _clean_user_text(message: Message) -> str:
     username = _bot_username or ""
     if username:
         text = re.sub(
-            rf"(?<!\\w)@{re.escape(username)}\\b", "", text, flags=re.IGNORECASE
+            rf"(?<!\w)@{re.escape(username)}\b", "", text, flags=re.IGNORECASE
         ).strip()
 
     if not text and message.reply_to_message:
