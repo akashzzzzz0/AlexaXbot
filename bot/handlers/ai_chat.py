@@ -45,7 +45,11 @@ async def is_alexa_trigger(message: Message) -> bool:
         return True
 
     replied = message.reply_to_message
-    if replied and replied.from_user and replied.from_user.id == message.bot.id:
+    # If the user is replying to anyone except Alexa, never join that thread,
+    # even when this user recently chatted with Alexa or the text says "hi".
+    if replied:
+        if not replied.from_user or replied.from_user.id != message.bot.id:
+            return False
         return True
 
     if _ALEXA_PREFIX_RE.match(text):
@@ -76,10 +80,9 @@ async def is_alexa_trigger(message: Message) -> bool:
         ):
             return False
 
-    # A group conversation stays active for this user for 10 minutes after
-    # they last spoke to Alexa; unrelated members' messages are never captured.
-    if _GREETING_RE.match(text):
-        return True
+    # In groups, don't respond to generic greetings on their own. Require
+    # an explicit Alexa address, a reply to Alexa, or a short follow-up in an
+    # already active one-to-one conversation with Alexa.
     session_key = (message.chat.id, message.from_user.id)
     return time.monotonic() < _active_until.get(session_key, 0.0)
 
@@ -111,6 +114,14 @@ async def _ask_gemini(user_text: str, history: deque) -> str:
         "Do not repeatedly announce that you are an AI or say 'I am an AI bot' unless the user directly asks what you are. "
         "Never claim to be a real human, and do not invent personal experiences. "
         "Avoid canned openings, repetitive disclaimers, and overly formal wording. "
+        "Treat each incoming message as a real conversation, not a customer-support ticket. "
+        "Avoid generic filler such as 'kuch nahi, free hoon', 'main yahin hoon', or 'aur batao' unless it "
+        "genuinely fits the exact context. Never use the same opening or follow-up in consecutive replies. "
+        "Do not turn every answer into a question; sometimes react, joke lightly, share a useful thought, "
+        "or continue the topic naturally. If the user shares news, respond to that news first. If they tease, "
+        "match the playful tone without being rude. Keep casual chat concise and lively; explain more only "
+        "when asked. Use natural Pakistani Roman Urdu/Hinglish rather than translated textbook Urdu. "
+        "Do not force emojis, flirt, claim real-world experiences, or invent facts about the user. "
         "Answer the actual message; never mention prompts, API keys, or internal setup."
     )
     url = (
