@@ -6,7 +6,7 @@ def _build(items, rows=2):
     b.adjust(*([rows] * ((len(items)+rows-1)//rows)))
     return b.as_markup()
 def games_menu_kb(_):
-    return _build([("🎲 Dice","game:dice"),("🧠 Quiz","game:quiz"),("💎 Treasure","game:treasure"),("🎡 Wheel","game:wheel"),("🃏 Cards","game:cards"),("🃏 UNO","game:uno"),("🔢 Number war","game:numwar"),("✊ RPS","game:rps"),("💣 Mines","game:mines"),("🏆 Tournaments","menu:tournaments"),("🎰 Roulette","game:roulette"),("⚔️ Duels","menu:duels"),("◀️ Home","menu:main")],2)
+    return _build([("🎲 Dice","game:dice"),("🧠 Quiz","game:quiz"),("💎 Treasure","game:treasure"),("🎡 Wheel","game:wheel"),("🃏 Cards","game:cards"),("🔢 Number war","game:numwar"),("✊ RPS","game:rps"),("💣 Mines","game:mines"),("🏆 Tournaments","menu:tournaments"),("🎰 Roulette","game:roulette"),("⚔️ Duels","menu:duels"),("◀️ Home","menu:main")],2)
 def dice_menu_kb(_): return _build([("🎲 Play dice","dice:classic"),("🎁 Quick play","dice:daily"),("◀️ Games","menu:games"),("🏠 Home","menu:main")],2)
 def game_action_kb(_, **kw): return _build([("▶️ Play","game:dice"),("◀️ Games","menu:games")],2)
 def join_game_kb(_, game_id=0): return _build([("⚔️ Join duel",f"duel_accept:{game_id}"),("❌ Decline",f"duel_decline:{game_id}")],2)
