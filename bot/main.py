@@ -19,6 +19,50 @@ async def health_handler(request):
     return web.Response(text='OK', status=200)
 
 
+
+async def uno_card_image_handler(request):
+    """Serve public UNO card-face thumbnails for Telegram's private inline picker."""
+    from io import BytesIO
+    from urllib.parse import unquote
+    from PIL import Image, ImageDraw, ImageFont
+
+    color_key = request.match_info.get('color', '').upper()
+    raw_value = unquote(request.match_info.get('value', ''))
+    value = {'PLUS2': '+2', 'PLUS4': '+4', 'WILD': 'Wild', 'SKIP': 'Skip', 'REVERSE': 'Reverse'}.get(raw_value.upper(), raw_value)
+    palette = {
+        'R': ((220, 48, 48), 'RED'), 'G': ((30, 145, 78), 'GREEN'),
+        'B': ((35, 112, 210), 'BLUE'), 'Y': ((238, 190, 30), 'YELLOW'),
+        'W': ((104, 72, 180), 'WILD'),
+    }
+    if color_key not in palette or value not in {str(n) for n in range(10)} | {'Skip', 'Reverse', '+2', '+4', 'Wild'}:
+        raise web.HTTPNotFound(text='Unknown UNO card')
+    bg, color_name = palette[color_key]
+    if color_key == 'W':
+        bg = (35, 35, 42)
+    image = Image.new('RGB', (420, 600), (28, 35, 48))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((18, 14, 402, 586), radius=38, fill=bg, outline='white', width=8)
+    draw.ellipse((55, 145, 365, 455), fill='white', outline=(245, 245, 245), width=4)
+    label = {'Skip': 'SKIP', 'Reverse': '↺', '+2': '+2', '+4': '+4', 'Wild': 'WILD'}.get(value, value)
+    try:
+        large = ImageFont.truetype('DejaVuSans.ttf', 88 if len(label) <= 4 else 58)
+        small = ImageFont.truetype('DejaVuSans.ttf', 28)
+    except Exception:
+        large = small = ImageFont.load_default()
+    draw.text((210, 295), label, fill=bg, font=large, anchor='mm', stroke_width=1)
+    draw.text((40, 30), label, fill='white', font=small)
+    draw.text((290, 525), label, fill='white', font=small)
+    if color_key == 'W':
+        draw.polygon([(210, 190), (275, 230), (245, 285), (175, 245)], fill=(220, 48, 48))
+        draw.polygon([(275, 230), (340, 270), (310, 325), (245, 285)], fill=(35, 112, 210))
+        draw.polygon([(175, 245), (245, 285), (215, 340), (145, 300)], fill=(30, 145, 78))
+        draw.polygon([(245, 285), (310, 325), (280, 380), (215, 340)], fill=(238, 190, 30))
+        draw.text((210, 420), label, fill='white', font=small, anchor='mm')
+    output = BytesIO()
+    image.save(output, format='PNG')
+    return web.Response(body=output.getvalue(), content_type='image/png', headers={'Cache-Control': 'public, max-age=3600'})
+
+
 async def run_health_server():
     port = int(os.environ.get('PORT', 8080))
     app = web.Application()
@@ -308,7 +352,7 @@ async def run_bot(bot, dp, runner):
     try:
         await dp.start_polling(
             bot,
-            allowed_updates=['message', 'callback_query', 'pre_checkout_query', 'chat_member', 'my_chat_member'],
+            allowed_updates=['message', 'callback_query', 'inline_query', 'chosen_inline_result', 'pre_checkout_query', 'chat_member', 'my_chat_member'],
         )
     except asyncio.CancelledError:
         pass
