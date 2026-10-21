@@ -1,10 +1,16 @@
 """Focused regression tests for ALEXA's UNO rules and turn mechanics."""
+import os
 import unittest
+from unittest.mock import patch
 
 from bot.handlers import uno
 
 
 class UnoRulesTests(unittest.TestCase):
+    def test_inline_card_images_use_configured_public_origin(self):
+        with patch.dict(os.environ, {"UNO_CARD_BASE_URL": "https://public.example.test/"}):
+            self.assertEqual(uno._uno_card_image_base_url(), "https://public.example.test")
+
     def test_lobby_board_renders_before_game_has_started(self):
         # /uno creates a lobby before dealing cards. The board must have a
         # placeholder top card so rendering does not crash on an empty discard.
