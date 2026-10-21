@@ -59,13 +59,13 @@ async def is_alexa_trigger(message: Message) -> bool:
             _bot_username = ""
 
     if _bot_username and re.search(
-        rf"(?<!\\w)@{re.escape(_bot_username)}\\b", text, re.IGNORECASE
+        rf"(?<!\w)@{re.escape(_bot_username)}\b", text, re.IGNORECASE
     ):
         return True
 
     # Do not answer messages directed at another member. Check this before
     # greeting/session triggers (e.g. "hi @someone") so Alexa doesn't interrupt.
-    mentioned_usernames = re.findall(r"(?<!\\w)@([A-Za-z0-9_]{5,})", text)
+    mentioned_usernames = re.findall(r"(?<!\w)@([A-Za-z0-9_]{5,})", text)
     if any(name.casefold() != _bot_username for name in mentioned_usernames):
         return False
     for entity in (message.entities or []):
