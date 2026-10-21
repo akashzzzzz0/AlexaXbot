@@ -29,7 +29,6 @@ def _menu_keyboard():
     kb.button(text="🏆 World Players", callback_data="arena:top")
     kb.button(text="🌍 World Groups", callback_data="arena:groups")
     kb.button(text="📊 My Rank", callback_data="arena:me")
-    kb.button(text="⚔️ Group Wars", callback_data="arena:wars")
     kb.adjust(2, 2, 2)
     return kb.as_markup()
 
@@ -320,16 +319,6 @@ async def arena_callback(callback: CallbackQuery, db_session: AsyncSession = Non
     if data == "arena:groups":
         await callback.answer()
         await world_groups_from_callback(callback, db_session)
-        return
-    if data == "arena:wars":
-        await callback.answer()
-        await callback.message.answer(
-            "⚔️ <b>Cross-group competitions</b>\n\n"
-            "Alexa already has Multiverse Wars for group-vs-group challenges. "
-            "Use /war to open it and /worldrank to view the all-time group ranking. "
-            "World Arena player XP remains a separate leaderboard.",
-            parse_mode="HTML",
-        )
         return
     if data == "arena:me":
         profile = await get_or_create_profile(db_session, callback.from_user.id)
