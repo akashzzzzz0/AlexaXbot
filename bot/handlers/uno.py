@@ -142,6 +142,36 @@ def _hand_keyboard(game, user_id):
 
 
 
+def _group_turn_keyboard(game):
+    """Render the active player's hand as public group buttons, never DM buttons."""
+    if not game.get("started") or game.get("finished"):
+        return None
+    if game.get("pending_wild"):
+        return _color_keyboard(game["id"])
+    player = game["players"][game["current"]]
+    user_id = player["id"]
+    builder = InlineKeyboardBuilder()
+    drawn_index = game.get("drawn_pending", {}).get(user_id)
+    hand = game["hands"].get(user_id, [])
+    if drawn_index is not None and 0 <= drawn_index < len(hand):
+        card = hand[drawn_index]
+        builder.button(text=f"▶️ Play drawn: {_card_emoji(card)}"[:60],
+                       callback_data=f"uno:play:{game['id']}:{drawn_index}")
+        builder.button(text="⏭️ Pass turn", callback_data=f"uno:pass:{game['id']}")
+        builder.adjust(1, 1)
+    else:
+        for index, card in enumerate(hand):
+            builder.button(text=_card_emoji(card)[:30],
+                           callback_data=f"uno:play:{game['id']}:{index}")
+        builder.adjust(2)
+        builder.button(text="➕ Draw a card", callback_data=f"uno:draw:{game['id']}")
+    if len(hand) == 1 and user_id in game.get("uno_pending", set()):
+        builder.button(text="📣 UNO!", callback_data=f"uno:call:{game['id']}")
+    if not builder.export():
+        return None
+    return builder.as_markup()
+
+
 def _render_hand_image(cards):
     from PIL import Image, ImageDraw, ImageFont
     cols = 7
@@ -208,75 +238,30 @@ def _board_text(game, status=None):
         lines.extend(["", "🌈 Waiting for the active player to choose a colour."])
     else:
         player = game["players"][game["current"]]
-        lines.extend(["", f"🎯 Turn: <b>{escape(player['name'])}</b>", "Each player receives their own cards in the bot's private chat."])
+        lines.extend(["", f"🎯 Next player: <b>{escape(player['name'])}</b>", "👇 <b>Make your choice</b> — tap a card button below."])
     return "\n".join(lines)
 
 
 async def _update_board(bot, game, status=None):
+    if not game.get("started") and not game.get("finished"):
+        keyboard = _lobby_keyboard(game["id"])
+    elif game.get("finished"):
+        keyboard = None
+    else:
+        keyboard = _group_turn_keyboard(game)
     try:
         await bot.edit_message_text(
             _board_text(game, status), chat_id=game["group_id"],
             message_id=game["group_message_id"], parse_mode="HTML",
-            reply_markup=_lobby_keyboard(game["id"]) if not game["started"] and not game.get("finished") else None,
+            reply_markup=keyboard,
         )
     except Exception:
         pass
 
 
-async def _send_or_update_hand(bot, game, user_id, status=None):
-    cards = game["hands"].get(user_id, [])
-    player = next((p for p in game["players"] if p["id"] == user_id), None)
-    if not player:
-        return
-    if not game["started"]:
-        return
-    if game.get("pending_wild") and game["pending_wild"]["user_id"] == user_id:
-        keyboard = _color_keyboard(game["id"])
-        status = "Choose the colour for your Wild card."
-    else:
-        keyboard = _hand_keyboard(game, user_id)
-    is_turn = game["players"][game["current"]]["id"] == user_id and not game.get("pending_wild")
-    if status is None:
-        status = "🟢 Your turn — tap a card button." if is_turn else f"⏳ Waiting for {game['players'][game['current']]['name']}."
-    caption = f"🃏 <b>ALEXA UNO</b>\n{escape(status)}\nCards in your hand: <b>{len(cards)}</b>"
-    photo = _render_hand_image(cards)
-    message_id = game["dm_messages"].get(user_id)
-    if message_id:
-        try:
-            previous_hand = game.get("rendered_hands", {}).get(user_id)
-            if previous_hand == cards:
-                # Most moves do not change every player's cards. Update the status
-                # and buttons without uploading an identical image again.
-                await bot.edit_message_caption(
-                    chat_id=user_id, message_id=message_id, caption=caption,
-                    parse_mode="HTML", reply_markup=keyboard,
-                )
-            else:
-                await bot.edit_message_media(
-                    chat_id=user_id, message_id=message_id,
-                    media=InputMediaPhoto(media=photo, caption=caption, parse_mode="HTML"),
-                    reply_markup=keyboard,
-                )
-            game.setdefault("rendered_hands", {})[user_id] = list(cards)
-            return
-        except Exception as exc:
-            # Telegram reports "message is not modified" when neither the caption
-            # nor keyboard changed. That is not a reason to send duplicate DMs.
-            if "message is not modified" in str(exc).lower():
-                game.setdefault("rendered_hands", {})[user_id] = list(cards)
-                return
-    sent = await bot.send_photo(user_id, photo=photo, caption=caption, parse_mode="HTML", reply_markup=keyboard)
-    game["dm_messages"][user_id] = sent.message_id
-    game.setdefault("rendered_hands", {})[user_id] = list(cards)
-
-
 async def _refresh_hands(bot, game, status=None):
-    for player in game["players"]:
-        try:
-            await _send_or_update_hand(bot, game, player["id"], status if player["id"] == game["players"][game["current"]]["id"] else None)
-        except Exception:
-            # A player can block the bot or have not pressed /start; notify in group.
-            pass
+    """Refresh the single public group board; no private hand messages are sent."""
+    await _update_board(bot, game, status)
 
 
 def _advance(game, steps=1):
@@ -288,19 +273,6 @@ async def _finish(bot, game, winner_id):
     game["started"] = False
     game["finished"] = True
     await _update_board(bot, game, f"🏆 <b>{escape(winner['name'])} wins!</b> UNO game finished.")
-    for player in game["players"]:
-        try:
-            message_id = game["dm_messages"].get(player["id"])
-            if message_id:
-                await bot.edit_message_caption(
-                    chat_id=player["id"], message_id=message_id,
-                    caption=f"🏆 <b>{escape(winner['name'])} won the UNO game!</b>",
-                    parse_mode="HTML", reply_markup=None,
-                )
-            else:
-                await bot.send_message(player["id"], f"🏆 {escape(winner['name'])} won the UNO game in your group!")
-        except Exception:
-            pass
     _GROUP_GAME.pop(game["group_id"], None)
     _GAMES.pop(game["id"], None)
 
@@ -319,8 +291,6 @@ async def _begin_game(callback, game):
         return
     game["deck"] = _make_deck()
     game["hands"] = {p["id"]: [game["deck"].pop() for _ in range(7)] for p in game["players"]}
-    # Start on a number card. Select it directly instead of rotating action cards
-    # through the deck, which can make startup logic harder to reason about.
     first_number = next(
         (index for index, card in enumerate(game["deck"])
          if card[0] in COLORS and card[1].isdigit()),
@@ -334,47 +304,19 @@ async def _begin_game(callback, game):
     game["current"] = 0
     game["direction"] = 1
     game["started"] = True
+    game["finished"] = False
     game["uno_pending"] = set()
     game["pending_wild"] = None
     game["drawn_pending"] = {}
     game["dm_messages"] = {}
     game["rendered_hands"] = {}
-    try:
-        for player in game["players"]:
-            photo = _render_hand_image(game["hands"][player["id"]])
-            sent = await callback.bot.send_photo(
-                player["id"], photo=photo,
-                caption="🃏 <b>ALEXA UNO</b>\nThe game has started! Wait for your turn.",
-                parse_mode="HTML",
-            )
-            game["dm_messages"][player["id"]] = sent.message_id
-    except Exception:
-        # Roll back partial startup: remove already-sent private hand messages so
-        # nobody is left with cards from a game that never actually began.
-        for user_id, message_id in list(game["dm_messages"].items()):
-            try:
-                await callback.bot.delete_message(chat_id=user_id, message_id=message_id)
-            except Exception:
-                pass
-        game["started"] = False
-        game["hands"] = {}
-        game["deck"] = []
-        game["discard"] = []
-        game["dm_messages"] = {}
-        game["rendered_hands"] = {}
-        game["pending_wild"] = None
-        game["drawn_pending"] = {}
-        await _update_board(callback.bot, game, "⚠️ I couldn't DM every player. Each player must open ALEXA and press /start, then the creator can press Start Game again.")
-        await callback.answer("A player must open the bot and press /start first.", show_alert=True)
-        return
-    await _update_board(callback.bot, game, "🚀 Game started! Cards have been sent privately.")
-    await _refresh_hands(callback.bot, game)
-    await callback.answer("UNO started!")
+    await _update_board(callback.bot, game, "🚀 Game started! Cards and choices are shown in this group.")
+    await callback.answer("UNO started in the group!")
 
 
 async def _create_lobby(message: Message, creator_user=None):
     if message.chat.type not in ("group", "supergroup"):
-        await message.answer("Start UNO in a Telegram group with /uno. Your cards will be sent privately by ALEXA.")
+        await message.answer("Start UNO in a Telegram group with /uno. Cards and turns are shown inside the group.")
         return
     if message.chat.id in _GROUP_GAME:
         existing = _GAMES.get(_GROUP_GAME[message.chat.id])
@@ -432,7 +374,7 @@ async def join_uno(callback: CallbackQuery, **kwargs):
         return
     game["players"].append({"id": user.id, "name": user.full_name or user.first_name or "Player"})
     await _update_board(callback.bot, game, f"🙋 {escape(user.full_name or user.first_name or 'Player')} joined UNO.")
-    await callback.answer("Joined! Open ALEXA and press /start if you haven't before.")
+    await callback.answer("Joined UNO! The game will run inside this group.")
 
 
 @router.callback_query(F.data.startswith("uno:start:"))
@@ -471,7 +413,7 @@ async def play_uno_card(callback: CallbackQuery, **kwargs):
         index = int(parts[3])
         card = game["hands"][user_id][index]
     except (ValueError, IndexError, KeyError):
-        await callback.answer("That card is no longer in your hand. Refresh your DM.", show_alert=True)
+        await callback.answer("That card is no longer in the current hand. Use the latest group buttons.", show_alert=True)
         return
     drawn_index = game.get("drawn_pending", {}).get(user_id)
     if drawn_index is not None and index != drawn_index:
