@@ -36,6 +36,14 @@ class AdminActionMiddleware(BaseMiddleware):
         if not protected:
             return await handler(event, data)
 
+        # Telegram represents an anonymous group admin as sender_chat == the group.
+        # Only Telegram admins can post as the group itself, so let the command handler
+        # request an explicit confirmation instead of rejecting the hidden sender.
+        if isinstance(event, Message) and chat is not None:
+            sender_chat = getattr(event, "sender_chat", None)
+            if chat.type in ("group", "supergroup") and sender_chat and sender_chat.id == chat.id:
+                return await handler(event, data)
+
         if chat is None or chat.type not in ("group", "supergroup"):
             if isinstance(event, CallbackQuery):
                 await event.answer("This action is available to group admins only.", show_alert=True)
