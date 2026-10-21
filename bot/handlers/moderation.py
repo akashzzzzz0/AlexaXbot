@@ -1,5 +1,5 @@
 from aiogram import Router, F, Bot
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, delete, func
@@ -19,10 +19,90 @@ logger = structlog.get_logger()
 router = Router()
 
 _bio_link_settings_drafts = {}
+_anonymous_pending_actions = {}
+
+
+def _is_anonymous_group_admin(message: Message) -> bool:
+    return bool(message.sender_chat and message.chat and message.sender_chat.id == message.chat.id and message.chat.type in ("group", "supergroup"))
+
+
+async def _queue_anonymous_confirmation(message: Message, action: str, target, reason: str = "", duration=None):
+    if not _is_anonymous_group_admin(message):
+        return False
+    import secrets
+    token = secrets.token_urlsafe(9)
+    _anonymous_pending_actions[token] = {"chat_id": message.chat.id, "action": action, "target_id": target.id, "reason": reason, "duration": duration}
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ Confirm action", callback_data=f"anon_confirm:{token}"), InlineKeyboardButton(text="❌ Cancel", callback_data=f"anon_cancel:{token}")]])
+    await message.reply(f"🛡️ Anonymous admin requested: <b>{escape(action.upper())}</b> for <code>{target.id}</code>.\nA group admin can confirm this action below.", reply_markup=keyboard, parse_mode="HTML")
+    return True
+
+
+@router.callback_query(F.data.startswith("anon_cancel:"))
+async def cancel_anonymous_action(callback: CallbackQuery):
+    token = (callback.data or "").split(":", 1)[1]
+    pending = _anonymous_pending_actions.get(token)
+    if not pending or pending["chat_id"] != callback.message.chat.id:
+        await callback.answer("This request expired or was already handled.", show_alert=True)
+        return
+    del _anonymous_pending_actions[token]
+    await callback.message.edit_text("❌ Anonymous admin action cancelled.")
+    await callback.answer("Cancelled")
+
+
+@router.callback_query(F.data.startswith("anon_confirm:"))
+async def confirm_anonymous_action(callback: CallbackQuery, bot: Bot, db_session: AsyncSession):
+    token = (callback.data or "").split(":", 1)[1]
+    pending = _anonymous_pending_actions.get(token)
+    if not pending or pending["chat_id"] != callback.message.chat.id:
+        await callback.answer("This request expired or was already handled.", show_alert=True)
+        return
+    try:
+        actor = await bot.get_chat_member(pending["chat_id"], callback.from_user.id)
+        if actor.status not in ("administrator", "creator"):
+            await callback.answer("Only a group admin can confirm this action.", show_alert=True)
+            return
+    except Exception:
+        await callback.answer("Could not verify your admin status.", show_alert=True)
+        return
+    action, target_id = pending["action"], pending["target_id"]
+    reason, duration = pending.get("reason", ""), pending.get("duration")
+    try:
+        if action == "ban":
+            ok = await ban_user(bot, db_session, pending["chat_id"], target_id, callback.from_user.id, reason)
+        elif action == "kick":
+            ok = await kick_user(bot, db_session, pending["chat_id"], target_id, callback.from_user.id, reason)
+        elif action == "mute":
+            ok = await mute_user(bot, db_session, pending["chat_id"], target_id, callback.from_user.id, duration, reason)
+        elif action == "unban":
+            ok = await unban_user(bot, db_session, pending["chat_id"], target_id, callback.from_user.id)
+        elif action == "unmute":
+            ok = await unmute_user(bot, db_session, pending["chat_id"], target_id, callback.from_user.id)
+        elif action in ("promote", "demote"):
+            if action == "promote":
+                bot_me = await bot.get_me()
+                bot_member = await bot.get_chat_member(pending["chat_id"], bot_me.id)
+                if bot_member.status != "administrator" or not getattr(bot_member, "can_promote_members", False):
+                    raise RuntimeError("Alexa needs Add New Admins permission.")
+                await bot.promote_chat_member(chat_id=pending["chat_id"], user_id=target_id, can_manage_chat=True, can_delete_messages=True, can_manage_video_chats=True, can_restrict_members=True, can_promote_members=False, can_change_info=False, can_invite_users=True, can_pin_messages=True, can_post_messages=False, can_edit_messages=False, can_manage_topics=True)
+            else:
+                await bot.promote_chat_member(pending["chat_id"], target_id, can_manage_chat=False, can_delete_messages=False, can_manage_video_chats=False, can_restrict_members=False, can_promote_members=False, can_change_info=False, can_invite_users=False, can_pin_messages=False, can_post_messages=False, can_edit_messages=False, can_manage_topics=False)
+            ok = True
+        else:
+            ok = False
+        if ok:
+            del _anonymous_pending_actions[token]
+            await callback.message.edit_text(f"✅ <b>{escape(action.title())} confirmed and completed.</b>\nTarget ID: <code>{target_id}</code>", parse_mode="HTML")
+            await callback.answer("Action completed")
+        else:
+            await callback.answer("Action failed; check Alexa's permissions and target status.", show_alert=True)
+    except Exception as exc:
+        logger.exception("Anonymous admin confirmation failed", action=action, chat_id=pending["chat_id"], target_id=target_id, error=str(exc))
+        await callback.answer(f"Action failed: {str(exc)[:150]}", show_alert=True)
+
 router.message.outer_middleware(AdminActionMiddleware(
     commands={"ban", "unban", "kick", "mute", "unmute", "warn", "unwarn", "warns", "warnings", "history", "note", "del", "purg", "pin", "unpin", "ro", "setrole", "clearrole", "role", "resetwarn", "resetwarns", "approvebio", "promote", "demote"}
 ))
-router.callback_query.outer_middleware(AdminActionMiddleware(prefixes=("mod:", "mute_duration:", "ban_duration:", "warn_action:", "ban_confirm:")))
+router.callback_query.outer_middleware(AdminActionMiddleware(prefixes=("mod:", "mute_duration:", "ban_duration:", "warn_action:", "ban_confirm:", "anon_confirm:", "anon_cancel:")))
 
 
 async def get_target_user(message: Message, session: AsyncSession) -> tuple:
@@ -372,7 +452,9 @@ async def cmd_ban(message: Message, bot: Bot, _: callable, db_session: AsyncSess
     if not target:
         await message.reply(_("provide_user"))
         return
-    success = await ban_user(bot, db_session, message.chat.id, target.id, message.from_user.id, reason)
+    if await _queue_anonymous_confirmation(message, "ban", target, reason):
+        return
+    success = await ban_user(bot, db_session, message.chat.id, target.id, message.from_user.id if message.from_user else 0, reason)
     if success:
         name = mention_user(target.id, safe_username(target))
         await message.reply(_("user_banned").format(name=name, reason=reason or _("no_reason")), parse_mode="HTML")
@@ -388,7 +470,9 @@ async def cmd_unban(message: Message, bot: Bot, _: callable, db_session: AsyncSe
     if not target:
         await message.reply(_("provide_user"))
         return
-    success = await unban_user(bot, db_session, message.chat.id, target.id, message.from_user.id)
+    if await _queue_anonymous_confirmation(message, "unban", target):
+        return
+    success = await unban_user(bot, db_session, message.chat.id, target.id, message.from_user.id if message.from_user else 0)
     if success:
         await message.reply(_("user_unbanned").format(name=safe_username(target)))
     else:
@@ -403,7 +487,9 @@ async def cmd_kick(message: Message, bot: Bot, _: callable, db_session: AsyncSes
     if not target:
         await message.reply(_("provide_user"))
         return
-    success = await kick_user(bot, db_session, message.chat.id, target.id, message.from_user.id, reason)
+    if await _queue_anonymous_confirmation(message, "kick", target, reason):
+        return
+    success = await kick_user(bot, db_session, message.chat.id, target.id, message.from_user.id if message.from_user else 0, reason)
     if success:
         name = mention_user(target.id, safe_username(target))
         await message.reply(_("user_kicked").format(name=name, reason=reason or _("no_reason")), parse_mode="HTML")
@@ -430,7 +516,9 @@ async def cmd_mute(message: Message, bot: Bot, _: callable, db_session: AsyncSes
             duration = dur
             reason = parts[1] if len(parts) > 1 else ""
 
-    success = await mute_user(bot, db_session, message.chat.id, target.id, message.from_user.id, duration, reason)
+    if await _queue_anonymous_confirmation(message, "mute", target, reason, duration):
+        return
+    success = await mute_user(bot, db_session, message.chat.id, target.id, message.from_user.id if message.from_user else 0, duration, reason)
     if success:
         name = mention_user(target.id, safe_username(target))
         dur_str = format_duration(duration) if duration else "Forever"
@@ -454,6 +542,8 @@ async def cmd_unmute(message: Message, bot: Bot, _: callable, db_session: AsyncS
         )
         return
     try:
+        if await _queue_anonymous_confirmation(message, "unmute", target):
+            return
         success = await unmute_user(
             bot, db_session, message.chat.id, target.id,
             message.from_user.id if message.from_user else 0,
@@ -846,6 +936,8 @@ async def cmd_promote(message: Message, bot: Bot, db_session: AsyncSession, **kw
     if not target:
         await message.reply("Reply to a member or use /promote <user ID>."); return
     try:
+        if await _queue_anonymous_confirmation(message, "promote", target):
+            return
         bot_identity = await bot.get_me()
         bot_member = await bot.get_chat_member(message.chat.id, bot_identity.id)
         if bot_member.status != "administrator" or not getattr(bot_member, "can_promote_members", False):
@@ -888,6 +980,8 @@ async def cmd_demote(message: Message, bot: Bot, db_session: AsyncSession, **kwa
     if not target:
         await message.reply("Reply to an admin or use /demote <user ID>."); return
     try:
+        if await _queue_anonymous_confirmation(message, "demote", target):
+            return
         await bot.promote_chat_member(message.chat.id, target.id, can_manage_chat=False, can_delete_messages=False, can_manage_video_chats=False, can_restrict_members=False, can_promote_members=False, can_change_info=False, can_invite_users=False, can_pin_messages=False, can_post_messages=False, can_edit_messages=False, can_manage_topics=False)
         await message.reply(f"✅ Demoted {escape(safe_username(target))}.", parse_mode="HTML")
     except Exception as exc:
