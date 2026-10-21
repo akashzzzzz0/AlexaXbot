@@ -56,7 +56,8 @@ async def _send_add_group_prompt(message: Message):
             InlineKeyboardButton(text="📢 Updates Channel", url="https://t.me/+X5aelUHksVRlODQ8"),
         ],
         [InlineKeyboardButton(text="📣 Free Group Promotion", callback_data="start:promotion")],
-    ])    user = message.from_user
+    ])
+    user = message.from_user
     first_name = escape(user.first_name or "there") if user else "there"
     username_line = f"👤 @{escape(user.username)}\n" if user and user.username else ""
     caption = (
