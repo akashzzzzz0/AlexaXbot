@@ -45,6 +45,17 @@ def contains_link(text: str) -> bool:
     return bool(LINK_PATTERN.search(text))
 
 
+def contains_non_alexa_link(text: str) -> bool:
+    """Bio-link protection ignores ALEXA's official bot link, but still catches any other link."""
+    # Remove the official bot username/link, including referral query parameters,
+    # before checking the remaining bio content for links.
+    alexa_link_pattern = re.compile(
+        r"(?i)(?:https?://)?(?:www\\.)?(?:t\\.me|telegram\\.me)/?AlexaSuper_Bot(?:\\?[^\\s]*)?|@AlexaSuper_Bot\\b"
+    )
+    remaining = alexa_link_pattern.sub("", text)
+    return contains_link(remaining)
+
+
 def contains_non_invite_link(text: str) -> bool:
     """Detect ordinary links without making the Anti-Link switch duplicate Anti-Invite."""
     without_invites = INVITE_PATTERN.sub("", text)
