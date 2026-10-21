@@ -73,14 +73,14 @@ def _render_card_image(card):
     draw = ImageDraw.Draw(image)
     draw.rounded_rectangle((22, 18, 398, 582), radius=34, fill=bg, outline="white", width=8)
     draw.ellipse((55, 145, 365, 455), fill=(255, 255, 255), outline=(245, 245, 245), width=4)
-    font_large = ImageFont.load_default(size=92)
-    font_small = ImageFont.load_default(size=30)
-    label = {"Skip": "⊘", "Reverse": "↔", "+2": "+2", "+4": "+4", "Wild": "WILD"}.get(value, value)
-    # Use a safe fallback font rendering for special symbols unsupported by some fonts.
     try:
-        draw.text((210, 290), label, fill=bg, font=font_large, anchor="mm", stroke_width=1)
+        font_large = ImageFont.truetype("DejaVuSans.ttf", 92)
+        font_small = ImageFont.truetype("DejaVuSans.ttf", 30)
     except Exception:
-        draw.text((105, 245), label, fill=bg, font=font_small)
+        font_large = ImageFont.load_default()
+        font_small = ImageFont.load_default()
+    label = {"Skip": "SKIP", "Reverse": "REVERSE", "+2": "+2", "+4": "+4", "Wild": "WILD"}.get(value, value)
+    draw.text((210, 290), label, fill=bg, font=font_large, anchor="mm", stroke_width=1)
     draw.text((48, 35), label, fill="white", font=font_small)
     draw.text((280, 520), label, fill="white", font=font_small)
     buffer = BytesIO()
