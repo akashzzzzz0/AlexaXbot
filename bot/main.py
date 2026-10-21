@@ -68,6 +68,7 @@ async def run_health_server():
     app = web.Application()
     app.router.add_get('/health', health_handler)
     app.router.add_get('/', health_handler)
+    app.router.add_get('/uno/card/{color}/{value}', uno_card_image_handler)
 
     try:
         from bot.admin_api import setup_admin_routes
