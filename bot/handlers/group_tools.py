@@ -45,6 +45,140 @@ async def list_admins(message: Message, **kwargs):
     except Exception:
         await message.reply("Could not fetch the admin list.")
 
+
+
+# --- Group-wide member mentions ---
+async def _mention_is_group_admin(message: Message) -> bool:
+    if message.chat.type not in ("group", "supergroup") or not message.from_user:
+        return False
+    try:
+        member = await message.bot.get_chat_member(message.chat.id, message.from_user.id)
+        return str(getattr(member.status, "value", member.status)) in ("administrator", "creator")
+    except Exception:
+        return False
+
+
+def _html_mention(user_id: int, name: str) -> str:
+    return f'<a href="tg://user?id={user_id}">{escape(name or str(user_id))}</a>'
+
+
+async def _send_mention_batches(message: Message, mentions: list[str], text: str, heading: str):
+    # Stay comfortably below Telegram's 4096-character message limit.
+    suffix = (" " + escape(text.strip())) if text.strip() else ""
+    chunks = []
+    current = heading + suffix + "\\n\\n"
+    for mention in mentions:
+        piece = mention + " "
+        if len(current) + len(piece) > 3500 and current.strip():
+            chunks.append(current.rstrip())
+            current = heading + suffix + "\\n\\n" if len(chunks) == 0 else ""
+        current += piece
+    if current.strip():
+        chunks.append(current.rstrip())
+    if not chunks:
+        await message.reply("No mentionable members were found in Alexa's saved member list.")
+        return
+    for chunk in chunks:
+        await message.answer(chunk, parse_mode="HTML", disable_web_page_preview=True)
+
+
+@router.message(Command("tagall"))
+async def tag_all_members(message: Message, db_session: AsyncSession, **kwargs):
+    if message.chat.type not in ("group", "supergroup"):
+        await message.reply("Use /tagall inside a group. Example: /tagall Uth jao sab 😂")
+        return
+    if not await _mention_is_group_admin(message):
+        await message.reply("Only group admins can use /tagall.")
+        return
+    parts = (message.text or "").split(None, 1)
+    custom_text = parts[1].strip() if len(parts) > 1 else ""
+    if len(custom_text) > 1200:
+        await message.reply("Message is too long. Keep the text under 1200 characters.")
+        return
+    rows = (await db_session.scalars(
+        select(GroupMember).where(
+            GroupMember.group_id == message.chat.id,
+            GroupMember.is_banned.is_(False),
+        ).order_by(GroupMember.user_id.asc())
+    )).all()
+    mentions = []
+    seen = set()
+    for row in rows:
+        user = await db_session.get(User, row.user_id)
+        if not user or user.is_bot or row.user_id in seen:
+            continue
+        seen.add(row.user_id)
+        name = " ".join(part for part in [user.first_name, user.last_name] if part).strip()
+        mentions.append(_html_mention(row.user_id, name or user.username or str(row.user_id)))
+    if not mentions:
+        await message.reply(
+            "Alexa has no saved members for this group yet. Members are saved as Alexa observes messages or join updates; "
+            "Telegram does not let bots download the complete historical member list."
+        )
+        return
+    await _send_mention_batches(message, mentions, custom_text, "📣 <b>Tag All</b>")
+
+
+@router.message(F.text.regexp(r"(?i)^@tagall(?:\\s|$)"))
+async def tag_all_members_alias(message: Message, db_session: AsyncSession, **kwargs):
+    # Text alias: @tagall Uth jao sab
+    if message.chat.type not in ("group", "supergroup"):
+        return
+    if not await _mention_is_group_admin(message):
+        await message.reply("Only group admins can use @tagall.")
+        return
+    parts = (message.text or "").split(None, 1)
+    custom_text = parts[1].strip() if len(parts) > 1 else ""
+    if len(custom_text) > 1200:
+        await message.reply("Message is too long. Keep the text under 1200 characters.")
+        return
+    rows = (await db_session.scalars(
+        select(GroupMember).where(
+            GroupMember.group_id == message.chat.id,
+            GroupMember.is_banned.is_(False),
+        ).order_by(GroupMember.user_id.asc())
+    )).all()
+    mentions, seen = [], set()
+    for row in rows:
+        user = await db_session.get(User, row.user_id)
+        if not user or user.is_bot or row.user_id in seen:
+            continue
+        seen.add(row.user_id)
+        name = " ".join(part for part in [user.first_name, user.last_name] if part).strip()
+        mentions.append(_html_mention(row.user_id, name or user.username or str(row.user_id)))
+    if mentions:
+        await _send_mention_batches(message, mentions, custom_text, "📣 <b>Tag All</b>")
+    else:
+        await message.reply("No saved members found yet. Alexa will build this list as members are observed.")
+
+
+@router.message(Command("admin"))
+async def tag_group_admins(message: Message, **kwargs):
+    if message.chat.type not in ("group", "supergroup"):
+        await message.reply("Use /admin inside a group. Example: /admin Meeting shuru ho gayi hai")
+        return
+    if not await _mention_is_group_admin(message):
+        await message.reply("Only group admins can use /admin.")
+        return
+    parts = (message.text or "").split(None, 1)
+    custom_text = parts[1].strip() if len(parts) > 1 else ""
+    try:
+        admins = await message.bot.get_chat_administrators(message.chat.id)
+    except Exception:
+        await message.reply("I couldn't retrieve the admin list. Please check Alexa's group access.")
+        return
+    mentions = []
+    for item in admins:
+        user = item.user
+        if user.is_bot:
+            continue
+        name = user.full_name or user.first_name or str(user.id)
+        mentions.append(_html_mention(user.id, name))
+    if not mentions:
+        await message.reply("No mentionable group admins were found.")
+        return
+    await _send_mention_batches(message, mentions, custom_text, "🛡️ <b>Group Admins</b>")
+
 async def _send_admin_report(message: Message, reason: str):
     if message.chat.type not in ("group", "supergroup"):
         await message.reply("Use /report or @admin in a group.")
