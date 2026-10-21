@@ -33,7 +33,12 @@ class UnoRulesTests(unittest.TestCase):
         }
         keyboard = uno._group_turn_keyboard(game)
         callbacks = [button.callback_data for row in keyboard.inline_keyboard for button in row]
-        self.assertIn("uno:choose:abc123", callbacks)
+        inline_queries = [
+            button.switch_inline_query_current_chat
+            for row in keyboard.inline_keyboard for button in row
+        ]
+        self.assertIn("uno_abc123", inline_queries)
+        self.assertNotIn("uno:choose:abc123", callbacks)
         self.assertNotIn("uno:play:abc123:0", callbacks)
         self.assertNotIn("uno:select:abc123:0", callbacks)
 
