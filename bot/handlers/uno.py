@@ -132,9 +132,10 @@ def _hand_picker_keyboard(game):
     for index in indices:
         if index is None or not 0 <= index < len(hand):
             continue
-        card = hand[index]
         marker = "✅" if selected == index else "🃏"
-        builder.button(text=f"{marker} #{index + 1} {_card_emoji(card)}"[:60], callback_data=f"uno:select:{game_id}:{index}")
+        # Never put card faces in public group button labels; only the active
+        # player sees the selected card's face in their callback alert.
+        builder.button(text=f"{marker} Card #{index + 1}", callback_data=f"uno:select:{game_id}:{index}")
     builder.adjust(2)
     builder.button(text="▶️ Play selected card", callback_data=f"uno:confirm:{game_id}")
     if drawn_index is None:
@@ -147,7 +148,7 @@ def _hand_picker_keyboard(game):
 
 
 async def _send_choice_picker(bot, game):
-    """Send the active player's card faces plus select-then-play buttons to the group."""
+    """Show private-to-clicker card previews without exposing hand faces in the group."""
     user = game["players"][game["current"]]
     user_id = user["id"]
     hand = game["hands"].get(user_id, [])
@@ -159,20 +160,15 @@ async def _send_choice_picker(bot, game):
     game["choice_open"] = True
     game["selected_card_index"] = None
     await _update_board(bot, game, f"🎴 <b>{escape(user['name'])}</b>, make your choice!")
-    try:
-        sent = await bot.send_photo(
-            chat_id=game["group_id"],
-            photo=_render_hand_image(hand),
-            caption=(f"🎴 <b>{escape(user['name'])}'s cards</b> — tap a card button to select it, then press <b>Play selected card</b>.\n"
-                     "⚠️ Cards are visible to everyone in this group."),
-            parse_mode="HTML",
-            reply_markup=_hand_picker_keyboard(game),
-        )
-        game["choice_message_id"] = sent.message_id
-    except Exception:
-        game["choice_open"] = False
-        await _update_board(bot, game, "⚠️ Could not show the card image. Tap Make your choice again.")
-        raise
+    sent = await bot.send_message(
+        chat_id=game["group_id"],
+        text=(f"🎴 <b>{escape(user['name'])}</b>, choose a numbered card. "
+              "Tap a card number to preview its face privately, then press <b>Play selected card</b>.\n"
+              "🔒 Card faces are not posted publicly in the group."),
+        parse_mode="HTML",
+        reply_markup=_hand_picker_keyboard(game),
+    )
+    game["choice_message_id"] = sent.message_id
 
 
 def _make_deck():
@@ -570,7 +566,11 @@ async def select_uno_card(callback: CallbackQuery, **kwargs):
     except Exception:
         await callback.answer("Card selected, but buttons could not refresh. Reopen your cards.", show_alert=True)
         return
-    await callback.answer(f"Selected card #{index + 1}. Tap Play selected card to play it.")
+    # Callback alerts are visible only to the user who tapped the button.
+    await callback.answer(
+        f"Card #{index + 1}: {_card_name(hand[index])}. Tap Play selected card to play it.",
+        show_alert=True,
+    )
 
 
 @router.callback_query(F.data.startswith("uno:confirm:"))
