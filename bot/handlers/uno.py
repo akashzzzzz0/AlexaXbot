@@ -1,5 +1,6 @@
 """Chat-based multiplayer UNO for ALEXA. Active matches live in memory."""
 import asyncio
+import os
 import random
 import secrets
 from functools import wraps
@@ -233,6 +234,23 @@ def _add_uno_call_buttons(builder, game):
                 text=f"📣 UNO! — {player['name']}"[:60],
                 callback_data=f"uno:call:{game['id']}",
             )
+
+
+def _uno_card_image_base_url():
+    """Public origin serving /uno/card/... images for Telegram inline results.
+
+    Configure UNO_CARD_BASE_URL in the hosting panel to the public HTTPS
+    origin that reaches this app. Other common public-origin variables are
+    accepted for platforms that provide one automatically.
+    """
+    base = (
+        os.getenv("UNO_CARD_BASE_URL")
+        or os.getenv("PUBLIC_BASE_URL")
+        or os.getenv("RENDER_EXTERNAL_URL")
+        or os.getenv("WEBHOOK_URL")
+        or "https://alexa-bot.fadehost.app"
+    )
+    return base.strip().rstrip("/")
 
 
 def _group_turn_keyboard(game):
@@ -552,7 +570,7 @@ async def private_uno_card_results(query: InlineQuery, **kwargs):
         # The card choice is visible only in the user's inline results. Selecting
         # it posts one selected card to the group with a confirmation button.
         value_slug = {"+2": "plus2", "+4": "plus4", "Wild": "wild", "Skip": "skip", "Reverse": "reverse"}.get(card[1], card[1])
-        image_url = f"https://alexa-bot.fadehost.app/uno/card/{card[0]}/{value_slug}"
+        image_url = f"{_uno_card_image_base_url()}/uno/card/{card[0]}/{value_slug}"
         results.append(InlineQueryResultPhoto(
             id=f"{game_id}_{player['id']}_{index}",
             photo_url=image_url,
@@ -814,6 +832,9 @@ async def play_uno_card(callback: CallbackQuery, **kwargs):
     if not _legal(game, card, user_id):
         await callback.answer("You can't play that card on the current colour/card.", show_alert=True)
         return
+    # Acknowledge before network/database/photo operations; Telegram callback
+    # queries expire quickly and late answers produce "query is too old".
+    await callback.answer("Playing card…")
     await _penalize_uno(game, user_id)
     await _remove_choice_message(callback.bot, game)
     game.get("drawn_pending", {}).pop(user_id, None)
@@ -834,7 +855,6 @@ async def play_uno_card(callback: CallbackQuery, **kwargs):
         # A missing Pillow install or photo-send failure must never break game turns.
         pass
     if not game["hands"][user_id]:
-        await callback.answer("UNO!")
         await _finish(callback.bot, game, user_id)
         return
     if len(game["hands"][user_id]) == 1:
@@ -846,7 +866,6 @@ async def play_uno_card(callback: CallbackQuery, **kwargs):
             await callback.message.edit_reply_markup(reply_markup=_color_keyboard(game["id"]))
         except Exception:
             pass
-        await callback.answer("Choose a colour.")
         await _refresh_hands(callback.bot, game)
         return
     game["color"] = card[0]
@@ -863,7 +882,6 @@ async def play_uno_card(callback: CallbackQuery, **kwargs):
     else:
         _advance(game)
     await _update_board(callback.bot, game, f"🃏 Played {_card_emoji(card)}.")
-    await callback.answer("Card played!")
     await _refresh_hands(callback.bot, game)
 
 
