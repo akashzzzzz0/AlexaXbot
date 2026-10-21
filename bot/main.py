@@ -107,12 +107,7 @@ async def configure_command_visibility(bot) -> None:
         ("hack", "Play Hack"), ("pfp", "View profile photo"),
         ("empire", "View Empire ranking"), ("empirecontribute", "Contribute Empire XP"),
         ("vip", "View Elite Club status"), ("pro", "View VIP status"),
-        ("vault", "Open Legendary Vault"), ("badges", "View badges"),
-        ("war", "View/start Multiverse War"), ("warregister", "Register for a War"),
-        ("warleave", "Leave a War"), ("warmission", "View War mission"),
-        ("waranswer", "Answer a War mission"), ("warboard", "View War board"),
-        ("warchallenge", "Challenge a War"), ("waraccept", "Accept a War challenge"),
-        ("warresult", "View War result"), ("worldrank", "View world rank"),
+        ("vault", "Open Legendary Vault"), ("badges", "View badges"), ("worldrank", "View world rank"),
         ("mystery", "Play Mystery"),
     ]
 
