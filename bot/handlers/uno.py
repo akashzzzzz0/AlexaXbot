@@ -142,6 +142,15 @@ def _hand_keyboard(game, user_id):
 
 
 
+def _add_uno_call_buttons(builder, game):
+    for player in game["players"]:
+        if player["id"] in game.get("uno_pending", set()):
+            builder.button(
+                text=f"📣 UNO! — {player['name']}"[:60],
+                callback_data=f"uno:call:{game['id']}",
+            )
+
+
 def _group_turn_keyboard(game):
     """Render the active player's hand as public group buttons, never DM buttons."""
     if not game.get("started") or game.get("finished"):
@@ -155,8 +164,7 @@ def _group_turn_keyboard(game):
     hand = game["hands"].get(user_id, [])
     if not game.get("choice_open") and drawn_index is None:
         builder.button(text="🎴 Make your choice", callback_data=f"uno:choose:{game['id']}")
-        if len(hand) == 1 and user_id in game.get("uno_pending", set()):
-            builder.button(text="📣 UNO!", callback_data=f"uno:call:{game['id']}")
+        _add_uno_call_buttons(builder, game)
         builder.adjust(1)
         return builder.as_markup()
     if drawn_index is not None and 0 <= drawn_index < len(hand):
@@ -171,8 +179,7 @@ def _group_turn_keyboard(game):
                            callback_data=f"uno:play:{game['id']}:{index}")
         builder.adjust(2)
         builder.button(text="➕ Draw a card", callback_data=f"uno:draw:{game['id']}")
-    if len(hand) == 1 and user_id in game.get("uno_pending", set()):
-        builder.button(text="📣 UNO!", callback_data=f"uno:call:{game['id']}")
+    _add_uno_call_buttons(builder, game)
     if not builder.export():
         return None
     return builder.as_markup()
