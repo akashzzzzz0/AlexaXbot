@@ -59,9 +59,22 @@ async def is_alexa_trigger(message: Message) -> bool:
             _bot_username = ""
 
     if _bot_username and re.search(
-        rf"(?<!\w)@{re.escape(_bot_username)}\b", text, re.IGNORECASE
+        rf"(?<!\\w)@{re.escape(_bot_username)}\\b", text, re.IGNORECASE
     ):
         return True
+
+    # Do not answer messages directed at another member. Check this before
+    # greeting/session triggers (e.g. "hi @someone") so Alexa doesn't interrupt.
+    mentioned_usernames = re.findall(r"(?<!\\w)@([A-Za-z0-9_]{5,})", text)
+    if any(name.casefold() != _bot_username for name in mentioned_usernames):
+        return False
+    for entity in (message.entities or []):
+        if (
+            getattr(entity.type, "value", entity.type) == "text_mention"
+            and entity.user
+            and entity.user.id != message.bot.id
+        ):
+            return False
 
     # A group conversation stays active for this user for 10 minutes after
     # they last spoke to Alexa; unrelated members' messages are never captured.
