@@ -1,6 +1,5 @@
 """Chat-based multiplayer UNO for ALEXA. Active matches live in memory."""
 import asyncio
-import io
 import random
 import secrets
 from functools import wraps
@@ -10,7 +9,6 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
-    BufferedInputFile, InputMediaPhoto,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -120,29 +118,7 @@ def _color_keyboard(game_id):
     ]])
 
 
-def _hand_keyboard(game, user_id):
-    builder = InlineKeyboardBuilder()
-    is_turn = game["started"] and not game.get("pending_wild") and game["players"][game["current"]]["id"] == user_id
-    drawn_index = game.get("drawn_pending", {}).get(user_id)
-    if is_turn and drawn_index is not None:
-        card = game["hands"][user_id][drawn_index]
-        builder.button(text=f"▶️ Play drawn: {_card_emoji(card)}"[:60], callback_data=f"uno:play:{game['id']}:{drawn_index}")
-        builder.button(text="⏭️ Pass turn", callback_data=f"uno:pass:{game['id']}")
-        builder.adjust(1, 1)
-    elif is_turn:
-        for index, card in enumerate(game["hands"][user_id]):
-            builder.button(text=_card_emoji(card)[:30], callback_data=f"uno:play:{game['id']}:{index}")
-        builder.adjust(2)
-        builder.button(text="➕ Draw a card", callback_data=f"uno:draw:{game['id']}")
-    if len(game["hands"].get(user_id, [])) == 1 and user_id in game.get("uno_pending", set()):
-        builder.button(text="📣 UNO!", callback_data=f"uno:call:{game['id']}")
-    if not builder.export():
-        return None
-    return builder.as_markup()
-
-
-
-def _add_uno_call_buttons(builder, game):
+def _add_uno_call_buttons(builder, game):def _add_uno_call_buttons(builder, game):
     for player in game["players"]:
         if player["id"] in game.get("uno_pending", set()):
             builder.button(
@@ -185,51 +161,7 @@ def _group_turn_keyboard(game):
     return builder.as_markup()
 
 
-def _render_hand_image(cards):
-    from PIL import Image, ImageDraw, ImageFont
-    cols = 7
-    rows = max(1, (len(cards) + cols - 1) // cols)
-    card_w, card_h, gap = 112, 164, 12
-    width = 24 + cols * card_w + (cols - 1) * gap
-    height = 62 + rows * card_h + (rows - 1) * gap + 24
-    image = Image.new("RGB", (width, height), "#17212b")
-    draw = ImageDraw.Draw(image)
-    try:
-        title_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 24)
-        card_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 20)
-        small_font = ImageFont.truetype("DejaVuSans.ttf", 14)
-    except OSError:
-        title_font = card_font = small_font = ImageFont.load_default()
-    draw.text((18, 14), "ALEXA UNO  •  YOUR HAND", fill="white", font=title_font)
-    for i, card in enumerate(cards):
-        color, value = card
-        row, col = divmod(i, cols)
-        x = 12 + col * (card_w + gap)
-        y = 54 + row * (card_h + gap)
-        fill = COLORS[color][1] if color in COLORS else "#30343b"
-        draw.rounded_rectangle((x, y, x + card_w, y + card_h), radius=14, fill=fill, outline="#f4f4f4", width=3)
-        draw.ellipse((x + 13, y + 30, x + card_w - 13, y + card_h - 30), fill="#ffffff", outline="#eeeeee", width=2)
-        label = value.upper()
-        if value == "Reverse":
-            label = "↔"
-        elif value == "Skip":
-            label = "SKIP"
-        elif value == "Wild":
-            label = "WILD"
-        elif value == "+4":
-            label = "+4"
-        box = draw.textbbox((0, 0), label, font=card_font)
-        tw, th = box[2] - box[0], box[3] - box[1]
-        ink = "#222222"
-        draw.text((x + (card_w - tw) / 2, y + (card_h - th) / 2 - 2), label, fill=ink, font=card_font)
-        draw.text((x + 8, y + 7), label[:5], fill="white", font=small_font)
-        draw.text((x + card_w - 32, y + card_h - 24), label[:5], fill="white", font=small_font)
-    output = io.BytesIO()
-    image.save(output, format="PNG")
-    return BufferedInputFile(output.getvalue(), filename="alexa_uno_hand.png")
-
-
-def _board_text(game, status=None):
+def _board_text(game, status=None):def _board_text(game, status=None):
     top = game["discard"][-1]
     lines = ["🃏 <b>ALEXA UNO</b>"]
     if status:
@@ -324,8 +256,6 @@ async def _begin_game(callback, game):
     game["uno_pending"] = set()
     game["pending_wild"] = None
     game["drawn_pending"] = {}
-    game["dm_messages"] = {}
-    game["rendered_hands"] = {}
     await _update_board(callback.bot, game, "🚀 Game started! Cards and choices are shown in this group.")
     await callback.answer("UNO started in the group!")
 
@@ -347,7 +277,7 @@ async def _create_lobby(message: Message, creator_user=None):
         # A lobby board renders the top-card row before the game starts.
         # Seed a harmless placeholder card; _begin_game replaces it at startup.
         "hands": {}, "deck": [], "discard": [("R", "0")], "color": "R", "current": 0,
-        "direction": 1, "started": False, "dm_messages": {}, "uno_pending": set(),
+        "direction": 1, "started": False, "uno_pending": set(),
         "pending_wild": None, "drawn_pending": {},
     }
     sent = await message.answer(
