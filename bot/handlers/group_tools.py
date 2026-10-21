@@ -71,7 +71,7 @@ async def _send_mention_batches(message: Message, mentions: list[str], text: str
         piece = mention + " "
         if len(current) + len(piece) > 3500 and current.strip():
             chunks.append(current.rstrip())
-            current = heading + suffix + "\\n\\n" if len(chunks) == 0 else ""
+            current = heading + suffix + "\\n\\n"
         current += piece
     if current.strip():
         chunks.append(current.rstrip())
