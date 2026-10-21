@@ -9,7 +9,7 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile,
-    InlineQuery, InlineQueryResultArticle, InputTextMessageContent,
+    InlineQuery, InlineQueryResultArticle, InlineQueryResultPhoto, ChosenInlineResult, InputTextMessageContent,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -546,29 +546,18 @@ async def private_uno_card_results(query: InlineQuery, **kwargs):
         status = "Playable" if legal else "Not playable on this turn"
         # The card choice is visible only in the user's inline results. Selecting
         # it posts one selected card to the group with a confirmation button.
-        results.append(InlineQueryResultArticle(
+        value_slug = {"+2": "plus2", "+4": "plus4", "Wild": "wild", "Skip": "skip", "Reverse": "reverse"}.get(card[1], card[1])
+        image_url = f"https://alexa-bot.fadehost.app/uno/card/{card[0]}/{value_slug}"
+        results.append(InlineQueryResultPhoto(
             id=f"{game_id}_{player['id']}_{index}",
-            title=f"{emoji}  {name}",
+            photo_url=image_url,
+            thumbnail_url=image_url,
+            photo_width=420,
+            photo_height=600,
+            title=f"{emoji} {name}",
             description=status,
-            thumbnail_url=(
-                "https://alexa-bot.fadehost.app/uno/card/"
-                f"{card[0]}/"
-                f"{ {'+2': 'plus2', '+4': 'plus4', 'Wild': 'wild', 'Skip': 'skip', 'Reverse': 'reverse'}.get(card[1], card[1]) }"
-            ),
-            thumbnail_width=105,
-            thumbnail_height=150,
-            input_message_content=InputTextMessageContent(
-                message_text=f"🎴 <b>{escape(player['name'])}</b> selected <b>{escape(name)}</b>. Confirm to play it.",
-                parse_mode="HTML",
-            ),
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(
-                    text=f"▶️ Play {name}",
-                    callback_data=f"uno:inlineplay:{game_id}:{player['id']}:{index}",
-                )
-            ], [
-                InlineKeyboardButton(text="✖️ Cancel", callback_data=f"uno:inlinecancel:{game_id}:{player['id']}")
-            ]]),
+            caption=f"🃏 <b>{escape(player['name'])}</b> played <b>{escape(name)}</b>.",
+            parse_mode="HTML",
         ))
     action_text = "⏭️ Pass turn" if drawn_index is not None else "➕ Draw a card"
     action_id = "pass" if drawn_index is not None else "draw"
@@ -588,6 +577,77 @@ async def private_uno_card_results(query: InlineQuery, **kwargs):
         ]]),
     ))
     await query.answer(results, cache_time=0, is_personal=True)
+
+
+@router.chosen_inline_result()
+async def chosen_private_uno_card(result: ChosenInlineResult, **kwargs):
+    """Apply a card immediately when the active player taps its private photo result."""
+    parts = (result.result_id or "").split("_")
+    if len(parts) != 3:
+        return
+    game_id, expected_user, index_text = parts
+    try:
+        user_id, index = int(expected_user), int(index_text)
+    except ValueError:
+        return
+    if result.from_user.id != user_id:
+        return
+    game = _GAMES.get(game_id)
+    if not game or not game.get("started") or game.get("finished"):
+        return
+    lock = game.setdefault("_action_lock", asyncio.Lock())
+    async with lock:
+        if not game.get("started") or game.get("finished"):
+            return
+        if game["players"][game["current"]]["id"] != user_id or game.get("pending_wild"):
+            await _update_board(result.bot, game, "⚠️ That card choice is no longer valid. Use Make your choice again.")
+            return
+        try:
+            card = game["hands"][user_id][index]
+        except (IndexError, KeyError):
+            await _update_board(result.bot, game, "⚠️ That card is no longer in your hand. Open Make your choice again.")
+            return
+        drawn_index = game.get("drawn_pending", {}).get(user_id)
+        if drawn_index is not None and index != drawn_index:
+            await _update_board(result.bot, game, "⚠️ After drawing, you can only play the card you just drew.")
+            return
+        if not _legal(game, card, user_id):
+            await _update_board(result.bot, game, "⚠️ That card cannot be played on the current colour/card.")
+            return
+        await _penalize_uno(game, user_id)
+        game.get("drawn_pending", {}).pop(user_id, None)
+        game["selected_card_index"] = None
+        game["choice_open"] = False
+        game["hands"][user_id].pop(index)
+        game["discard"].append(card)
+        player_name = next(p["name"] for p in game["players"] if p["id"] == user_id)
+        if not game["hands"][user_id]:
+            await _finish(result.bot, game, user_id)
+            return
+        if len(game["hands"][user_id]) == 1:
+            game["uno_pending"].add(user_id)
+        if card[0] == "W":
+            game["pending_wild"] = {"user_id": user_id, "value": card[1]}
+            await _update_board(
+                result.bot, game,
+                f"🌈 {escape(player_name)} played {escape(_card_name(card))}. Choose a colour."
+            )
+            return
+        game["color"] = card[0]
+        value = card[1]
+        if value == "Reverse":
+            game["direction"] *= -1
+            _advance(game, 2 if len(game["players"]) == 2 else 1)
+        elif value == "Skip":
+            _advance(game, 2)
+        elif value == "+2":
+            next_index = (game["current"] + game["direction"]) % len(game["players"])
+            _draw_for(game, game["players"][next_index]["id"], 2)
+            _advance(game, 2)
+        else:
+            _advance(game)
+        await _update_board(result.bot, game, f"🃏 {escape(player_name)} played {_card_emoji(card)}.")
+        await _refresh_hands(result.bot, game)
 
 
 @router.callback_query(F.data.startswith("uno:inlineaction:"))
