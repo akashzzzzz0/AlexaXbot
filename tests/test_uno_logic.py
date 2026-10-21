@@ -28,7 +28,7 @@ class UnoRulesTests(unittest.TestCase):
             "players": [{"id": 10, "name": "A"}, {"id": 20, "name": "B"}],
             "hands": {10: [("R", "3"), ("W", "Wild")], 20: [("B", "9")]},
             "discard": [("R", "0")], "color": "R", "current": 0,
-            "direction": 1, "started": True, "finished": False,
+            "direction": 1, "started": True, "finished": False, "choice_open": True,
             "uno_pending": set(), "drawn_pending": {}, "pending_wild": None,
         }
         keyboard = uno._group_turn_keyboard(game)
@@ -38,8 +38,8 @@ class UnoRulesTests(unittest.TestCase):
         self.assertIn("uno:play:abc123:0", callbacks)
         self.assertIn("uno:play:abc123:1", callbacks)
         self.assertIn("uno:draw:abc123", callbacks)
-        self.assertTrue(any("Red 3" in label for label in labels))
-        self.assertTrue(any("Wild" in label for label in labels))
+        self.assertTrue(any("🔴 3" in label for label in labels))
+        self.assertTrue(any("🌈" in label for label in labels))
         self.assertNotIn("uno:play:abc123:2", callbacks)
 
     def test_board_announces_next_player_and_make_your_choice(self):
