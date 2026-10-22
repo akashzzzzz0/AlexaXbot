@@ -247,15 +247,13 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
             error=str(exc),
         )
 
-    # Bio-link protection has its own persistent moderation switch. For groups
-    # without an explicit choice yet, preserve the previous anti-link-linked behavior.
+    # Bio-link protection must be explicitly enabled in its own setting.
+    # Anti-Link is for messages, and must never silently mute/ban people just
+    # because they joined the group or their profile bio contains a URL.
     bio_setting = await db_session.scalar(
         select(BioLinkProtectionSetting).where(BioLinkProtectionSetting.group_id == chat.id)
     )
-    bio_protection_enabled = (
-        bool(bio_setting.enabled) if bio_setting is not None
-        else bool(security and security.anti_link)
-    )
+    bio_protection_enabled = bool(bio_setting and bio_setting.enabled)
     # Telegram may not expose bios for every joining member, so this is best-effort.
     if bio_protection_enabled and not joining_user_is_admin:
         try:
@@ -721,10 +719,9 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                 BioLinkProtectionSetting.group_id == message.chat.id
             )
         )
-        bio_protection_enabled = (
-            bool(bio_setting.enabled) if bio_setting is not None
-            else bool(group_security.anti_link)
-        )
+        # Do not inherit the message Anti-Link toggle here. Bio protection
+        # is a separate feature and only runs when explicitly enabled.
+        bio_protection_enabled = bool(bio_setting and bio_setting.enabled)
         if bio_protection_enabled:
             is_admin = False
             try:
