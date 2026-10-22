@@ -146,6 +146,9 @@ def setup_uno_web_routes(app):
             steps = 1
             if card["value"] == "Reverse":
                 game["direction"] *= -1
+                # In a 2-player game Reverse acts like Skip: same player goes again.
+                if len(game["players"]) == 2:
+                    steps = 2
             elif card["value"] == "Skip":
                 steps = 2
             elif card["value"] == "+2":
