@@ -1,4 +1,5 @@
 """UNO Mini App API; authenticated with Telegram WebApp initData."""
+import asyncio
 import hashlib
 import hmac
 import json
@@ -35,6 +36,7 @@ def setup_uno_web_routes(app):
     from pathlib import Path
     from bot.handlers.uno import GAMES, COLORS, _valid, _board, _turn_prompt, _new_deck
     page = Path(__file__).resolve().parent.parent / "web" / "uno" / "index.html"
+    action_lock = asyncio.Lock()
 
     def get_game(chat_id):
         game = GAMES.get(chat_id)
@@ -85,7 +87,7 @@ def setup_uno_web_routes(app):
             raise web.HTTPForbidden(text='{"error":"Join this game in the group first"}', content_type="application/json")
         return web.json_response(state(game, uid))
 
-    async def action(request):
+    async def _action_unlocked(request):
         bot = request.app.get('telegram_bot')
         if bot is None:
             raise web.HTTPServiceUnavailable(text='Bot is starting')
@@ -112,6 +114,18 @@ def setup_uno_web_routes(app):
                 raise web.HTTPBadRequest(text='{"error":"Invalid card"}', content_type="application/json")
             if not _valid(card, game["discard"][-1]):
                 raise web.HTTPBadRequest(text='{"error":"That card cannot be played"}', content_type="application/json")
+            # Official-style Wild Draw Four restriction: no other card in hand
+            # may match the currently active color.
+            if card["value"] == "+4":
+                active_color = game["discard"][-1]["color"]
+                if active_color and any(
+                    other is not card and other.get("color") == active_color
+                    for other in hand
+                ):
+                    raise web.HTTPBadRequest(
+                        text='{"error":"You can play +4 only when you have no card matching the current color"}',
+                        content_type="application/json",
+                    )
             if card["color"] is None:
                 color = body.get("color")
                 if color not in COLORS:
@@ -146,6 +160,11 @@ def setup_uno_web_routes(app):
         await _board(bot, chat_id, game)
         await _turn_prompt(bot, chat_id, game)
         return web.json_response(state(game, uid))
+
+    async def action(request):
+        # Prevent two rapid taps/polling requests from consuming the same turn.
+        async with action_lock:
+            return await _action_unlocked(request)
 
     app.router.add_get("/uno/", index)
     app.router.add_get("/uno", index)
