@@ -107,7 +107,7 @@ def build_public_help_text(_: callable) -> str:
         "/dice — Play dice\n/rps — Rock Paper Scissors\n"
         "/quiz — Play quiz\n/wheel — Spin the wheel\n"
         "/numwar — Play Number War\n/cards — Play card game\n"
-        "/card — Card game alias\n/uno — Multiplayer UNO (group game; cards in DM)\n"
+        "/card — Card game alias\n"
         "/treasure — Treasure hunt\n/mines — Play Mines\n"
         "/roulette — Play roulette\n/rullet — Roulette alias\n"
         "/ludo — Ludo race\n/bingo — Bingo\n/duel — Challenge a player\n\n"
@@ -191,7 +191,7 @@ HELP_GUIDES = {
     "help:games": (
         "🎮 <b>Games Guide</b>\n\n"
         "/dice — dice game\n/rps — rock-paper-scissors\n/quiz — quiz\n"
-        "/wheel — wheel of fortune\n/numwar — number war\n/cards — card game\n/uno — multiplayer UNO with private cards\n"
+        "/wheel — wheel of fortune\n/numwar — number war\n/cards — card game\n"
         "/treasure — treasure game\n/mines — mines game\n/roulette — roulette\n"
         "/bal /kill /rob /revive /protect /unprotect /rank /leaders — virtual game tools\n\n"
         "Use a game's command in the chat where you want to play."
