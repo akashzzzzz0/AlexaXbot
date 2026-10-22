@@ -55,6 +55,7 @@ async def _send_add_group_prompt(message: Message):
             InlineKeyboardButton(text="💬 Discussion Group", url="https://t.me/+dGq9_BqdD5hjYzk0"),
             InlineKeyboardButton(text="📢 Updates Channel", url="https://t.me/+X5aelUHksVRlODQ8"),
         ],
+        [InlineKeyboardButton(text="🎁 Get Free Premium + Stars", callback_data="affiliate:promo")],
         [InlineKeyboardButton(text="📣 Free Group Promotion", callback_data="start:promotion")],
     ])
     user = message.from_user
