@@ -1,0 +1,33 @@
+name: UNO syntax checks
+
+on:
+  pull_request:
+    paths:
+      - 'bot/handlers/uno.py'
+      - 'bot/uno_webapp.py'
+      - 'bot/main.py'
+      - 'web/uno/index.html'
+      - '.github/workflows/uno-check.yml'
+  push:
+    branches:
+      - 'fix/uno-visual-mini-app'
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile UNO Python modules
+        run: python -m py_compile bot/handlers/uno.py bot/uno_webapp.py bot/main.py
+      - name: Check HTML JavaScript syntax
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          html = Path('web/uno/index.html').read_text(encoding='utf-8')
+          assert '<script>' in html and '</script>' in html, 'UNO app script not found'
+          assert '/uno/api/state' in html and "api('end')" in html, 'Expected UNO API controls missing'
+          print('UNO HTML structure smoke check passed')
+          PY
