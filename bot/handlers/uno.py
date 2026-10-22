@@ -301,6 +301,7 @@ async def show_hand(callback: CallbackQuery):
 
 async def _advance(callback, chat_id, game, steps=1):
     game["turn"] = (game["turn"] + game["direction"] * steps) % len(game["players"])
+    _save_games()
     await _board(callback.bot, chat_id, game)
     await _turn_prompt(callback.bot, chat_id, game)
 
@@ -391,6 +392,7 @@ async def play_card(callback: CallbackQuery):
         kb.adjust(2, 2)
         # Keep the card in a pending state until a color is chosen.
         game["pending_wild"] = {"uid": uid, "card": card}
+        _save_games()
         await callback.message.answer("🌈 Wild card ke liye color choose karo:", reply_markup=kb.as_markup())
         await callback.answer()
         return
@@ -402,6 +404,7 @@ async def play_card(callback: CallbackQuery):
         pass
     if not hand:
         game["active"] = False
+        _save_games()
         old = game.get("turn_message_id")
         if old:
             try:
@@ -443,6 +446,7 @@ async def choose_wild_color(callback: CallbackQuery):
     hand = game["hands"][uid]
     if not hand:
         game["active"] = False
+        _save_games()
         await callback.bot.send_message(chat_id, f"🏆 {_mention(game['members'][uid])} UNO jeet gaya!")
         return
     steps = 1
