@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import time
+from html import escape
 from urllib.parse import parse_qsl
 
 from aiohttp import web
@@ -17,7 +18,7 @@ def verify_init_data(request):
         data = dict(parse_qsl(header[4:], keep_blank_values=True))
         supplied = data.pop("hash")
         stamp = int(data.get("auth_date", "0"))
-        if not stamp or time.time() - stamp > 86400:
+        if not stamp or stamp > time.time() + 60 or time.time() - stamp > 86400:
             return None
         check = "\n".join(f"{k}={v}" for k, v in sorted(data.items()))
         secret = hmac.new(b"WebAppData", settings.BOT_TOKEN.encode(), hashlib.sha256).digest()
@@ -126,7 +127,7 @@ def setup_uno_web_routes(app):
                         await bot.delete_message(chat_id, old)
                     except Exception:
                         pass
-                await bot.send_message(chat_id, f'🏆 <a href="tg://user?id={uid}">{game["members"][uid]["name"]}</a> won UNO!')
+                await bot.send_message(chat_id, f'🏆 <a href="tg://user?id={uid}">{escape(game["members"][uid]["name"])}</a> won UNO!')
                 return web.json_response({"done": True, "message": "You won UNO!"})
             steps = 1
             if card["value"] == "Reverse":
