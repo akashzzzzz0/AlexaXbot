@@ -31,6 +31,22 @@ def _new_deck():
     return deck
 
 
+def _draw_cards(game, user_id, count):
+    """Draw cards, recycling the discard pile when the draw pile runs out."""
+    for _ in range(count):
+        if not game["deck"]:
+            if len(game["discard"]) > 1:
+                top = game["discard"][-1]
+                game["deck"] = game["discard"][:-1]
+                game["discard"] = [top]
+                random.shuffle(game["deck"])
+            else:
+                # If no cards can be recycled, rebuild a deck rather than fail a penalty.
+                game["deck"] = _new_deck()
+        if game["deck"]:
+            game["hands"][user_id].append(game["deck"].pop())
+
+
 def _card_name(card):
     if card["color"] is None:
         return f"🌈 {card['value']}"
@@ -264,9 +280,7 @@ async def draw_card(callback: CallbackQuery):
     if game["players"][game["turn"]] != uid:
         await callback.answer("Ab tumhari turn nahi hai.", show_alert=True)
         return
-    if not game["deck"]:
-        game["deck"] = _new_deck()
-    game["hands"][uid].append(game["deck"].pop())
+    _draw_cards(game, uid, 1)
     await callback.answer("1 card draw kiya.")
     try:
         await callback.bot.send_message(uid, "➕ Tumne ek card draw kiya.", reply_markup=_hand_keyboard(chat_id, uid, game))
@@ -294,6 +308,11 @@ async def play_card(callback: CallbackQuery):
     if not _valid(card, game["discard"][-1]):
         await callback.answer("Ye card play nahi ho sakta!", show_alert=True)
         return
+    if card["value"] == "+4":
+        active_color = game["discard"][-1]["color"]
+        if active_color and any(other.get("color") == active_color for i, other in enumerate(hand) if i != index):
+            await callback.answer("Current color ka card haath mein hai, +4 nahi khel sakte.", show_alert=True)
+            return
     hand.pop(index)
     if card["color"] is None:
         kb = InlineKeyboardBuilder()
@@ -330,7 +349,7 @@ async def play_card(callback: CallbackQuery):
     elif card["value"] == "+2":
         next_index = (game["turn"] + game["direction"]) % len(game["players"])
         next_uid = game["players"][next_index]
-        game["hands"][next_uid].extend([game["deck"].pop() for _ in range(min(2, len(game["deck"])))])
+        _draw_cards(game, next_uid, 2)
         steps = 2
     else:
         steps = 1
@@ -359,7 +378,6 @@ async def choose_wild_color(callback: CallbackQuery):
     if value == "+4":
         next_index = (game["turn"] + game["direction"]) % len(game["players"])
         next_uid = game["players"][next_index]
-        draw_count = min(4, len(game["deck"]))
-        game["hands"][next_uid].extend([game["deck"].pop() for _ in range(draw_count)])
+        _draw_cards(game, next_uid, 4)
         steps = 2
     await _advance(callback, chat_id, game, steps=steps)
