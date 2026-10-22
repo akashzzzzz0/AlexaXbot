@@ -230,7 +230,9 @@ async def show_hand(callback: CallbackQuery):
         await callback.answer("Ab tumhari turn nahi hai.", show_alert=True)
         return
     try:
-        base_url = os.environ.get("UNO_WEBAPP_URL", "https://laplace.fadehost.com/uno/").rstrip("/")
+        base_url = (os.environ.get("UNO_WEBAPP_URL") or os.environ.get("UNO_CARD_BASE_URL") or "https://laplace.fadehost.com").rstrip("/")
+        if not base_url.endswith("/uno"):
+            base_url += "/uno"
         app_url = f"{base_url}/?chat_id={chat_id}"
         markup = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="🎴 Open UNO Cards", web_app=WebAppInfo(url=app_url))
