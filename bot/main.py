@@ -32,6 +32,12 @@ async def run_health_server():
     except Exception as e:
         logger.warning('Admin routes not loaded', error=str(e))
 
+    try:
+        from bot.uno_webapp import setup_uno_web_routes
+        setup_uno_web_routes(app)
+    except Exception as e:
+        logger.warning('UNO Mini App routes not loaded', error=str(e))
+
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', port, reuse_port=True)
