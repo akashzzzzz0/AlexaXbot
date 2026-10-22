@@ -193,11 +193,13 @@ async def _send_welcome_message(bot, db_session, chat, user):
     if ws and not ws.enabled:
         return
     welcome_text = (ws.message if ws and ws.message else None) or "👋 Welcome {name} to {group}!"
+    from html import escape
     replacements = {
-        "{name}": user.first_name or "User",
-        "{username}": f"@{user.username}" if user.username else (user.first_name or "User"),
+        "{name}": escape(user.first_name or "User"),
+        "{username}": escape(f"@{user.username}" if user.username else (user.first_name or "User")),
+        "{mention}": mention_user(user.id, escape(safe_username(user))),
         "{id}": str(user.id),
-        "{group}": chat.title or "Group",
+        "{group}": escape(chat.title or "Group"),
     }
     for key, val in replacements.items():
         welcome_text = welcome_text.replace(key, val)
