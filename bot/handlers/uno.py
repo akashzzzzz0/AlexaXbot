@@ -4,6 +4,8 @@ Game state is intentionally in-memory; an app restart clears active games.
 """
 import random
 import os
+import json
+from pathlib import Path
 from html import escape
 
 from aiogram import F, Router
@@ -12,7 +14,37 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardButton, InlineKe
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 router = Router()
+_STATE_FILE = Path(os.environ.get("UNO_STATE_FILE", "data/uno_games.json"))
 GAMES = {}
+
+
+def _load_games():
+    try:
+        raw = json.loads(_STATE_FILE.read_text(encoding="utf-8"))
+        for chat, game in raw.items():
+            for key in ("members", "hands", "drawn_card_index"):
+                if key in game:
+                    game[key] = {int(uid): value for uid, value in game[key].items()}
+            if "players" in game:
+                game["players"] = [int(uid) for uid in game["players"]]
+            if game.get("pending_wild") and "uid" in game["pending_wild"]:
+                game["pending_wild"]["uid"] = int(game["pending_wild"]["uid"])
+            GAMES[int(chat)] = game
+    except (OSError, ValueError, TypeError):
+        pass
+
+
+def _save_games():
+    try:
+        _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        temp = _STATE_FILE.with_suffix(".tmp")
+        temp.write_text(json.dumps(GAMES, ensure_ascii=False), encoding="utf-8")
+        temp.replace(_STATE_FILE)
+    except OSError:
+        pass
+
+
+_load_games()
 COLORS = ("Red", "Yellow", "Green", "Blue")
 COLOR_EMOJI = {"Red": "🔴", "Yellow": "🟡", "Green": "🟢", "Blue": "🔵"}
 VALUES = ("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "Skip", "Reverse", "+2")
@@ -154,6 +186,7 @@ async def uno_start(message: Message, **kwargs):
         "discard": [], "turn": 0, "direction": 1, "turn_message_id": None,
     }
     GAMES[chat_id] = game
+    _save_games()
     await message.answer(
         "🎴 <b>UNO is starting!</b>\n\nPlayers, join the game below. At least 2 players are needed.",
         reply_markup=_keyboard(game, chat_id),
@@ -188,6 +221,7 @@ async def restart_callback(callback: CallbackQuery):
         "discard": [], "turn": 0, "direction": 1, "turn_message_id": None,
     }
     GAMES[chat_id] = game
+    _save_games()
     await callback.message.answer(
         "🎴 <b>UNO restarted!</b> Players, join below.",
         reply_markup=_keyboard(game, chat_id),
@@ -207,6 +241,7 @@ async def join_uno(callback: CallbackQuery):
         return
     game["members"][user.id] = {"id": user.id, "name": user.full_name}
     game["players"].append(user.id)
+    _save_games()
     await callback.answer("UNO mein join ho gaye!")
     if len(game["players"]) < 2:
         await callback.message.edit_text(
@@ -226,6 +261,7 @@ async def join_uno(callback: CallbackQuery):
         first = deck.pop()
     game["discard"].append(first)
     game["turn"] = random.randrange(len(game["players"]))
+    _save_games()
     await callback.message.edit_text("🎴 <b>UNO started!</b> Turn prompts will be sent separately.")
     await _board(callback.bot, chat_id, game)
     await _turn_prompt(callback.bot, chat_id, game)
@@ -286,6 +322,7 @@ async def draw_card(callback: CallbackQuery):
         return
     _draw_cards(game, uid, 1)
     drawn[uid] = len(game["hands"][uid]) - 1
+    _save_games()
     await callback.answer("1 card draw kiya. Naya card play kar sakte ho, warna End turn dabao.")
     kb = InlineKeyboardBuilder()
     drawn_card = game["hands"][uid][-1]
@@ -311,6 +348,7 @@ async def end_drawn_turn(callback: CallbackQuery):
         await callback.answer("Pehle card draw karo ya apni turn check karo.", show_alert=True)
         return
     drawn.pop(uid, None)
+    _save_games()
     await callback.answer("Turn end ho gayi.")
     await _advance(callback, chat_id, game)
 
@@ -345,6 +383,7 @@ async def play_card(callback: CallbackQuery):
             return
     hand.pop(index)
     game.setdefault("drawn_card_index", {}).pop(uid, None)
+    _save_games()
     if card["color"] is None:
         kb = InlineKeyboardBuilder()
         for color in COLORS:
@@ -399,6 +438,7 @@ async def choose_wild_color(callback: CallbackQuery):
     pending["card"]["color"] = color
     game["discard"].append(pending["card"])
     game["pending_wild"] = None
+    _save_games()
     await callback.answer(f"Color {color} selected!")
     hand = game["hands"][uid]
     if not hand:
