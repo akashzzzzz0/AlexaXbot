@@ -131,6 +131,8 @@ def setup_uno_web_routes(app):
                 if color not in COLORS:
                     raise web.HTTPBadRequest(text='{"error":"Choose a Wild color"}', content_type="application/json")
                 card = dict(card, color=color)
+            elif "color" in body:
+                raise web.HTTPBadRequest(text='{"error":"Color can only be selected for a Wild card"}', content_type="application/json")
             hand.pop(idx)
             game["discard"].append(card)
             if not hand:
