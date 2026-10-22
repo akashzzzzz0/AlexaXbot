@@ -66,6 +66,8 @@ def setup_uno_web_routes(app):
             "currentColor": top["color"] or "Wild",
             "direction": game["direction"],
             "isTurn": uid == current,
+            "drawnCardIndex": game.get("drawn_card_index", {}).get(uid),
+            "canEndTurn": game.get("drawn_card_index", {}).get(uid) is not None,
             "currentPlayerName": game["members"][current]["name"],
             "message": "Your turn — choose a card!" if uid == current else "Waiting for " + game["members"][current]["name"],
             "players": [{"name": game["members"][p]["name"], "cards": len(game["hands"][p]), "isTurn": p == current} for p in game["players"]],
@@ -105,7 +107,18 @@ def setup_uno_web_routes(app):
         if uid not in game["players"] or game["players"][game["turn"]] != uid:
             raise web.HTTPForbidden(text='{"error":"Not your turn"}', content_type="application/json")
         if request.match_info["action"] == "draw":
+            drawn = game.setdefault("drawn_card_index", {})
+            if uid in drawn:
+                raise web.HTTPBadRequest(text='{"error":"You already drew a card this turn"}', content_type="application/json")
             refill(game, uid, 1)
+            drawn[uid] = len(game["hands"][uid]) - 1
+            # Keep the turn: the player may play the newly drawn card if legal,
+            # or explicitly end the turn.
+        elif request.match_info["action"] == "end":
+            drawn = game.setdefault("drawn_card_index", {})
+            if uid not in drawn:
+                raise web.HTTPBadRequest(text='{"error":"Draw a card before ending your turn"}', content_type="application/json")
+            drawn.pop(uid, None)
             game["turn"] = (game["turn"] + game["direction"]) % len(game["players"])
         else:
             try:
@@ -114,6 +127,10 @@ def setup_uno_web_routes(app):
                 card = hand[idx]
             except (KeyError, ValueError, TypeError, IndexError):
                 raise web.HTTPBadRequest(text='{"error":"Invalid card"}', content_type="application/json")
+            drawn = game.setdefault("drawn_card_index", {})
+            drawn_idx = drawn.get(uid)
+            if drawn_idx is not None and idx != drawn_idx:
+                raise web.HTTPBadRequest(text='{"error":"After drawing, you may only play the card you just drew"}', content_type="application/json")
             if not _valid(card, game["discard"][-1]):
                 raise web.HTTPBadRequest(text='{"error":"That card cannot be played"}', content_type="application/json")
             # Official-style Wild Draw Four restriction: no other card in hand
@@ -136,6 +153,7 @@ def setup_uno_web_routes(app):
             elif "color" in body:
                 raise web.HTTPBadRequest(text='{"error":"Color can only be selected for a Wild card"}', content_type="application/json")
             hand.pop(idx)
+            drawn.pop(uid, None)
             game["discard"].append(card)
             if not hand:
                 game["active"] = False
@@ -176,4 +194,4 @@ def setup_uno_web_routes(app):
     app.router.add_get("/uno/", index)
     app.router.add_get("/uno", index)
     app.router.add_get("/uno/api/state", read_state)
-    app.router.add_post("/uno/api/{action:play|draw}", action)
+    app.router.add_post("/uno/api/{action:play|draw|end}", action)
