@@ -323,7 +323,8 @@ async def play_card(callback: CallbackQuery):
         return
     if card["value"] == "Reverse":
         game["direction"] *= -1
-        steps = 1 if len(game["players"]) == 2 else 1
+        # In a 2-player game, Reverse skips the opponent.
+        steps = 2 if len(game["players"]) == 2 else 1
     elif card["value"] == "Skip":
         steps = 2
     elif card["value"] == "+2":
