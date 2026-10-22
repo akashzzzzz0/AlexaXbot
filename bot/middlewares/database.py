@@ -3,6 +3,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Message, CallbackQuery, Update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from bot.database.models import User, Group, GroupMember, SecuritySettings, GroupDisabledCommand, InboxMessage
 import structlog
 
@@ -80,6 +81,13 @@ class DatabaseMiddleware(BaseMiddleware):
                             except Exception as mission_error:
                                 logger.warning("Mission progress tracking failed", error=str(mission_error))
                     except Exception as e:
+                        # A failed flush leaves SQLAlchemy's transaction unusable until
+                        # rollback. Recover here so later handlers (including Force Join)
+                        # can still query through this session.
+                        try:
+                            await session.rollback()
+                        except Exception:
+                            pass
                         logger.warning("Could not get/create user or track mission progress", error=str(e))
                         data["db_user"] = None
 
@@ -136,6 +144,11 @@ class DatabaseMiddleware(BaseMiddleware):
                             member = await self._get_or_create_member(session, chat.id, user.id)
                             data["db_member"] = member
                     except Exception as e:
+                        # Recover from failed inserts/flushes before continuing to handlers.
+                        try:
+                            await session.rollback()
+                        except Exception:
+                            pass
                         logger.warning("Could not load group data from DB", error=str(e))
 
                 # Save private messages from non-owner users for the owner-only inbox.
@@ -154,6 +167,10 @@ class DatabaseMiddleware(BaseMiddleware):
                                 is_read=False,
                             ))
                     except Exception as inbox_error:
+                        try:
+                            await session.rollback()
+                        except Exception:
+                            pass
                         logger.warning("Could not save private message to owner inbox", user_id=user.id, error=str(inbox_error))
 
                 # Emergency lockdown must run before command routers, not only in the catch-all handler.
@@ -229,8 +246,17 @@ is_bot=tg_user.is_bot,
                 telegram_id=tg_user.id,
             )
             session.add(user)
-            await session.flush()
-        else:
+            try:
+                await session.flush()
+            except IntegrityError:
+                # Another update may have inserted the same Telegram user between
+                # session.get() and flush(). Roll back the failed transaction, then
+                # reuse the row that won the race instead of poisoning this session.
+                await session.rollback()
+                user = await session.get(User, tg_user.id)
+                if user is None:
+                    raise
+        if user:
             user.username = tg_user.username
             user.first_name = tg_user.first_name or "User"
             user.last_name = tg_user.last_name
