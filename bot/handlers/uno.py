@@ -120,6 +120,14 @@ async def uno_start(message: Message, **kwargs):
         await message.answer("🎴 UNO group mein start karo, phir players Join UNO dabayen.")
         return
     chat_id = message.chat.id
+    if message.text and len(message.text.split()) > 1 and message.text.split(maxsplit=1)[1].strip().lower() == "restart":
+        previous = GAMES.get(chat_id)
+        if previous and previous.get("turn_message_id"):
+            try:
+                await message.bot.delete_message(chat_id, previous["turn_message_id"])
+            except Exception:
+                pass
+        GAMES.pop(chat_id, None)
     existing = GAMES.get(chat_id)
     if existing and existing.get("active") and len(existing["players"]) >= 2:
         await message.answer("UNO game already chal rahi hai. Nayi game ke liye /uno restart bhejo.")
@@ -136,7 +144,6 @@ async def uno_start(message: Message, **kwargs):
 
 
 @router.message(Command("uno_restart"))
-@router.message(Command("uno", "restart"))
 async def uno_restart(message: Message, **kwargs):
     if not message.chat or message.chat.type not in ("group", "supergroup"):
         await message.answer("Ye command group mein use karo.")
@@ -151,6 +158,12 @@ async def restart_callback(callback: CallbackQuery):
     if callback.message.chat.type not in ("group", "supergroup"):
         await callback.answer("Group mein restart karo.", show_alert=True)
         return
+    previous = GAMES.get(chat_id)
+    if previous and previous.get("turn_message_id"):
+        try:
+            await callback.bot.delete_message(chat_id, previous["turn_message_id"])
+        except Exception:
+            pass
     GAMES.pop(chat_id, None)
     await callback.answer("UNO restarted!")
     game = {
