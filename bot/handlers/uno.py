@@ -280,12 +280,38 @@ async def draw_card(callback: CallbackQuery):
     if game["players"][game["turn"]] != uid:
         await callback.answer("Ab tumhari turn nahi hai.", show_alert=True)
         return
+    drawn = game.setdefault("drawn_card_index", {})
+    if uid in drawn:
+        await callback.answer("Is turn mein tum already card draw kar chuke ho.", show_alert=True)
+        return
     _draw_cards(game, uid, 1)
-    await callback.answer("1 card draw kiya.")
+    drawn[uid] = len(game["hands"][uid]) - 1
+    await callback.answer("1 card draw kiya. Naya card play kar sakte ho, warna End turn dabao.")
+    kb = InlineKeyboardBuilder()
+    drawn_card = game["hands"][uid][-1]
+    kb.button(text=f"🎴 Play {_card_name(drawn_card)}", callback_data=f"uno:play:{chat_id}:{uid}:{len(game['hands'][uid]) - 1}")
+    kb.button(text="⏭ End turn", callback_data=f"uno:end:{chat_id}:{uid}")
+    kb.adjust(1)
     try:
-        await callback.bot.send_message(uid, "➕ Tumne ek card draw kiya.", reply_markup=_hand_keyboard(chat_id, uid, game))
+        await callback.bot.send_message(uid, "➕ Tumne ek card draw kiya.", reply_markup=kb.as_markup())
     except Exception:
         pass
+
+
+@router.callback_query(F.data.startswith("uno:end:"))
+async def end_drawn_turn(callback: CallbackQuery):
+    _, _, chat, target = callback.data.split(":")
+    chat_id, uid = int(chat), int(target)
+    game = GAMES.get(chat_id)
+    drawn = game.setdefault("drawn_card_index", {}) if game else {}
+    if not game or not game.get("active") or callback.from_user.id != uid:
+        await callback.answer("Ye tumhara turn nahi hai.", show_alert=True)
+        return
+    if game["players"][game["turn"]] != uid or uid not in drawn:
+        await callback.answer("Pehle card draw karo ya apni turn check karo.", show_alert=True)
+        return
+    drawn.pop(uid, None)
+    await callback.answer("Turn end ho gayi.")
     await _advance(callback, chat_id, game)
 
 
@@ -304,6 +330,10 @@ async def play_card(callback: CallbackQuery):
     if index >= len(hand):
         await callback.answer("Cards update ho chuke hain. Make Your Move dobara dabao.", show_alert=True)
         return
+    drawn = game.setdefault("drawn_card_index", {})
+    if uid in drawn and index != drawn[uid]:
+        await callback.answer("Draw ke baad sirf naya card play kar sakte ho.", show_alert=True)
+        return
     card = hand[index]
     if not _valid(card, game["discard"][-1]):
         await callback.answer("Ye card play nahi ho sakta!", show_alert=True)
@@ -314,6 +344,7 @@ async def play_card(callback: CallbackQuery):
             await callback.answer("Current color ka card haath mein hai, +4 nahi khel sakte.", show_alert=True)
             return
     hand.pop(index)
+    game.setdefault("drawn_card_index", {}).pop(uid, None)
     if card["color"] is None:
         kb = InlineKeyboardBuilder()
         for color in COLORS:
