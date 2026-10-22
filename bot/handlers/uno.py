@@ -3,11 +3,12 @@
 Game state is intentionally in-memory; an app restart clears active games.
 """
 import random
+import os
 from html import escape
 
 from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 router = Router()
@@ -229,12 +230,17 @@ async def show_hand(callback: CallbackQuery):
         await callback.answer("Ab tumhari turn nahi hai.", show_alert=True)
         return
     try:
+        base_url = os.environ.get("UNO_WEBAPP_URL", "https://laplace.fadehost.com/uno/").rstrip("/")
+        app_url = f"{base_url}/?chat_id={chat_id}"
+        markup = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="🎴 Open UNO Cards", web_app=WebAppInfo(url=app_url))
+        ]])
         await callback.bot.send_message(
             target_id,
-            "🎴 <b>Your UNO cards</b>\nSirf valid card choose karo. Ye hand private hai.",
-            reply_markup=_hand_keyboard(chat_id, target_id, game),
+            "🎴 <b>Your UNO turn!</b>\nApne private graphical cards kholne ke liye button dabao. Sirf tum apni hand dekh sakte ho.",
+            reply_markup=markup,
         )
-        await callback.answer("Tumhare cards DM mein bhej diye.")
+        await callback.answer("Private UNO app DM mein bhej di.")
     except Exception:
         await callback.answer("Pehle Alexa ko private mein /start bhejo, phir button dobara dabao.", show_alert=True)
 
