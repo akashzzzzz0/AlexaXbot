@@ -390,6 +390,12 @@ async def main() -> None:
         session=session,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
+    if runner is not None:
+        try:
+            runner._app['telegram_bot'] = bot
+        except Exception as exc:
+            logger.warning('Could not attach bot to web app', error=str(exc))
+
     dp = Dispatcher(storage=storage)
     dp.include_router(get_main_router())
     from bot.middlewares.auto_delete import AutoDeleteCommandMiddleware
