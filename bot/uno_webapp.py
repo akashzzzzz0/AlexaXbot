@@ -52,8 +52,10 @@ def setup_uno_web_routes(app):
                 game["deck"] = game["discard"][:-1]
                 game["discard"] = [top]
                 random.shuffle(game["deck"])
-            if game["deck"]:
-                game["hands"][uid].append(game["deck"].pop())
+                # Extremely rare empty-discard edge case: never silently skip a draw.
+                if not game["deck"]:
+                    game["deck"] = _new_deck()
+            game["hands"][uid].append(game["deck"].pop())
 
     def state(game, uid):
         top = game["discard"][-1]
