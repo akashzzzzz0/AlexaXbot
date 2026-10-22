@@ -1,7 +1,4 @@
-"""Group UNO game with private hand selection and one replaceable turn prompt.
-
-Game state is intentionally in-memory; an app restart clears active games.
-"""
+"""Group UNO game with private hand selection and restart-persistent game state."""
 import random
 import os
 import json
