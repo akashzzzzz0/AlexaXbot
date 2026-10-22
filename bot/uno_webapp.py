@@ -30,7 +30,7 @@ def verify_init_data(request):
         return None
 
 
-def setup_uno_web_routes(app, bot):
+def setup_uno_web_routes(app):
     from pathlib import Path
     from bot.handlers.uno import GAMES, COLORS, _valid, _board, _turn_prompt, _new_deck
     page = Path(__file__).resolve().parent.parent / "web" / "uno" / "index.html"
@@ -85,6 +85,9 @@ def setup_uno_web_routes(app, bot):
         return web.json_response(state(game, uid))
 
     async def action(request):
+        bot = request.app.get('telegram_bot')
+        if bot is None:
+            raise web.HTTPServiceUnavailable(text='Bot is starting')
         uid = verify_init_data(request)
         if uid is None:
             raise web.HTTPUnauthorized(text='{"error":"Telegram verification failed"}', content_type="application/json")
