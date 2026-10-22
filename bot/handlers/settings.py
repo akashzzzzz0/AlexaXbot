@@ -124,11 +124,19 @@ async def set_welcome_command(message: Message, db_session: AsyncSession, db_gro
         return
     raw = (message.text or "").split(None, 1)
     if len(raw) < 2 or not raw[1].strip():
-        await message.reply("Send your welcome text in the next message. Placeholders: {name}, {username}, {id}, {group}.")
+        await message.reply("Send your welcome text in the next message. Placeholders: {name}, {username}, {id}, {group}. Telegram Premium custom emojis are supported when sent in this next message.")
         if state:
             await state.set_state(WelcomeStates.waiting_message)
         return
-    welcome_text = raw[1].strip()
+    # Store Telegram's HTML representation so custom Premium emoji entities
+    # are preserved as <tg-emoji emoji-id="..."> markup for the welcome sender.
+    raw_html = (message.html_text or message.text or "").split(None, 1)
+    if len(raw_html) < 2 or not raw_html[1].strip():
+        await message.reply("Send your welcome text in the next message. Premium custom emojis are supported there too.")
+        if state:
+            await state.set_state(WelcomeStates.waiting_message)
+        return
+    welcome_text = raw_html[1].strip()
     ws = await db_session.scalar(select(WelcomeSettings).where(WelcomeSettings.group_id == db_group.id))
     if not ws:
         ws = WelcomeSettings(group_id=db_group.id, enabled=True, message=welcome_text)
@@ -149,14 +157,17 @@ async def save_welcome_message(message: Message, _: callable, db_session: AsyncS
             await state.clear()
         return
     ws = await db_session.scalar(select(WelcomeSettings).where(WelcomeSettings.group_id == db_group.id))
+    # html_text serializes custom_emoji entities into Telegram-supported HTML,
+    # allowing arbitrary Premium emojis to animate in the eventual welcome.
+    welcome_content = message.html_text or message.text or message.caption or ""
     if not ws:
-        ws = WelcomeSettings(group_id=db_group.id, message=message.text)
+        ws = WelcomeSettings(group_id=db_group.id, message=welcome_content)
         db_session.add(ws)
     else:
-        ws.message = message.text
+        ws.message = welcome_content
         ws.enabled = True
     await db_session.flush()
-    await message.reply("✅ Custom welcome saved and enabled.")
+    await message.reply("✅ Custom welcome saved and enabled, including any Telegram Premium custom emojis.")
     if state:
         await state.clear()
 
