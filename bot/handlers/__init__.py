@@ -24,8 +24,9 @@ def get_main_router() -> Router:
     router.include_router(help.router)
     router.include_router(tournaments.router)
     router.include_router(affiliate.router)
-    router.include_router(owner.router)
+    # Register this specific owner callback router before owner's catch-all callback.
     router.include_router(owner_group_message.router)
+    router.include_router(owner.router)
     router.include_router(alexa_games.router)
     router.include_router(group_tools.router)
     router.include_router(community_shield.router)
