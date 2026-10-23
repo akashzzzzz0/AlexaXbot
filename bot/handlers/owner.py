@@ -1197,7 +1197,11 @@ async def owner_purge_recent_start(callback: CallbackQuery, db_session: AsyncSes
         if status not in {"administrator", "creator"} or (
             status == "administrator" and not getattr(me, "can_delete_messages", False)
         ):
-            await callback.answer("ALEXA needs admin + Delete Messages permission in this group.", show_alert=True)            return
+            await callback.answer(
+                "ALEXA needs admin + Delete Messages permission in this group.",
+                show_alert=True,
+            )
+            return
     except Exception:
         await callback.answer("Could not verify ALEXA's permissions in this group.", show_alert=True)
         return
