@@ -58,8 +58,9 @@ def owner_kb(_=None) -> object:
     builder.button(text=f"{'🟢 Disable' if _maintenance_mode else '🔧 Enable'} Maintenance", callback_data="owner:maintenance")
     builder.button(text="👤 User List", callback_data="owner:users")
     builder.button(text="📩 User Messages", callback_data="owner:inbox")
+    builder.button(text="📨 Message Selected Groups", callback_data="owner:group_message")
     builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
-    builder.adjust(2, 2, 2, 2, 2, 2, 2, 1)
+    builder.adjust(2, 2, 2, 2, 2, 2, 2, 2)
     return builder.as_markup()
 
 
@@ -397,8 +398,7 @@ async def owner_leave_group_confirm(callback: CallbackQuery, db_session: AsyncSe
         return
     await callback.message.edit_text(
         f"✅ <b>Alexa has left the group</b>\n\n"
-        f"Group: <b>{escape(group_title)}</b>\n"
-        f"ID: <code>{group_id}</code>\n\n"
+        f"Group: <b>{escape(group_title)}</b>\n"        f"ID: <code>{group_id}</code>\n\n"
         "This group has been removed from the active-group list.",
         parse_mode="HTML",
         reply_markup=back_button_kb(None, "owner:groups"),
@@ -797,8 +797,7 @@ async def owner_known_bans(callback: CallbackQuery, db_session: AsyncSession, **
             GroupMember.group_id == group_id,
             GroupMember.is_banned.is_(True),
         ).order_by(desc(GroupMember.last_activity)).limit(30)
-    )
-    members = result.scalars().all()
+    )    members = result.scalars().all()
     if not members:
         text = (
             f"🔓 <b>Known Bans — {escape(group.title)}</b>\n\n"
@@ -1197,8 +1196,7 @@ async def owner_purge_recent_start(callback: CallbackQuery, db_session: AsyncSes
         if status not in {"administrator", "creator"} or (
             status == "administrator" and not getattr(me, "can_delete_messages", False)
         ):
-            await callback.answer("ALEXA needs admin + Delete Messages permission in this group.", show_alert=True)
-            return
+            await callback.answer("ALEXA needs admin + Delete Messages permission in this group.", show_alert=True)            return
     except Exception:
         await callback.answer("Could not verify ALEXA's permissions in this group.", show_alert=True)
         return
@@ -1597,8 +1595,7 @@ async def owner_users(callback: CallbackQuery, _: callable, db_session: AsyncSes
     result = await db_session.execute(
         select(User).where(*user_filter)
         .order_by(desc(User.last_seen), desc(User.created_at))
-        .offset(page * page_size).limit(page_size)
-    )
+        .offset(page * page_size).limit(page_size)    )
     users = result.scalars().all()
 
     if not users:
@@ -1997,8 +1994,7 @@ async def owner_inbox_reply_send(message: Message, state: FSMContext, db_session
         inbox_id = int(data.get("inbox_reply_inbox_id"))
         item = await db_session.get(InboxMessage, inbox_id)
         if not item or item.user_id != user_id:
-            await message.reply("❌ This inbox message no longer exists. Open the inbox and choose a message again.")
-            return
+            await message.reply("❌ This inbox message no longer exists. Open the inbox and choose a message again.")            return
         await message.copy_to(
             chat_id=user_id,
             reply_parameters=ReplyParameters(message_id=item.telegram_message_id, allow_sending_without_reply=True),
@@ -2020,6 +2016,5 @@ async def owner_catch_all(callback: CallbackQuery, _: callable, **kwargs):
         await callback.answer("Not available.", show_alert=True)
         return
     await callback.answer("Feature unavailable.", show_alert=True)
-
 
 
