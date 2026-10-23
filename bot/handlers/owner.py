@@ -797,7 +797,8 @@ async def owner_known_bans(callback: CallbackQuery, db_session: AsyncSession, **
             GroupMember.group_id == group_id,
             GroupMember.is_banned.is_(True),
         ).order_by(desc(GroupMember.last_activity)).limit(30)
-    )    members = result.scalars().all()
+    )
+    members = result.scalars().all()
     if not members:
         text = (
             f"🔓 <b>Known Bans — {escape(group.title)}</b>\n\n"
@@ -1994,7 +1995,8 @@ async def owner_inbox_reply_send(message: Message, state: FSMContext, db_session
         inbox_id = int(data.get("inbox_reply_inbox_id"))
         item = await db_session.get(InboxMessage, inbox_id)
         if not item or item.user_id != user_id:
-            await message.reply("❌ This inbox message no longer exists. Open the inbox and choose a message again.")            return
+            await message.reply("❌ This inbox message no longer exists. Open the inbox and choose a message again.")
+            return
         await message.copy_to(
             chat_id=user_id,
             reply_parameters=ReplyParameters(message_id=item.telegram_message_id, allow_sending_without_reply=True),
