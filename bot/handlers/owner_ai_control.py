@@ -63,7 +63,7 @@ async def _find_target_group(message: Message, session: AsyncSession, prompt: st
     for group in groups:
         if group.title and group.title.casefold() in lowered:
             return group
-    numeric = re.search(r"(?<!\\d)(-100\\d{8,}|\\d{5,20})(?!\\d)", prompt or "")
+    numeric = re.search(r"(?<!\\d)(-100\\d{8,}|-\\d{5,20})(?!\\d)", prompt or "")
     if numeric:
         try:
             group = await session.get(Group, int(numeric.group(1)))
@@ -619,6 +619,9 @@ async def is_owner_ai_message(message: Message) -> bool:
 )
 async def owner_ai_group_prompt(message: Message, db_session: AsyncSession, **kwargs):
     if not await _global_ai_enabled(db_session):
+        # Global control is OFF, but owner can still use Alexa for ordinary AI chat.
+        from bot.handlers.ai_chat import alexa_ai_chat
+        await alexa_ai_chat(message)
         return
     prompt = _strip_prefix(message.text or "")
     if not prompt and message.reply_to_message:
