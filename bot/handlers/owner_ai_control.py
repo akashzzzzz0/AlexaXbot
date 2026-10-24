@@ -66,11 +66,20 @@ async def _find_target_group(message: Message, session: AsyncSession, prompt: st
     numeric = re.search(r"(?<!\d)(-100\d{8,}|-\d{5,20})(?!\d)", prompt or "")
     if numeric:
         try:
-            group = await session.get(Group, int(numeric.group(1)))
+            group_id = int(numeric.group(1))
+            group = await session.get(Group, group_id)
             if group and group.is_active:
                 return group
-        except (TypeError, ValueError):
-            pass
+            # The bot may be an admin in a group not yet tracked in the database.
+            chat = await message.bot.get_chat(group_id)
+            chat_type = str(getattr(chat.type, "value", chat.type))
+            if chat_type in {"group", "supergroup"}:
+                group = Group(id=group_id, title=chat.title or "Telegram group", type=chat_type, is_active=True)
+                session.add(group)
+                await session.commit()
+                return group
+        except Exception:
+            await session.rollback()
     if message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
         current = await session.get(Group, message.chat.id)
         if current and current.is_active:
