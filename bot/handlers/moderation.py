@@ -13,10 +13,22 @@ from bot.services.moderation_service import (
 from bot.utils.helpers import format_duration, mention_user, safe_username
 import structlog
 from html import escape
+from datetime import datetime, timedelta, timezone
 from bot.middlewares.admin_actions import AdminActionMiddleware
 
 logger = structlog.get_logger()
 router = Router()
+
+
+async def _delete_moderation_command(message: Message) -> bool:
+    """Delete a moderation command only after its action succeeded."""
+    try:
+        await message.bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+        return True
+    except Exception as exc:
+        logger.warning("Could not delete successful moderation command", chat_id=message.chat.id, message_id=message.message_id, error=str(exc))
+        return False
+
 
 _bio_link_settings_drafts = {}
 _anonymous_pending_actions = {}
@@ -26,12 +38,12 @@ def _is_anonymous_group_admin(message: Message) -> bool:
     return bool(message.sender_chat and message.chat and message.sender_chat.id == message.chat.id and message.chat.type in ("group", "supergroup"))
 
 
-async def _queue_anonymous_confirmation(message: Message, action: str, target, reason: str = "", duration=None):
+async def _queue_anonymous_confirmation(message: Message, action: str, target, reason: str = "", duration=None, silent: bool = False):
     if not _is_anonymous_group_admin(message):
         return False
     import secrets
     token = secrets.token_urlsafe(9)
-    _anonymous_pending_actions[token] = {"chat_id": message.chat.id, "action": action, "target_id": target.id, "reason": reason, "duration": duration}
+    _anonymous_pending_actions[token] = {"chat_id": message.chat.id, "action": action, "target_id": target.id, "reason": reason, "duration": duration, "silent": silent, "command_message_id": message.message_id}
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ Confirm action", callback_data=f"anon_confirm:{token}"), InlineKeyboardButton(text="❌ Cancel", callback_data=f"anon_cancel:{token}")]])
     await message.reply(f"🛡️ Anonymous admin requested: <b>{escape(action.upper())}</b> for <code>{target.id}</code>.\nA group admin can confirm this action below.", reply_markup=keyboard, parse_mode="HTML")
     return True
@@ -68,7 +80,7 @@ async def confirm_anonymous_action(callback: CallbackQuery, bot: Bot, db_session
     reason, duration = pending.get("reason", ""), pending.get("duration")
     try:
         if action == "ban":
-            ok = await ban_user(bot, db_session, pending["chat_id"], target_id, callback.from_user.id, reason)
+            ok = await ban_user(bot, db_session, pending["chat_id"], target_id, callback.from_user.id, reason, pending.get("until"))
         elif action == "kick":
             ok = await kick_user(bot, db_session, pending["chat_id"], target_id, callback.from_user.id, reason)
         elif action == "mute":
@@ -91,8 +103,19 @@ async def confirm_anonymous_action(callback: CallbackQuery, bot: Bot, db_session
             ok = False
         if ok:
             del _anonymous_pending_actions[token]
-            await callback.message.edit_text(f"✅ <b>{escape(action.title())} confirmed and completed.</b>\nTarget ID: <code>{target_id}</code>", parse_mode="HTML")
-            await callback.answer("Action completed")
+            try:
+                await bot.delete_message(chat_id=pending["chat_id"], message_id=pending.get("command_message_id"))
+            except Exception as exc:
+                logger.debug("Could not delete confirmed moderation command", error=str(exc))
+            if pending.get("silent"):
+                try:
+                    await callback.message.delete()
+                except Exception as exc:
+                    logger.debug("Could not remove silent-action confirmation prompt", error=str(exc))
+                await callback.answer()
+            else:
+                await callback.message.edit_text(f"✅ <b>{escape(action.title())} confirmed and completed.</b>\nTarget ID: <code>{target_id}</code>", parse_mode="HTML")
+                await callback.answer("Action completed")
         else:
             await callback.answer("Action failed; check Alexa's permissions and target status.", show_alert=True)
     except Exception as exc:
@@ -100,7 +123,7 @@ async def confirm_anonymous_action(callback: CallbackQuery, bot: Bot, db_session
         await callback.answer(f"Action failed: {str(exc)[:150]}", show_alert=True)
 
 router.message.outer_middleware(AdminActionMiddleware(
-    commands={"ban", "unban", "kick", "mute", "unmute", "warn", "unwarn", "warns", "warnings", "history", "note", "del", "purg", "pin", "unpin", "ro", "setrole", "clearrole", "role", "resetwarn", "resetwarns", "approvebio", "promote", "demote"}
+    commands={"ban", "sban", "dban", "tban", "unban", "kick", "mute", "smute", "unmute", "warn", "unwarn", "warns", "warnings", "history", "note", "del", "purg", "pin", "unpin", "ro", "setrole", "clearrole", "role", "resetwarn", "resetwarns", "approvebio", "promote", "demote"}
 ))
 router.callback_query.outer_middleware(AdminActionMiddleware(prefixes=("mod:", "mute_duration:", "ban_duration:", "warn_action:", "ban_confirm:", "anon_confirm:", "anon_cancel:")))
 
@@ -248,7 +271,6 @@ async def open_bio_link_protection(callback: CallbackQuery, db_session: AsyncSes
         reply_markup=bio_link_protection_kb(enabled),
     )
     await callback.answer()
-
 
 @router.callback_query(F.data == "mod:bio_link_settings")
 async def open_bio_link_settings(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
@@ -456,10 +478,85 @@ async def cmd_ban(message: Message, bot: Bot, _: callable, db_session: AsyncSess
         return
     success = await ban_user(bot, db_session, message.chat.id, target.id, message.from_user.id if message.from_user else 0, reason)
     if success:
+        await _delete_moderation_command(message)
         name = mention_user(target.id, safe_username(target))
-        await message.reply(_("user_banned").format(name=name, reason=reason or _("no_reason")), parse_mode="HTML")
+        await message.answer(_("user_banned").format(name=name, reason=reason or _("no_reason")), parse_mode="HTML")
     else:
         await message.reply("❌ Ban failed. Check ALEXA's Ban Users permission and the target's admin status.")
+
+
+@router.message(Command("sban"))
+async def cmd_sban(message: Message, bot: Bot, db_session: AsyncSession, **kwargs):
+    """Silently ban a member; the command is removed only after success."""
+    if message.chat.type not in ("group", "supergroup"):
+        await message.answer("This command only works in groups.")
+        return
+    target, reason = await get_target_user(message, db_session)
+    if not target:
+        await message.reply("Reply to a member's message or use /sban @username (or user ID).")
+        return
+    if await _queue_anonymous_confirmation(message, "ban", target, reason, silent=True):
+        return
+    success = await ban_user(bot, db_session, message.chat.id, target.id, message.from_user.id if message.from_user else 0, reason)
+    if success:
+        await _delete_moderation_command(message)
+    else:
+        await message.answer("❌ Silent ban failed. Check Alexa's Ban Users permission and the target's status.")
+
+
+@router.message(Command("tban"))
+async def cmd_tban(message: Message, bot: Bot, db_session: AsyncSession, **kwargs):
+    """Temporarily ban a member for the duration supplied by an admin."""
+    if message.chat.type not in ("group", "supergroup"):
+        await message.answer("This command only works in groups.")
+        return
+    target, args = await get_target_user(message, db_session)
+    if not target:
+        await message.reply("Usage: /tban @username 1h [reason], or reply with /tban 1h [reason].")
+        return
+    from bot.utils.helpers import parse_duration
+    parts = args.split(None, 1) if args else []
+    duration = parse_duration(parts[0]) if parts else None
+    if not duration or duration <= 0:
+        await message.reply("Please provide a valid duration, e.g. /tban @username 1h spam or reply with /tban 1h spam.")
+        return
+    reason = parts[1] if len(parts) > 1 else ""
+    until = datetime.now(timezone.utc) + timedelta(seconds=duration)
+    if await _queue_anonymous_confirmation(message, "ban", target, reason):
+        token = next((k for k, v in _anonymous_pending_actions.items() if v.get("command_message_id") == message.message_id), None)
+        if token:
+            _anonymous_pending_actions[token]["until"] = until
+        return
+    success = await ban_user(bot, db_session, message.chat.id, target.id, message.from_user.id if message.from_user else 0, reason, until)
+    if success:
+        await _delete_moderation_command(message)
+        await message.answer(f"✅ {mention_user(target.id, safe_username(target))} has been temporarily banned for {escape(format_duration(duration))}.\nReason: {escape(reason or 'No reason provided')}", parse_mode="HTML")
+    else:
+        await message.answer("❌ Temporary ban failed. Check Alexa's Ban Users permission and the target's status.")
+
+
+@router.message(Command("dban"))
+async def cmd_dban(message: Message, bot: Bot, db_session: AsyncSession, **kwargs):
+    """Ban a member for one day (24 hours)."""
+    if message.chat.type not in ("group", "supergroup"):
+        await message.answer("This command only works in groups.")
+        return
+    target, reason = await get_target_user(message, db_session)
+    if not target:
+        await message.reply("Reply to a member's message or use /dban @username (or user ID).")
+        return
+    until = datetime.now(timezone.utc) + timedelta(days=1)
+    if await _queue_anonymous_confirmation(message, "ban", target, reason):
+        token = next((k for k, v in _anonymous_pending_actions.items() if v.get("command_message_id") == message.message_id), None)
+        if token:
+            _anonymous_pending_actions[token]["until"] = until
+        return
+    success = await ban_user(bot, db_session, message.chat.id, target.id, message.from_user.id if message.from_user else 0, reason, until)
+    if success:
+        await _delete_moderation_command(message)
+        await message.answer(f"✅ {mention_user(target.id, safe_username(target))} has been banned for 1 day (24 hours).\nReason: {escape(reason or 'No reason provided')}", parse_mode="HTML")
+    else:
+        await message.answer("❌ 1-day ban failed. Check Alexa's Ban Users permission and the target's status.")
 
 
 @router.message(Command("unban"))
@@ -497,8 +594,7 @@ async def cmd_kick(message: Message, bot: Bot, _: callable, db_session: AsyncSes
         await message.reply("❌ Kick failed. Check ALEXA's Ban Users permission and the target's admin status.")
 
 
-@router.message(Command("mute"))
-async def cmd_mute(message: Message, bot: Bot, _: callable, db_session: AsyncSession, **kwargs):
+@router.message(Command("mute"))async def cmd_mute(message: Message, bot: Bot, _: callable, db_session: AsyncSession, **kwargs):
     if message.chat.type == "private":
         return
     target, args = await get_target_user(message, db_session)
@@ -520,14 +616,43 @@ async def cmd_mute(message: Message, bot: Bot, _: callable, db_session: AsyncSes
         return
     success = await mute_user(bot, db_session, message.chat.id, target.id, message.from_user.id if message.from_user else 0, duration, reason)
     if success:
+        await _delete_moderation_command(message)
         name = mention_user(target.id, safe_username(target))
         dur_str = format_duration(duration) if duration else "Forever"
-        await message.reply(
+        await message.answer(
             _("user_muted").format(name=name, duration=dur_str, reason=reason or _("no_reason")),
             parse_mode="HTML",
         )
     else:
         await message.reply("❌ I couldn't mute this user. Check that ALEXA is an admin with Restrict Members permission and that the target is not a group admin.")
+
+
+@router.message(Command("smute"))
+async def cmd_smute(message: Message, bot: Bot, db_session: AsyncSession, **kwargs):
+    """Silently mute a member; duration is optional and defaults to indefinite."""
+    if message.chat.type not in ("group", "supergroup"):
+        await message.answer("This command only works in groups.")
+        return
+    target, args = await get_target_user(message, db_session)
+    if not target:
+        await message.reply("Reply to a member's message or use /smute @username (or user ID).")
+        return
+    from bot.utils.helpers import parse_duration
+    duration = None
+    reason = args
+    if args:
+        parts = args.split(None, 1)
+        parsed = parse_duration(parts[0])
+        if parsed:
+            duration = parsed
+            reason = parts[1] if len(parts) > 1 else ""
+    if await _queue_anonymous_confirmation(message, "mute", target, reason, duration, silent=True):
+        return
+    success = await mute_user(bot, db_session, message.chat.id, target.id, message.from_user.id if message.from_user else 0, duration, reason)
+    if success:
+        await _delete_moderation_command(message)
+    else:
+        await message.answer("❌ Silent mute failed. Check Alexa's Restrict Members permission and the target's status.")
 
 
 @router.message(Command("unmute"))
@@ -747,8 +872,7 @@ async def cb_mod_command_hint(callback: CallbackQuery, db_session: AsyncSession,
         return
     kb = InlineKeyboardBuilder()
     for member, user in rows:
-        name = (user.first_name or user.username or str(user.id)).replace("\n", " ")[:30]
-        kb.button(text=f"{name} · {user.id}", callback_data=f"mod:target:{action}:{user.id}")
+        name = (user.first_name or user.username or str(user.id)).replace("\n", " ")[:30]        kb.button(text=f"{name} · {user.id}", callback_data=f"mod:target:{action}:{user.id}")
     kb.button(text="◀️ Back", callback_data="mod:menu")
     kb.adjust(1)
     try:
@@ -997,7 +1121,6 @@ async def cmd_delete_message(message: Message, bot: Bot, **kwargs):
         await bot.delete_message(message.chat.id, message.message_id)
     except Exception as exc:
         await message.reply(f"Delete failed. Check bot admin/delete permissions. ({escape(str(exc)[:150])})", parse_mode="HTML")
-
 
 
 @router.message(Command("purg"))
