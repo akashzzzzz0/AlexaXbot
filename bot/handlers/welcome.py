@@ -757,8 +757,7 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                             message.bot.id, 3600, "3 link warnings reached"
                         )
                         notice = (
-                            f"🚫 Link removed. {message.from_user.first_name or 'Member'} reached "
-                            f"3/3 warnings and has been muted for 1 hour."
+                            ""
                             if muted else
                             f"⚠️ Link removed. Member reached {count}/3 warnings, but I couldn't apply the mute. "
                             "Please check ALEXA's Restrict Members permission."
@@ -768,10 +767,11 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                             f"⚠️ Link removed. Warning {count}/3. "
                             "At 3 warnings, the member will be muted for 1 hour."
                         )
-                    try:
-                        await message.bot.send_message(message.chat.id, notice)
-                    except Exception:
-                        pass
+                    if notice:
+                        try:
+                            await message.bot.send_message(message.chat.id, notice)
+                        except Exception:
+                            pass
                 return
 
 
@@ -828,7 +828,7 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                                             message.bot.id, duration, "3 bio-link warnings reached"
                                         )
                                         notice = (
-                                            f"🔇 Bio-link warning limit reached (3/3). Member muted for {max(1, duration // 60)} minutes."
+                                            ""
                                             if muted else
                                             "⚠️ Bio-link warning limit reached (3/3), but mute failed. Check ALEXA's Restrict Members permission."
                                         )
@@ -838,7 +838,7 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                                             message.bot.id, "3 bio-link warnings reached"
                                         )
                                         notice = (
-                                            "🚫 Bio-link warning limit reached (3/3). Member banned."
+                                            ""
                                             if banned else
                                             "⚠️ Bio-link warning limit reached (3/3), but ban failed. Check ALEXA's Ban Users permission."
                                         )
@@ -855,7 +855,7 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                                         message.bot.id, duration, "Link found in profile bio"
                                     )
                                 notice = (
-                                    f"🔇 Message removed. Member muted for {max(1, duration // 60)} minutes because their bio contains a link."
+                                    ""
                                     if muted else
                                     "⚠️ Message removed because a link was found in the member's bio, but mute failed. Check ALEXA's Restrict Members permission."
                                 )
@@ -866,11 +866,12 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                                         message.bot, db_session, db_group.id, db_user.id,
                                         message.bot.id, "Link found in profile bio"
                                     )
-                                notice = "🚫 Member banned because their bio contains a link." if banned else "⚠️ Message removed, but ban failed. Check ALEXA's Ban Users permission."
-                            try:
-                                await message.bot.send_message(message.chat.id, notice)
-                            except Exception:
-                                pass
+                                notice = "" if banned else "⚠️ Message removed, but ban failed. Check ALEXA's Ban Users permission."
+                            if notice:
+                                try:
+                                    await message.bot.send_message(message.chat.id, notice)
+                                except Exception:
+                                    pass
                             return
             except Exception as exc:
                 logger.debug(
