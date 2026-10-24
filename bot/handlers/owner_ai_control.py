@@ -493,6 +493,11 @@ async def _run_request(message: Message, session: AsyncSession, prompt: str) -> 
             return "Owner action classify nahi ho saka, isliye kuch execute nahi hua. Request ko target user aur group ke saath dobara likho."
         return await _answer_owner_question(prompt)
     action = intent["action"]
+    if action == "unsupported":
+        lowered_prompt = prompt.casefold()
+        lookup_hints = ("telegram id", " id", "username", "who is", "who's", "kaun hai", "profile", "details", "member", "user", "naam", "name", "ki id", "ka id")
+        if "@" in prompt or any(hint in lowered_prompt for hint in lookup_hints):
+            return await _lookup_user(session, prompt)
     if action == "report_today":
         return await _today_report(session)
     if action == "list_groups":
