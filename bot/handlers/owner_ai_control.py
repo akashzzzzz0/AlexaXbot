@@ -637,6 +637,29 @@ async def is_owner_ai_message(message: Message) -> bool:
     )
 
 
+async def is_owner_direct_ai_message(message: Message) -> bool:
+    text = (message.text or "").strip()
+    return bool(
+        message.from_user
+        and _is_owner(message.from_user.id)
+        and message.chat.type == ChatType.PRIVATE
+        and text
+        and not text.startswith("/")
+    )
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text, is_owner_direct_ai_message)
+async def owner_ai_direct_dm(message: Message, db_session: AsyncSession, **kwargs):
+    # When Global AI is ON, owner can ask Alexa from a plain DM without opening the panel first.
+    # When OFF, pass the message to normal casual AI chat instead.
+    if not await _global_ai_enabled(db_session):
+        from bot.handlers.ai_chat import alexa_ai_chat
+        await alexa_ai_chat(message)
+        return
+    result = await _run_request(message, db_session, (message.text or "").strip())
+    await message.answer(result, parse_mode="HTML", disable_web_page_preview=True)
+
+
 @router.message(
     F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}),
     F.text,
