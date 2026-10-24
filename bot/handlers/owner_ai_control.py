@@ -16,11 +16,12 @@ from aiogram.enums import ChatType
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
-from sqlalchemy import func, select
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from sqlalchemy import func, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import get_gemini_api_key, settings
-from bot.database.models import Group, GroupMember, GroupSettings, SecuritySettings, User, Warning
+from bot.database.models import GlobalSetting, Group, GroupMember, GroupSettings, SecuritySettings, User, Warning
 from bot.services.moderation_service import ban_user, unban_user, kick_user, mute_user, unmute_user, warn_user
 
 router = Router(name="owner_ai_control")
@@ -36,6 +37,51 @@ class OwnerAIState(StatesGroup):
 
 def _is_owner(user_id: int | None) -> bool:
     return bool(user_id and settings.effective_owner_id and user_id == settings.effective_owner_id)
+
+
+async def _global_ai_enabled(session: AsyncSession) -> bool:
+    row = await session.get(GlobalSetting, "owner_ai_enabled")
+    return row is None or row.value == "1"
+
+
+async def _set_global_ai_enabled(session: AsyncSession, enabled: bool) -> None:
+    row = await session.get(GlobalSetting, "owner_ai_enabled")
+    if row is None:
+        session.add(GlobalSetting(key="owner_ai_enabled", value="1" if enabled else "0"))
+    else:
+        row.value = "1" if enabled else "0"
+    await session.commit()
+
+
+async def _lookup_user(session: AsyncSession, prompt: str) -> str:
+    username = re.search(r"(?<!\w)@([A-Za-z0-9_]{5,32})\b", prompt)
+    numeric = re.search(r"(?<!\d)(\d{5,20})(?!\d)", prompt)
+    if numeric:
+        user = await session.get(User, int(numeric.group(1)))
+        rows = [user] if user else []
+    elif username:
+        user = await session.scalar(select(User).where(func.lower(User.username) == username.group(1).casefold()))
+        rows = [user] if user else []
+    else:
+        query = re.sub(r"(?i)\b(please|alexa|find|search|lookup|look up|who is|tell me|show me|user|member|id|telegram|ki|ka|ke|hai|he|batao|btao|mujhe|iska|iski|naam|name|details|profile|about)\b", " ", prompt)
+        query = re.sub(r"\s+", " ", query).strip(" @#:-")
+        if len(query) < 2:
+            return "Kis user ka naam, @username ya Telegram ID check karni hai?"
+        rows = list((await session.scalars(select(User).where(or_(
+            func.lower(User.first_name).contains(query.casefold()),
+            func.lower(User.last_name).contains(query.casefold()),
+            func.lower(User.username).contains(query.casefold()),
+        )).order_by(User.first_name.asc()).limit(10))).all())
+    if not rows:
+        return "Is naam/ID ka record Alexa ke saved users mein nahi mila. Main Telegram ke tamam users ki private/global directory access nahi kar sakti; user ko bot/group se interact karna hoga taake record ban sake."
+    lines = ["🔎 <b>Alexa saved-user search</b>"]
+    for user in rows:
+        if not user:
+            continue
+        name = html.escape(" ".join(x for x in [user.first_name, user.last_name] if x) or "Unknown")
+        username_text = f" (@{html.escape(user.username)})" if user.username else ""
+        lines.append(f"\n• <b>{name}</b>{username_text}\n  🆔 <code>{user.id}</code>\n  DM started: <b>{'Yes' if user.dm_started else 'No'}</b>")
+    return "\n".join(lines)
 
 
 async def _explicitly_addressed(message: Message) -> bool:
@@ -74,10 +120,10 @@ async def _classify_request(text: str) -> dict:
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     instructions = (
         "Classify the user's Roman Urdu/English request into JSON only. "
-        "Allowed action values: report_today, list_groups, group_status, lock_content, unlock_content, ban, mute, kick, promote, demote, demote_self, promote_self, make_bot_admin, unban, unmute, warn, reset_warnings, help, unsupported. "
+        "Allowed action values: report_today, list_groups, lookup_user, group_status, lock_content, unlock_content, ban, mute, kick, promote, demote, demote_self, promote_self, make_bot_admin, unban, unmute, warn, reset_warnings, help, unsupported. "
         "Schema: {\"action\": string, \"type\": string, \"duration_seconds\": integer, \"reason\": string}. "
         "For lock/unlock, type must be one of text, links, photos, videos, stickers, all. "
-        "For global daily user counts choose report_today. For listing active registered groups choose list_groups. "
+        "For global daily user counts choose report_today. For listing active registered groups choose list_groups. For a user's saved name, username or Telegram ID choose lookup_user. "
         "For current chat bot permissions/status choose group_status. If owner says remove me/myself from admin, choose demote_self. If owner says make me/myself admin, choose promote_self. If owner asks to make Alexa/the bot an admin, choose make_bot_admin (never pretend the bot can promote itself). For ban/mute/kick/promote/demote/unban/unmute/warn/reset warnings choose the matching action only when clearly requested. Mute duration is seconds, default 3600. Keep reason short. Target is resolved separately from an explicit mention, reply, or user ID. If not clearly supported choose unsupported. "
         "Never output code, commands, explanations, or extra JSON fields."
     )
@@ -95,7 +141,7 @@ async def _classify_request(text: str) -> dict:
     result = json.loads(raw)
     action = result.get("action")
     kind = str(result.get("type", "")).lower()
-    allowed = {"report_today", "list_groups", "group_status", "lock_content", "unlock_content", "ban", "mute", "kick", "promote", "demote", "demote_self", "promote_self", "make_bot_admin", "unban", "unmute", "warn", "reset_warnings", "help", "unsupported"}
+    allowed = {"report_today", "list_groups", "lookup_user", "group_status", "lock_content", "unlock_content", "ban", "mute", "kick", "promote", "demote", "demote_self", "promote_self", "make_bot_admin", "unban", "unmute", "warn", "reset_warnings", "help", "unsupported"}
     if action not in allowed:
         return {"action": "unsupported", "type": ""}
     if action in {"lock_content", "unlock_content"} and kind not in {"text", "links", "photos", "videos", "stickers", "all"}:
@@ -369,6 +415,8 @@ async def _run_request(message: Message, session: AsyncSession, prompt: str) -> 
         return await _today_report(session)
     if action == "list_groups":
         return await _groups_report(session)
+    if action == "lookup_user":
+        return await _lookup_user(session, prompt)
     if action == "group_status":
         return await _group_status(message)
     if action in {"lock_content", "unlock_content"}:
