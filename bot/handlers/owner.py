@@ -58,9 +58,10 @@ def owner_kb(_=None) -> object:
     builder.button(text=f"{'🟢 Disable' if _maintenance_mode else '🔧 Enable'} Maintenance", callback_data="owner:maintenance")
     builder.button(text="👤 User List", callback_data="owner:users")
     builder.button(text="📩 User Messages", callback_data="owner:inbox")
+    builder.button(text="🧠 Global AI Control", callback_data="owner:ai")
     builder.button(text="📨 Message Selected Groups", callback_data="owner:group_message")
     builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
-    builder.adjust(2, 2, 2, 2, 2, 2, 2, 2)
+    builder.adjust(2, 2, 2, 2, 2, 2, 2, 2, 1)
     return builder.as_markup()
 
 
