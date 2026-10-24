@@ -440,17 +440,68 @@ async def _run_request(message: Message, session: AsyncSession, prompt: str) -> 
     )
 
 
+def _ai_control_kb(enabled: bool):
+    builder = InlineKeyboardBuilder()
+    builder.button(text=("🟢 Global AI: ON" if enabled else "🔴 Global AI: OFF"), callback_data="owner:ai_toggle")
+    builder.button(text="💬 Ask Alexa / Run Request", callback_data="owner:ai_ask")
+    builder.button(text="👑 Owner Panel", callback_data="owner:menu")
+    builder.adjust(1, 1, 1)
+    return builder.as_markup()
+
+
 @router.callback_query(F.data == "owner:ai")
-async def owner_ai_panel(callback: CallbackQuery, state: FSMContext):
+async def owner_ai_panel(callback: CallbackQuery, db_session: AsyncSession):
     if not _is_owner(callback.from_user.id):
         await callback.answer("Owner only.", show_alert=True)
         return
-    await state.set_state(OwnerAIState.waiting_prompt)
+    enabled = await _global_ai_enabled(db_session)
     await callback.message.answer(
         "🧠 <b>Alexa Global AI Control</b>\n\n"
-        "Apni request normal Roman Urdu ya English mein bhejo. Global reports yahan chalengi. "
-        "Group-specific actions ke liye wohi instruction us group mein Alexa ko address karke do.\n\n"
-        "Try: <code>Aaj kitne naye users aaye?</code>",
+        f"Status: <b>{'ON' if enabled else 'OFF'}</b>\n"
+        "ON: owner requests DM ya kisi bhi chat se registered target group par run ho sakti hain, "
+        "jab Alexa us group mein admin ho aur required permission milti ho. Normal members ki casual AI chat alag rahegi.\n"
+        "OFF: owner AI commands band; normal AI chat aur baqi bot features apni settings ke mutabiq chalte rahenge.\n\n"
+        "User lookup sirf Alexa ke saved/recorded users se hoga—Telegram ki private/global directory ka access nahi hota.",
+        parse_mode="HTML", reply_markup=_ai_control_kb(enabled),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner:ai_toggle")
+async def owner_ai_toggle(callback: CallbackQuery, db_session: AsyncSession):
+    if not _is_owner(callback.from_user.id):
+        await callback.answer("Owner only.", show_alert=True)
+        return
+    enabled = not await _global_ai_enabled(db_session)
+    await _set_global_ai_enabled(db_session, enabled)
+    await callback.message.edit_text(
+        "🧠 <b>Alexa Global AI Control</b>\n\n"
+        f"Status: <b>{'ON 🟢' if enabled else 'OFF 🔴'}</b>\n"
+        "ON par owner global request aur target group actions use kar sakta hai. OFF par owner AI control band rahega; "
+        "normal AI chat aur doosre bot features unchanged rahenge.\n\n"
+        "User details Alexa ke saved records se milengi, na ke Telegram ki private/global directory se.",
+        parse_mode="HTML", reply_markup=_ai_control_kb(enabled),
+    )
+    await callback.answer("Global AI " + ("ON" if enabled else "OFF"))
+
+
+@router.callback_query(F.data == "owner:ai_ask")
+async def owner_ai_ask(callback: CallbackQuery, state: FSMContext, db_session: AsyncSession):
+    if not _is_owner(callback.from_user.id):
+        await callback.answer("Owner only.", show_alert=True)
+        return
+    if not await _global_ai_enabled(db_session):
+        await callback.answer("Pehle Global AI ON karo.", show_alert=True)
+        return
+    await state.set_state(OwnerAIState.waiting_prompt)
+    await callback.message.answer(
+        "🧠 <b>Alexa ready hai.</b> Apni request normal Roman Urdu/English mein likho.\n\n"
+        "Examples:\n"
+        "• <code>Ali ka saved Telegram ID batao</code>\n"
+        "• <code>Active groups ki list do</code>\n"
+        "• <code>@user ko mute karo in My Group</code>\n"
+        "• <code>My Group mein links lock karo</code>\n\n"
+        "Remote action mein registered group ka naam ya ID zaroor likhna. /cancel se close karo.",
         parse_mode="HTML",
     )
     await callback.answer()
@@ -465,6 +516,10 @@ async def owner_ai_panel_prompt(message: Message, state: FSMContext, db_session:
     if prompt.lower() in {"/cancel", "cancel", "close"}:
         await state.clear()
         await message.answer("AI Control session closed.")
+        return
+    if not await _global_ai_enabled(db_session):
+        await state.clear()
+        await message.answer("Global AI Control OFF hai. Owner Panel → Global AI Control se ON karo.")
         return
     status = await message.answer("🧠 Request check kar rahi hoon…")
     result = await _run_request(message, db_session, prompt)
@@ -490,6 +545,8 @@ async def is_owner_ai_message(message: Message) -> bool:
     is_owner_ai_message,
 )
 async def owner_ai_group_prompt(message: Message, db_session: AsyncSession, **kwargs):
+    if not await _global_ai_enabled(db_session):
+        return
     prompt = _strip_prefix(message.text or "")
     if not prompt and message.reply_to_message:
         prompt = (message.reply_to_message.text or "").strip()
