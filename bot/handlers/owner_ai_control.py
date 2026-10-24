@@ -53,6 +53,32 @@ async def _set_global_ai_enabled(session: AsyncSession, enabled: bool) -> None:
     await session.commit()
 
 
+async def _find_target_group(message: Message, session: AsyncSession, prompt: str):
+    """Resolve a registered group named in the request, or use the current group."""
+    groups = (await session.scalars(
+        select(Group).where(Group.is_active.is_(True)).order_by(Group.title.asc())
+    )).all()
+    lowered = (prompt or "").casefold()
+    # An explicit registered group title always wins over the current chat.
+    for group in groups:
+        if group.title and group.title.casefold() in lowered:
+            return group
+    numeric = re.search(r"(?<!\\d)(-100\\d{8,}|\\d{5,20})(?!\\d)", prompt or "")
+    if numeric:
+        try:
+            group = await session.get(Group, int(numeric.group(1)))
+            if group and group.is_active:
+                return group
+        except (TypeError, ValueError):
+            pass
+    if message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
+        current = await session.get(Group, message.chat.id)
+        if current and current.is_active:
+            return current
+        return Group(id=message.chat.id, title=message.chat.title or "Current group", type="group")
+    return None
+
+
 async def _lookup_user(session: AsyncSession, prompt: str) -> str:
     username = re.search(r"(?<!\w)@([A-Za-z0-9_]{5,32})\b", prompt)
     numeric = re.search(r"(?<!\d)(\d{5,20})(?!\d)", prompt)
@@ -423,12 +449,15 @@ async def _run_request(message: Message, session: AsyncSession, prompt: str) -> 
         return await _groups_report(session)
     if action == "lookup_user":
         return await _lookup_user(session, prompt)
-    if action == "group_status":
-        return await _group_status(message)
-    if action in {"lock_content", "unlock_content"}:
-        return await _set_content_lock(message, session, action, intent["type"])
-    if action in {"ban", "mute", "kick", "promote", "promote_self", "demote", "demote_self", "make_bot_admin", "unban", "unmute", "warn", "reset_warnings"}:
-        return await _moderation_action(message, session, action, intent, prompt)
+    if action in {"group_status", "lock_content", "unlock_content", "ban", "mute", "kick", "promote", "promote_self", "demote", "demote_self", "make_bot_admin", "unban", "unmute", "warn", "reset_warnings"}:
+        target_group = await _find_target_group(message, session, prompt)
+        if target_group is None:
+            return "Remote action ke liye registered group ka exact naam ya numeric group ID likho. Example: <code>@user ko mute karo in My Group</code>."
+        if action == "group_status":
+            return await _group_status(message, target_group.id, target_group.title)
+        if action in {"lock_content", "unlock_content"}:
+            return await _set_content_lock(message, session, action, intent["type"], target_group.id, target_group.title)
+        return await _moderation_action(message, session, action, intent, prompt, target_group.id, target_group.title)
     if action == "help":
         return (
             "👑 <b>Owner AI abhi ye requests support karti hai:</b>\n"
