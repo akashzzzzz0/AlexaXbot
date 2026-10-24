@@ -348,15 +348,15 @@ async def _run_request(message: Message, session: AsyncSession, prompt: str) -> 
     # Fast deterministic path for the owner's common self-admin requests.
     # These explicit phrases don't need an LLM round-trip.
     normalized = re.sub(r"[^a-z0-9@ ]+", " ", (prompt or "").casefold())
-    normalized = re.sub(r"\\s+", " ", normalized).strip()
+    normalized = re.sub(r"\s+", " ", normalized).strip()
     self_admin_phrases = (
-        r"\\b(?:mujhe|mujhko|me|myself)\\s+(?:group\\s+)?admin\\s+(?:banao|bana do|make|promote)\\b",
-        r"\\b(?:make|promote)\\s+me\\s+(?:a\\s+)?admin\\b",
-        r"\\b(?:mujhe|mujhko|me|myself)\\s+(?:group\\s+)?admin\\s+se\\s+(?:hatao|remove|demote)\\b",
-        r"\\b(?:remove|demote)\\s+me\\s+(?:from\\s+)?admin\\b",
+        r"\b(?:mujhe|mujhko|me|myself)\s+(?:group\s+)?admin\s+(?:banao|bana do|make|promote)\b",
+        r"\b(?:make|promote)\s+me\s+(?:a\s+)?admin\b",
+        r"\b(?:mujhe|mujhko|me|myself)\s+(?:group\s+)?admin\s+se\s+(?:hatao|remove|demote)\b",
+        r"\b(?:remove|demote)\s+me\s+(?:from\s+)?admin\b",
     )
     if any(re.search(pattern, normalized) for pattern in self_admin_phrases):
-        action = "demote_self" if re.search(r"\\b(?:se\\s+hatao|remove|demote)\\b", normalized) else "promote_self"
+        action = "demote_self" if re.search(r"\b(?:se\s+hatao|remove|demote)\b", normalized) else "promote_self"
         intent = {"action": action, "type": "", "duration_seconds": 3600, "reason": "Owner self-admin request"}
         return await _moderation_action(message, session, action, intent, prompt)
     try:
