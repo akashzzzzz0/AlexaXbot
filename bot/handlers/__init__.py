@@ -28,6 +28,8 @@ def get_main_router() -> Router:
     router.include_router(owner_group_message.router)
     # Group Activity owns the five-section owner submenu; register before legacy owner callbacks.
     router.include_router(owner_group_activity.router)
+    # Owner AI callback must precede owner's broad owner:* callback fallback.
+    router.include_router(owner_ai_control.router)
     router.include_router(owner.router)
     router.include_router(alexa_games.router)
     router.include_router(group_tools.router)
@@ -35,8 +37,7 @@ def get_main_router() -> Router:
     router.include_router(scam_review.router)
     router.include_router(ultra_vip.router)
     router.include_router(ai.router)
-    # Owner AI gets first chance at explicitly addressed owner requests, before casual AI chat.
-    router.include_router(owner_ai_control.router)
+    # General casual AI chat runs after owner action handling.
     router.include_router(ai_chat.router)
     # Keep welcome/join-leave/captcha processing, but after feature handlers.
     router.include_router(welcome.router)
