@@ -63,7 +63,7 @@ async def _find_target_group(message: Message, session: AsyncSession, prompt: st
     for group in groups:
         if group.title and group.title.casefold() in lowered:
             return group
-    numeric = re.search(r"(?<!\\d)(-100\\d{8,}|-\\d{5,20})(?!\\d)", prompt or "")
+    numeric = re.search(r"(?<!\d)(-100\d{8,}|-\d{5,20})(?!\d)", prompt or "")
     if numeric:
         try:
             group = await session.get(Group, int(numeric.group(1)))
@@ -471,12 +471,15 @@ async def _run_request(message: Message, session: AsyncSession, prompt: str) -> 
     if any(re.search(pattern, normalized) for pattern in self_admin_phrases):
         action = "demote_self" if re.search(r"\b(?:se\s+hatao|remove|demote)\b", normalized) else "promote_self"
         intent = {"action": action, "type": "", "duration_seconds": 3600, "reason": "Owner self-admin request"}
-        return await _moderation_action(message, session, action, intent, prompt)
+        target_group = await _find_target_group(message, session, prompt)
+        if target_group is None:
+            return "Apna admin role change karne ke liye target registered group ka naam/ID likho."
+        return await _moderation_action(message, session, action, intent, prompt, target_group.id, target_group.title)
     try:
         intent = await _classify_request(prompt)
     except Exception as exc:
         logger.warning("Owner AI request classification failed: %s", type(exc).__name__)
-        action_words = r"\\b(ban|mute|kick|promote|demote|unban|unmute|warn|lock|unlock|admin|hatao|karo|kar do|remove|restrict)\\b"
+        action_words = r"\b(ban|mute|kick|promote|demote|unban|unmute|warn|lock|unlock|admin|hatao|karo|kar do|remove|restrict)\b"
         if re.search(action_words, normalized):
             return "Owner action classify nahi ho saka, isliye kuch execute nahi hua. Request ko target user aur group ke saath dobara likho."
         return await _answer_owner_question(prompt)
@@ -507,7 +510,7 @@ async def _run_request(message: Message, session: AsyncSession, prompt: str) -> 
             "Remote actions ke liye group ka naam/ID aur member ka @username, ID, ya group message ka reply zaroori hai. "
             "Har action se pehle Alexa admin status aur permissions verify karti hai."
         )
-    action_words = r"\\b(ban|mute|kick|promote|demote|unban|unmute|warn|lock|unlock|admin|hatao|remove|restrict)\\b"
+    action_words = r"\b(ban|mute|kick|promote|demote|unban|unmute|warn|lock|unlock|admin|hatao|remove|restrict)\b"
     if re.search(action_words, normalized):
         return "Is specific bot action ka safe handler abhi connected nahi, isliye maine kuch execute nahi kiya."
     return await _answer_owner_question(prompt)
