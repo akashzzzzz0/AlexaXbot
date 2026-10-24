@@ -8,6 +8,7 @@ from bot.database.models import (
     GroupMember, Warning, UserNote, ActionLog, GroupSettings
 )
 import structlog
+from html import escape as html_escape
 
 logger = structlog.get_logger()
 
@@ -60,6 +61,62 @@ async def log_action(
     session.add(log)
 
 
+
+async def _announce_automatic_action(
+    bot: Bot,
+    group_id: int,
+    user_id: int,
+    action: str,
+    reason: str,
+    duration: Optional[int] = None,
+) -> None:
+    """Post a clear audit message when ALEXA automatically mutes or bans a member."""
+    try:
+        target = f'<a href="tg://user?id={user_id}">Member</a> (<code>{user_id}</code>)'
+        reason_text = html_escape((reason or "").strip() or "No reason provided")
+        if action == "mute":
+            if duration and duration > 0:
+                minutes = duration // 60
+                if minutes >= 60 and minutes % 60 == 0:
+                    duration_text = f"{minutes // 60} hour(s)"
+                elif minutes >= 60:
+                    duration_text = f"{minutes // 60} hour(s) {minutes % 60} minute(s)"
+                else:
+                    duration_text = f"{max(1, minutes)} minute(s)"
+            else:
+                duration_text = "Indefinite"
+            heading = "🔇 MEMBER MUTED BY ALEXA"
+        else:
+            duration_text = "Permanent until an admin unbans the member"
+            heading = "🚫 MEMBER BANNED BY ALEXA"
+        await bot.send_message(
+            group_id,
+            f"<b>{heading}</b>\n"
+            f"👤 Member: {target}\n"
+            f"📝 Full reason: <code>{reason_text}</code>\n"
+            f"⏳ Duration: <b>{html_escape(duration_text)}</b>",
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Could not post automatic moderation reason",
+            group_id=group_id,
+            user_id=user_id,
+            action=action,
+            error=str(exc),
+        )
+
+
+def _should_announce_automatic_action(bot: Bot, admin_id: int, reason: str) -> bool:
+    # Automated protection paths use the bot's own ID. Warning-limit escalations
+    # are triggered by a moderator's warning but enforced automatically by ALEXA.
+    return admin_id == getattr(bot, "id", None) or (reason or "").strip() in {
+        "Max warnings reached",
+        "Warning limit reached",
+    }
+
+
 async def ban_user(
     bot: Bot,
     session: AsyncSession,
@@ -84,6 +141,8 @@ async def ban_user(
             member.is_banned = True
             member.ban_reason = reason
         await log_action(session, group_id, "ban", user_id, admin_id, {"reason": reason})
+        if _should_announce_automatic_action(bot, admin_id, reason):
+            await _announce_automatic_action(bot, group_id, user_id, "ban", reason)
         return True
     except Exception as e:
         logger.error("Ban failed", error=str(e), user_id=user_id, group_id=group_id)
@@ -164,6 +223,8 @@ async def mute_user(
         member.is_muted = True
         member.mute_until = until_dt
         await log_action(session, group_id, "mute", user_id, admin_id, {"duration": duration, "reason": reason})
+        if _should_announce_automatic_action(bot, admin_id, reason):
+            await _announce_automatic_action(bot, group_id, user_id, "mute", reason, duration)
         return True
     except Exception as e:
         logger.error("Mute failed", error=str(e))
