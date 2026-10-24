@@ -1,5 +1,5 @@
 from aiogram import Router
-from bot.handlers import start, security, moderation, economy, games, duels, statistics, settings, help, affiliate, owner, owner_group_message, owner_group_activity, force_join, welcome, tournaments, alexa_games, group_tools, community_shield, scam_review, ultra_vip, ai, ai_chat, missing_games
+from bot.handlers import start, security, moderation, economy, games, duels, statistics, settings, help, affiliate, owner, owner_group_message, owner_group_activity, force_join, welcome, tournaments, alexa_games, group_tools, community_shield, scam_review, ultra_vip, ai, ai_chat, owner_ai_control, missing_games
 from bot.handlers.auto_delete_middleware import StartMenuAutoDeleteMessageMiddleware, StartMenuAutoDeleteCallbackMiddleware
 
 
@@ -35,6 +35,8 @@ def get_main_router() -> Router:
     router.include_router(scam_review.router)
     router.include_router(ultra_vip.router)
     router.include_router(ai.router)
+    # Owner AI gets first chance at explicitly addressed owner requests, before casual AI chat.
+    router.include_router(owner_ai_control.router)
     router.include_router(ai_chat.router)
     # Keep welcome/join-leave/captcha processing, but after feature handlers.
     router.include_router(welcome.router)
