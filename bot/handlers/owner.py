@@ -704,29 +704,90 @@ async def owner_global_controls(callback: CallbackQuery, _: callable, db_session
             emergency_on += int(bool(security.emergency_mode))
             anti_spam_on += int(bool(security.anti_spam))
             anti_flood_on += int(bool(security.anti_flood))
+    total = len(groups)
+    def toggle_label(name: str, enabled_count: int) -> str:
+        if total and enabled_count == total:
+            return f"🟢 {name}: ON · Tap to turn OFF"
+        if enabled_count:
+            return f"🟡 {name}: MIXED · Tap to turn ON everywhere"
+        return f"🔴 {name}: OFF · Tap to turn ON"
+
     builder = InlineKeyboardBuilder()
-    for label, field, val in [
-        ("🟢 Anti-Spam ON — All Groups", "anti_spam", "1"),
-        ("🔴 Anti-Spam OFF — All Groups", "anti_spam", "0"),
-        ("🟢 Anti-Flood ON — All Groups", "anti_flood", "1"),
-        ("🔴 Anti-Flood OFF — All Groups", "anti_flood", "0"),
-        ("🚨 Lockdown ON — All Groups", "emergency_mode", "1"),
-        ("🔓 Lockdown OFF — All Groups", "emergency_mode", "0"),
+    for label, field, enabled_count in [
+        ("Anti-Spam", "anti_spam", anti_spam_on),
+        ("Anti-Flood", "anti_flood", anti_flood_on),
+        ("Lockdown", "emergency_mode", emergency_on),
     ]:
-        builder.button(text=label, callback_data=f"owner:global_set:{field}:{val}")
+        builder.button(
+            text=toggle_label(label, enabled_count),
+            callback_data=f"owner:global_toggle:{field}",
+        )
     builder.button(text="👥 Per-Group Settings", callback_data="owner:groups")
     builder.button(text="◀️ Owner Panel", callback_data="owner:menu")
     builder.adjust(1)
     await callback.message.edit_text(
         "🌐 <b>GLOBAL CONTROLS</b>\n\n"
-        f"Active groups: <b>{format_number(len(groups))}</b>\n"
+        f"Active groups: <b>{format_number(total)}</b>\n"
         f"Anti-Spam enabled: <b>{format_number(anti_spam_on)}</b> groups\n"
         f"Anti-Flood enabled: <b>{format_number(anti_flood_on)}</b> groups\n"
         f"Emergency Lockdown enabled: <b>{format_number(emergency_on)}</b> groups\n\n"
-        "⚠️ Changes below apply to every active registered group. Lockdown requires Delete Messages permission.",
+        "Each control is a single toggle for all active registered groups. If every group is ON, tap to turn it OFF everywhere; otherwise tap to turn it ON everywhere. "
+        "Lockdown requires Delete Messages permission in each group.",
         parse_mode="HTML", reply_markup=builder.as_markup()
     )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner:global_toggle:"))
+async def owner_global_toggle(callback: CallbackQuery, _: callable, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Not available.", show_alert=True)
+        return
+    try:
+        _, _, field = callback.data.split(":", 2)
+    except ValueError:
+        await callback.answer("Invalid global setting.", show_alert=True)
+        return
+    if field not in {"anti_spam", "anti_flood", "emergency_mode"}:
+        await callback.answer("Invalid global setting.", show_alert=True)
+        return
+
+    groups = await _active_groups(db_session)
+    if not groups:
+        await callback.answer("No active registered groups found.", show_alert=True)
+        return
+
+    # A single button acts as a true global toggle: mixed/off becomes ON everywhere;
+    # only when all groups are ON does it turn the setting OFF everywhere.
+    enabled_count = 0
+    for group in groups:
+        security = await db_session.scalar(
+            select(SecuritySettings).where(SecuritySettings.group_id == group.id)
+        )
+        if security and bool(getattr(security, field, False)):
+            enabled_count += 1
+    enabled = enabled_count != len(groups)
+
+    try:
+        for group in groups:
+            security = await db_session.scalar(
+                select(SecuritySettings).where(SecuritySettings.group_id == group.id)
+            )
+            if security is None:
+                security = SecuritySettings(group_id=group.id)
+                db_session.add(security)
+            setattr(security, field, enabled)
+        await db_session.commit()
+    except Exception as exc:
+        await db_session.rollback()
+        logger.warning("owner_global_toggle_failed", field=field, error=str(exc))
+        await callback.answer("Could not apply global setting.", show_alert=True)
+        return
+
+    await owner_global_controls(callback, _, db_session)
+    await callback.answer(
+        f"{field.replace('_', ' ').title()} turned {'ON' if enabled else 'OFF'} for all active groups."
+    )
 
 
 @router.callback_query(F.data.startswith("owner:global_set:"))
