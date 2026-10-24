@@ -359,7 +359,7 @@ async def _run_request(message: Message, session: AsyncSession, prompt: str) -> 
         return await _group_status(message)
     if action in {"lock_content", "unlock_content"}:
         return await _set_content_lock(message, session, action, intent["type"])
-    if action in {"ban", "mute", "kick", "promote", "demote", "unban", "unmute", "warn", "reset_warnings"}:
+    if action in {"ban", "mute", "kick", "promote", "demote", "demote_self", "make_bot_admin", "unban", "unmute", "warn", "reset_warnings"}:
         return await _moderation_action(message, session, action, intent, prompt)
     if action == "help":
         return (
