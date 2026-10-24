@@ -74,11 +74,11 @@ async def _classify_request(text: str) -> dict:
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     instructions = (
         "Classify the user's Roman Urdu/English request into JSON only. "
-        "Allowed action values: report_today, list_groups, group_status, lock_content, unlock_content, ban, mute, kick, promote, demote, demote_self, make_bot_admin, unban, unmute, warn, reset_warnings, help, unsupported. "
+        "Allowed action values: report_today, list_groups, group_status, lock_content, unlock_content, ban, mute, kick, promote, demote, demote_self, promote_self, make_bot_admin, unban, unmute, warn, reset_warnings, help, unsupported. "
         "Schema: {\"action\": string, \"type\": string, \"duration_seconds\": integer, \"reason\": string}. "
         "For lock/unlock, type must be one of text, links, photos, videos, stickers, all. "
         "For global daily user counts choose report_today. For listing active registered groups choose list_groups. "
-        "For current chat bot permissions/status choose group_status. If owner says remove me/myself from admin, choose demote_self. If owner asks to make Alexa/the bot an admin, choose make_bot_admin (never pretend the bot can promote itself). For ban/mute/kick/promote/demote/unban/unmute/warn/reset warnings choose the matching action only when clearly requested. Mute duration is seconds, default 3600. Keep reason short. Target is resolved separately from an explicit mention, reply, or user ID. If not clearly supported choose unsupported. "
+        "For current chat bot permissions/status choose group_status. If owner says remove me/myself from admin, choose demote_self. If owner says make me/myself admin, choose promote_self. If owner asks to make Alexa/the bot an admin, choose make_bot_admin (never pretend the bot can promote itself). For ban/mute/kick/promote/demote/unban/unmute/warn/reset warnings choose the matching action only when clearly requested. Mute duration is seconds, default 3600. Keep reason short. Target is resolved separately from an explicit mention, reply, or user ID. If not clearly supported choose unsupported. "
         "Never output code, commands, explanations, or extra JSON fields."
     )
     payload = {
@@ -95,7 +95,7 @@ async def _classify_request(text: str) -> dict:
     result = json.loads(raw)
     action = result.get("action")
     kind = str(result.get("type", "")).lower()
-    allowed = {"report_today", "list_groups", "group_status", "lock_content", "unlock_content", "ban", "mute", "kick", "promote", "demote", "demote_self", "make_bot_admin", "unban", "unmute", "warn", "reset_warnings", "help", "unsupported"}
+    allowed = {"report_today", "list_groups", "group_status", "lock_content", "unlock_content", "ban", "mute", "kick", "promote", "demote", "demote_self", "promote_self", "make_bot_admin", "unban", "unmute", "warn", "reset_warnings", "help", "unsupported"}
     if action not in allowed:
         return {"action": "unsupported", "type": ""}
     if action in {"lock_content", "unlock_content"} and kind not in {"text", "links", "photos", "videos", "stickers", "all"}:
@@ -204,7 +204,7 @@ async def _set_content_lock(message: Message, session: AsyncSession, action: str
 
 async def _resolve_target(message: Message, session: AsyncSession, prompt: str, action: str = ""):
     """Resolve explicit target, or the owner for an explicit self-demotion request."""
-    if action == "demote_self" and message.from_user:
+    if action in {"demote_self", "promote_self"} and message.from_user:
         tg = message.from_user
         target = await session.get(User, tg.id)
         if target is None:
@@ -252,7 +252,7 @@ async def _moderation_action(message: Message, session: AsyncSession, action: st
         return "Member ko Telegram mention se select karo, uske message ka reply do, ya uska numeric user ID likho."
     if target.id == message.bot.id:
         return "Main apne aap par ye action nahi laga sakti."
-    if target.id == settings.effective_owner_id and action != "demote_self":
+    if target.id == settings.effective_owner_id and action not in {"demote_self", "promote_self"}:
         return "Configured bot owner par moderation action execute nahi kiya gaya, siwaye aapki explicit self-demotion request ke."
     try:
         bot_member = await message.bot.get_chat_member(message.chat.id, message.bot.id)
@@ -266,14 +266,14 @@ async def _moderation_action(message: Message, session: AsyncSession, action: st
     needed = {
         "ban": "can_restrict_members", "kick": "can_restrict_members", "mute": "can_restrict_members",
         "unmute": "can_restrict_members", "unban": "can_restrict_members",
-        "promote": "can_promote_members", "demote": "can_promote_members",
+        "promote": "can_promote_members", "demote": "can_promote_members", "promote_self": "can_promote_members",
         "warn": "can_delete_messages", "reset_warnings": "can_delete_messages",
     }.get(action)
     if needed and not getattr(bot_member, needed, False):
         permission_name = {"can_restrict_members": "Ban/Restrict Members", "can_promote_members": "Add New Admins",
                            "can_delete_messages": "Delete Messages"}.get(needed, needed)
         return "Alexa ke paas " + permission_name + " permission nahi hai."
-    if target_status == "creator" and action in {"ban", "mute", "kick", "promote", "demote", "demote_self"}:
+    if target_status == "creator" and action in {"ban", "mute", "kick", "promote", "demote", "demote_self", "promote_self"}:
         return "Admin/owner par ye action execute nahi kiya; Telegram admin hierarchy ke rules apply hote hain."
     actor_id = settings.effective_owner_id or 0
     reason = intent.get("reason") or "Owner AI command"
@@ -311,7 +311,7 @@ async def _moderation_action(message: Message, session: AsyncSession, action: st
             member.warn_count = 0
         await session.commit()
         return "✅ Warnings reset for <a href='tg://user?id=" + str(target.id) + "'>" + html.escape(target.first_name) + "</a>."
-    elif action in {"promote", "demote", "demote_self"}:
+    elif action in {"promote", "promote_self", "demote", "demote_self"}:
         try:
             if action == "promote":
                 await message.bot.promote_chat_member(
@@ -328,7 +328,7 @@ async def _moderation_action(message: Message, session: AsyncSession, action: st
                     can_edit_messages=False, can_manage_topics=False,
                 )
             verified = await message.bot.get_chat_member(message.chat.id, target.id)
-            expected = "administrator" if action == "promote" else "member"
+            expected = "administrator" if action in {"promote", "promote_self"} else "member"
             ok = str(getattr(verified.status, "value", verified.status)) == expected
         except Exception:
             ok = False
@@ -339,7 +339,7 @@ async def _moderation_action(message: Message, session: AsyncSession, action: st
     verb = {
         "ban": "banned", "mute": "muted for " + str((intent.get("duration_seconds") or 3600) // 60) + " minutes",
         "kick": "kicked", "unban": "unbanned", "unmute": "unmuted",
-        "promote": "promoted to admin", "demote": "demoted", "demote_self": "removed from admin",
+        "promote": "promoted to admin", "promote_self": "promoted you to admin", "demote": "demoted", "demote_self": "removed from admin",
     }.get(action, action.replace("_", " "))
     return "✅ <b>" + html.escape(target.first_name or "Member") + "</b> " + html.escape(verb) + " successfully in <b>" + html.escape(message.chat.title or "this group") + "</b>."
 
@@ -359,7 +359,7 @@ async def _run_request(message: Message, session: AsyncSession, prompt: str) -> 
         return await _group_status(message)
     if action in {"lock_content", "unlock_content"}:
         return await _set_content_lock(message, session, action, intent["type"])
-    if action in {"ban", "mute", "kick", "promote", "demote", "demote_self", "make_bot_admin", "unban", "unmute", "warn", "reset_warnings"}:
+    if action in {"ban", "mute", "kick", "promote", "promote_self", "demote", "demote_self", "make_bot_admin", "unban", "unmute", "warn", "reset_warnings"}:
         return await _moderation_action(message, session, action, intent, prompt)
     if action == "help":
         return (
@@ -369,7 +369,7 @@ async def _run_request(message: Message, session: AsyncSession, prompt: str) -> 
             "• Current group mein Alexa ki permissions/status\n"
             "• Current group mein text/links/photos/videos/stickers/all lock ya unlock\n"
             "• Mention/reply wale member ko ban, mute, kick, promote, demote, unban, unmute, warn ya warnings reset\n"
-            "• Khud ko admin se demote karne ki request; Alexa ko admin banane ke liye group owner ko manually promote karna hoga\n\n"
+            "• Tumhein admin banana ya admin se hatana, agar Alexa ke paas Add New Admins permission ho; Alexa ko khud admin banane ke liye group owner ko manually promote karna hoga\n\n"
             "Baaki commands ko safely connect karne ke liye additional actions implement karne honge."
         )
     return (
