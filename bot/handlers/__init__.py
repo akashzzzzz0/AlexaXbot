@@ -1,5 +1,5 @@
 from aiogram import Router
-from bot.handlers import start, security, moderation, economy, games, duels, statistics, settings, help, affiliate, owner, owner_group_message, force_join, welcome, tournaments, alexa_games, group_tools, community_shield, scam_review, ultra_vip, ai, ai_chat, missing_games
+from bot.handlers import start, security, moderation, economy, games, duels, statistics, settings, help, affiliate, owner, owner_group_message, owner_group_activity, force_join, welcome, tournaments, alexa_games, group_tools, community_shield, scam_review, ultra_vip, ai, ai_chat, missing_games
 from bot.handlers.auto_delete_middleware import StartMenuAutoDeleteMessageMiddleware, StartMenuAutoDeleteCallbackMiddleware
 
 
@@ -26,6 +26,8 @@ def get_main_router() -> Router:
     router.include_router(affiliate.router)
     # Register this specific owner callback router before owner's catch-all callback.
     router.include_router(owner_group_message.router)
+    # Group Activity owns the five-section owner submenu; register before legacy owner callbacks.
+    router.include_router(owner_group_activity.router)
     router.include_router(owner.router)
     router.include_router(alexa_games.router)
     router.include_router(group_tools.router)
