@@ -873,7 +873,8 @@ async def cb_mod_command_hint(callback: CallbackQuery, db_session: AsyncSession,
         return
     kb = InlineKeyboardBuilder()
     for member, user in rows:
-        name = (user.first_name or user.username or str(user.id)).replace("\n", " ")[:30]        kb.button(text=f"{name} · {user.id}", callback_data=f"mod:target:{action}:{user.id}")
+        name = (user.first_name or user.username or str(user.id)).replace("\n", " ")[:30]
+        kb.button(text=f"{name} · {user.id}", callback_data=f"mod:target:{action}:{user.id}")
     kb.button(text="◀️ Back", callback_data="mod:menu")
     kb.adjust(1)
     try:
