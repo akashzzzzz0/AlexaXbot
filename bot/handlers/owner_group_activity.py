@@ -65,7 +65,7 @@ async def group_activity_menu(callback: CallbackQuery):
         "② Statistics — tracked members, messages and moderation counts\n"
         "③ Security — per-group security and content locks\n"
         "④ Group Actions — open a group's existing management controls\n"
-        "⑤ Activity Logs — recent recorded actions and outcomes\n\n"
+        "⑤ Activity Logs — recent recorded actions and outcomes\n\n",
         parse_mode="HTML",
         reply_markup=builder.as_markup(),
     )
