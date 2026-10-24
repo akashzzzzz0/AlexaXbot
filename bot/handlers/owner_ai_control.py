@@ -84,7 +84,15 @@ async def _find_target_group(message: Message, session: AsyncSession, prompt: st
         current = await session.get(Group, message.chat.id)
         if current and current.is_active:
             return current
-        return Group(id=message.chat.id, title=message.chat.title or "Current group", type="group")
+        current = Group(
+            id=message.chat.id,
+            title=message.chat.title or "Current group",
+            type=str(getattr(message.chat.type, "value", message.chat.type)),
+            is_active=True,
+        )
+        session.add(current)
+        await session.commit()
+        return current
     return None
 
 
