@@ -436,24 +436,19 @@ async def bio_unmute_after_profile_fix(callback: CallbackQuery, db_session: Asyn
         return
 
     # Verify that the latest mute for this member was specifically caused by bio-link protection.
-    recent_logs = (await db_session.execute(
+    latest_mute = await db_session.scalar(
         select(ActionLog)
         .where(
             ActionLog.group_id == group_id,
             ActionLog.user_id == user_id,
             ActionLog.action == "mute",
         )
-        .order_by(ActionLog.created_at.desc())
-        .limit(10)
-    )).scalars().all()
-    bio_mute = False
-    for log in recent_logs:
-        details = log.details or {}
-        reason = details.get("reason", "") if isinstance(details, dict) else ""
-        if reason:
-            bio_mute = reason == "Link found in profile bio (Bio Link Protection)"
-            break
-    if not bio_mute:
+        .order_by(ActionLog.created_at.desc(), ActionLog.id.desc())
+        .limit(1)
+    )
+    details = (latest_mute.details or {}) if latest_mute else {}
+    reason = details.get("reason", "") if isinstance(details, dict) else ""
+    if reason != "Link found in profile bio (Bio Link Protection)":
         await callback.answer("This mute was not caused by Bio Link Protection.", show_alert=True)
         return
 
