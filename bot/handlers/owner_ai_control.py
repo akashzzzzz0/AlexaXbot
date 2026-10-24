@@ -3,6 +3,7 @@
 Only explicitly addressed messages from the configured owner are considered.
 The model may classify requests, but execution is restricted to a small allowlist.
 """
+import html
 import json
 import logging
 import re
@@ -104,8 +105,8 @@ async def _classify_request(text: str) -> dict:
 async def _today_report(session: AsyncSession) -> str:
     now_local = datetime.now(_PK)
     start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
-    start_utc = start_local.astimezone(timezone.utc).replace(tzinfo=None)
-    end_utc = (start_local + timedelta(days=1)).astimezone(timezone.utc).replace(tzinfo=None)
+    start_utc = start_local.astimezone(timezone.utc)
+    end_utc = (start_local + timedelta(days=1)).astimezone(timezone.utc)
     new_users = await session.scalar(
         select(func.count(User.id)).where(User.created_at >= start_utc, User.created_at < end_utc)
     )
@@ -129,7 +130,7 @@ async def _groups_report(session: AsyncSession) -> str:
     )).all()
     if not rows:
         return "Abhi database mein koi active registered group nahi mila."
-    lines = [f"• {g.title} — <code>{g.id}</code>" for g in rows]
+    lines = [f"• {html.escape(g.title or \"Untitled\")} — <code>{g.id}</code>" for g in rows]
     more = "\n<i>Showing up to 30 groups.</i>" if len(rows) == 30 else ""
     return "🌐 <b>Active registered groups</b>\n\n" + "\n".join(lines) + more
 
@@ -197,7 +198,7 @@ async def _set_content_lock(message: Message, session: AsyncSession, action: str
         await session.rollback()
         return "❌ Lock setting save nahi ho saki. Dobara try karo."
     verb = "locked" if enabled else "unlocked"
-    return f"✅ <b>{lock_type.title()}</b> {verb} in <b>{message.chat.title or 'this group'}</b>."
+    return f"✅ <b>{html.escape(lock_type.title())}</b> {verb} in <b>{html.escape(message.chat.title or \"this group\")}</b>."
 
 
 async def _run_request(message: Message, session: AsyncSession, prompt: str) -> str:
