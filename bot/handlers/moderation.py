@@ -594,7 +594,8 @@ async def cmd_kick(message: Message, bot: Bot, _: callable, db_session: AsyncSes
         await message.reply("❌ Kick failed. Check ALEXA's Ban Users permission and the target's admin status.")
 
 
-@router.message(Command("mute"))async def cmd_mute(message: Message, bot: Bot, _: callable, db_session: AsyncSession, **kwargs):
+@router.message(Command("mute"))
+async def cmd_mute(message: Message, bot: Bot, _: callable, db_session: AsyncSession, **kwargs):
     if message.chat.type == "private":
         return
     target, args = await get_target_user(message, db_session)
