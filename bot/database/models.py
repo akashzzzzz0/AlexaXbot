@@ -12,6 +12,15 @@ class Base(DeclarativeBase):
     pass
 
 
+class GlobalSetting(Base):
+    """Small persistent key/value settings shared across all bot chats."""
+    __tablename__ = "global_settings"
+
+    key = Column(String(64), primary_key=True)
+    value = Column(String(256), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
 class User(Base):
     __tablename__ = "users"
 
