@@ -785,9 +785,6 @@ async def owner_global_toggle(callback: CallbackQuery, _: callable, db_session: 
         return
 
     await owner_global_controls(callback, _, db_session)
-    await callback.answer(
-        f"{field.replace('_', ' ').title()} turned {'ON' if enabled else 'OFF'} for all active groups."
-    )
 
 
 @router.callback_query(F.data.startswith("owner:global_set:"))
