@@ -265,15 +265,21 @@ async def owner_ai_panel_prompt(message: Message, state: FSMContext, db_session:
         await message.answer(result, parse_mode="HTML")
 
 
+async def is_owner_ai_message(message: Message) -> bool:
+    return bool(
+        message.from_user
+        and _is_owner(message.from_user.id)
+        and message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP)
+        and await _explicitly_addressed(message)
+    )
+
+
 @router.message(
     F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}),
     F.text,
+    is_owner_ai_message,
 )
 async def owner_ai_group_prompt(message: Message, db_session: AsyncSession, **kwargs):
-    if not message.from_user or not _is_owner(message.from_user.id):
-        return
-    if not await _explicitly_addressed(message):
-        return
     prompt = _strip_prefix(message.text or "")
     if not prompt and message.reply_to_message:
         prompt = (message.reply_to_message.text or "").strip()
