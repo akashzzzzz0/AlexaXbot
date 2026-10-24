@@ -182,11 +182,13 @@ async def _groups_report(session: AsyncSession) -> str:
     return "🌐 <b>Active registered groups</b>\n\n" + "\n".join(lines) + more
 
 
-async def _group_status(message: Message) -> str:
-    if message.chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
-        return "Group status ke liye Alexa ko kisi group mein address karo."
+async def _group_status(message: Message, target_group_id: int | None = None, target_group_title: str | None = None) -> str:
+    if target_group_id is None and message.chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
+        return "Group status ke liye registered group ka naam/ID bhi likho."
+    group_id = target_group_id or message.chat.id
+    group_title = target_group_title or message.chat.title or "this group"
     try:
-        member = await message.bot.get_chat_member(message.chat.id, message.bot.id)
+        member = await message.bot.get_chat_member(group_id, message.bot.id)
         status = str(getattr(member.status, "value", member.status))
         if status == "administrator":
             checks = [
@@ -201,16 +203,18 @@ async def _group_status(message: Message) -> str:
             lines = ["• Group creator permissions"]
         else:
             lines = ["• Alexa is not an administrator in this group."]
-        return f"🤖 <b>Alexa status — {html.escape(message.chat.title or 'this group')}</b>\nStatus: <b>{html.escape(status)}</b>\n" + "\n".join(lines)
+        return f"🤖 <b>Alexa status — {html.escape(group_title)}</b>\nStatus: <b>{html.escape(status)}</b>\n" + "\n".join(lines)
     except Exception:
         return "Alexa group status check nahi kar saki. Telegram permissions check karo."
 
 
-async def _set_content_lock(message: Message, session: AsyncSession, action: str, lock_type: str) -> str:
-    if message.chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
-        return "Content lock/unlock ke liye Alexa ko us group mein instruction do."
+async def _set_content_lock(message: Message, session: AsyncSession, action: str, lock_type: str, target_group_id: int | None = None, target_group_title: str | None = None) -> str:
+    if target_group_id is None and message.chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
+        return "Remote lock/unlock ke liye registered group ka exact naam ya ID likho."
+    group_id = target_group_id or message.chat.id
+    group_title = target_group_title or message.chat.title or "this group"
     try:
-        bot_member = await message.bot.get_chat_member(message.chat.id, message.bot.id)
+        bot_member = await message.bot.get_chat_member(group_id, message.bot.id)
         status = str(getattr(bot_member.status, "value", bot_member.status))
         if status not in {"administrator", "creator"}:
             return "❌ Alexa is group mein admin nahi hai, isliye lock change nahi kar sakti."
@@ -228,9 +232,9 @@ async def _set_content_lock(message: Message, session: AsyncSession, action: str
     all_fields = ["lock_text", "lock_links", "lock_photos", "lock_videos", "lock_gifs", "lock_audio",
                   "lock_voice", "lock_documents", "lock_polls", "lock_games", "lock_bots", "lock_forwards",
                   "lock_contacts", "lock_locations", "lock_stickers", "lock_inline", "lock_mentions", "lock_hashtags"]
-    security = await session.scalar(select(SecuritySettings).where(SecuritySettings.group_id == message.chat.id))
+    security = await session.scalar(select(SecuritySettings).where(SecuritySettings.group_id == group_id))
     if security is None:
-        security = SecuritySettings(group_id=message.chat.id)
+        security = SecuritySettings(group_id=group_id)
         session.add(security)
         await session.flush()
     enabled = action == "lock_content"
@@ -245,7 +249,7 @@ async def _set_content_lock(message: Message, session: AsyncSession, action: str
         await session.rollback()
         return "❌ Lock setting save nahi ho saki. Dobara try karo."
     verb = "locked" if enabled else "unlocked"
-    return f"✅ <b>{html.escape(lock_type.title())}</b> {verb} in <b>{html.escape(message.chat.title or 'this group')}</b>."
+    return f"✅ <b>{html.escape(lock_type.title())}</b> {verb} in <b>{html.escape(group_title)}</b>."
 
 
 async def _resolve_target(message: Message, session: AsyncSession, prompt: str, action: str = ""):
@@ -288,9 +292,11 @@ async def _resolve_target(message: Message, session: AsyncSession, prompt: str, 
     return None
 
 
-async def _moderation_action(message: Message, session: AsyncSession, action: str, intent: dict, prompt: str) -> str:
-    if message.chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
-        return "Ye moderation action group mein hi chal sakta hai."
+async def _moderation_action(message: Message, session: AsyncSession, action: str, intent: dict, prompt: str, target_group_id: int | None = None, target_group_title: str | None = None) -> str:
+    if target_group_id is None and message.chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
+        return "Remote moderation ke liye registered group ka exact naam ya ID likho."
+    group_id = target_group_id or message.chat.id
+    group_title = target_group_title or message.chat.title or "this group"
     if action == "make_bot_admin":
         return "Main khud ko admin promote nahi kar sakti. Group ka owner/admin mujhe Telegram ke Admins menu se manually admin banaye; uske baad main apni available permissions ke mutabiq kaam karungi."
     target = await _resolve_target(message, session, prompt, action)
@@ -301,9 +307,9 @@ async def _moderation_action(message: Message, session: AsyncSession, action: st
     if target.id == settings.effective_owner_id and action not in {"demote_self", "promote_self"}:
         return "Configured bot owner par moderation action execute nahi kiya gaya, siwaye aapki explicit self-demotion request ke."
     try:
-        bot_member = await message.bot.get_chat_member(message.chat.id, message.bot.id)
+        bot_member = await message.bot.get_chat_member(group_id, message.bot.id)
         bot_status = str(getattr(bot_member.status, "value", bot_member.status))
-        target_member = await message.bot.get_chat_member(message.chat.id, target.id)
+        target_member = await message.bot.get_chat_member(group_id, target.id)
         target_status = str(getattr(target_member.status, "value", target_member.status))
     except Exception:
         return "Member/group status verify nahi ho saka. Target isi group mein hona chahiye."
@@ -325,34 +331,34 @@ async def _moderation_action(message: Message, session: AsyncSession, action: st
     reason = intent.get("reason") or "Owner AI command"
     ok = False
     if action == "ban":
-        ok = await ban_user(message.bot, session, message.chat.id, target.id, actor_id, reason)
+        ok = await ban_user(message.bot, session, group_id, target.id, actor_id, reason)
     elif action == "mute":
-        ok = await mute_user(message.bot, session, message.chat.id, target.id, actor_id, int(intent.get("duration_seconds") or 3600), reason)
+        ok = await mute_user(message.bot, session, group_id, target.id, actor_id, int(intent.get("duration_seconds") or 3600), reason)
     elif action == "kick":
-        ok = await kick_user(message.bot, session, message.chat.id, target.id, actor_id, reason)
+        ok = await kick_user(message.bot, session, group_id, target.id, actor_id, reason)
     elif action == "unban":
-        ok = await unban_user(message.bot, session, message.chat.id, target.id, actor_id)
+        ok = await unban_user(message.bot, session, group_id, target.id, actor_id)
     elif action == "unmute":
-        ok = await unmute_user(message.bot, session, message.chat.id, target.id, actor_id)
+        ok = await unmute_user(message.bot, session, group_id, target.id, actor_id)
     elif action == "warn":
-        count, reached = await warn_user(session, message.chat.id, target.id, actor_id, reason)
+        count, reached = await warn_user(session, group_id, target.id, actor_id, reason)
         if reached:
-            group_settings = await session.scalar(select(GroupSettings).where(GroupSettings.group_id == message.chat.id))
+            group_settings = await session.scalar(select(GroupSettings).where(GroupSettings.group_id == group_id))
             warn_action = group_settings.warn_action if group_settings else "mute"
             if warn_action == "mute":
-                await mute_user(message.bot, session, message.chat.id, target.id, actor_id, 3600, "Warning limit reached")
+                await mute_user(message.bot, session, group_id, target.id, actor_id, 3600, "Warning limit reached")
             elif warn_action == "kick":
-                await kick_user(message.bot, session, message.chat.id, target.id, actor_id, "Warning limit reached")
+                await kick_user(message.bot, session, group_id, target.id, actor_id, "Warning limit reached")
             elif warn_action == "ban":
-                await ban_user(message.bot, session, message.chat.id, target.id, actor_id, "Warning limit reached")
+                await ban_user(message.bot, session, group_id, target.id, actor_id, "Warning limit reached")
             await session.commit()
             return "⚠️ Warning recorded for <a href='tg://user?id=" + str(target.id) + "'>" + html.escape(target.first_name) + "</a>. Count: <b>" + str(count) + "</b>; limit action: <b>" + html.escape(warn_action) + "</b>."
         await session.commit()
         return "⚠️ Warning recorded for <a href='tg://user?id=" + str(target.id) + "'>" + html.escape(target.first_name) + "</a>. Count: <b>" + str(count) + "</b>."
     elif action == "reset_warnings":
         from sqlalchemy import delete
-        await session.execute(delete(Warning).where(Warning.group_id == message.chat.id, Warning.user_id == target.id))
-        member = await session.scalar(select(GroupMember).where(GroupMember.group_id == message.chat.id, GroupMember.user_id == target.id))
+        await session.execute(delete(Warning).where(Warning.group_id == group_id, Warning.user_id == target.id))
+        member = await session.scalar(select(GroupMember).where(GroupMember.group_id == group_id, GroupMember.user_id == target.id))
         if member:
             member.warn_count = 0
         await session.commit()
@@ -361,19 +367,19 @@ async def _moderation_action(message: Message, session: AsyncSession, action: st
         try:
             if action == "promote":
                 await message.bot.promote_chat_member(
-                    chat_id=message.chat.id, user_id=target.id, can_manage_chat=True, can_delete_messages=True,
+                    chat_id=group_id, user_id=target.id, can_manage_chat=True, can_delete_messages=True,
                     can_manage_video_chats=True, can_restrict_members=True, can_promote_members=False,
                     can_change_info=False, can_invite_users=True, can_pin_messages=True, can_post_messages=False,
                     can_edit_messages=False, can_manage_topics=True,
                 )
             else:
                 await message.bot.promote_chat_member(
-                    chat_id=message.chat.id, user_id=target.id, can_manage_chat=False, can_delete_messages=False,
+                    chat_id=group_id, user_id=target.id, can_manage_chat=False, can_delete_messages=False,
                     can_manage_video_chats=False, can_restrict_members=False, can_promote_members=False,
                     can_change_info=False, can_invite_users=False, can_pin_messages=False, can_post_messages=False,
                     can_edit_messages=False, can_manage_topics=False,
                 )
-            verified = await message.bot.get_chat_member(message.chat.id, target.id)
+            verified = await message.bot.get_chat_member(group_id, target.id)
             expected = "administrator" if action in {"promote", "promote_self"} else "member"
             ok = str(getattr(verified.status, "value", verified.status)) == expected
         except Exception:
