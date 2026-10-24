@@ -130,7 +130,7 @@ async def _groups_report(session: AsyncSession) -> str:
     )).all()
     if not rows:
         return "Abhi database mein koi active registered group nahi mila."
-    lines = [f"• {html.escape(g.title or \"Untitled\")} — <code>{g.id}</code>" for g in rows]
+    lines = [f"• {html.escape(g.title or 'Untitled')} — <code>{g.id}</code>" for g in rows]
     more = "\n<i>Showing up to 30 groups.</i>" if len(rows) == 30 else ""
     return "🌐 <b>Active registered groups</b>\n\n" + "\n".join(lines) + more
 
@@ -154,7 +154,7 @@ async def _group_status(message: Message) -> str:
             lines = ["• Group creator permissions"]
         else:
             lines = ["• Alexa is not an administrator in this group."]
-        return f"🤖 <b>Alexa status — {message.chat.title or 'this group'}</b>\nStatus: <b>{status}</b>\n" + "\n".join(lines)
+        return f"🤖 <b>Alexa status — {html.escape(message.chat.title or 'this group')}</b>\nStatus: <b>{html.escape(status)}</b>\n" + "\n".join(lines)
     except Exception:
         return "Alexa group status check nahi kar saki. Telegram permissions check karo."
 
@@ -198,7 +198,7 @@ async def _set_content_lock(message: Message, session: AsyncSession, action: str
         await session.rollback()
         return "❌ Lock setting save nahi ho saki. Dobara try karo."
     verb = "locked" if enabled else "unlocked"
-    return f"✅ <b>{html.escape(lock_type.title())}</b> {verb} in <b>{html.escape(message.chat.title or \"this group\")}</b>."
+    return f"✅ <b>{html.escape(lock_type.title())}</b> {verb} in <b>{html.escape(message.chat.title or 'this group')}</b>."
 
 
 async def _run_request(message: Message, session: AsyncSession, prompt: str) -> str:
