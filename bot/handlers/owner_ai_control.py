@@ -98,7 +98,7 @@ async def _lookup_user(session: AsyncSession, prompt: str) -> str:
         user = await session.scalar(select(User).where(func.lower(User.username) == username.group(1).casefold()))
         rows = [user] if user else []
     else:
-        query = re.sub(r"(?i)\b(please|alexa|find|search|lookup|look up|who is|tell me|show me|user|member|id|telegram|ki|ka|ke|hai|he|batao|btao|mujhe|iska|iski|naam|name|details|profile|about)\b", " ", prompt)
+        query = re.sub(r"(?i)\b(please|alexa|find|search|lookup|look up|who is|tell me|show me|user|member|id|telegram|saved|ki|ka|ke|hai|he|batao|btao|mujhe|iska|iski|naam|name|details|profile|about)\b", " ", prompt)
         query = re.sub(r"\s+", " ", query).strip(" @#:-")
         if len(query) < 2:
             return "Kis user ka naam, @username ya Telegram ID check karni hai?"
@@ -108,7 +108,7 @@ async def _lookup_user(session: AsyncSession, prompt: str) -> str:
             func.lower(User.username).contains(query.casefold()),
         )).order_by(User.first_name.asc()).limit(10))).all())
     if not rows:
-        return "Is naam/ID ka record Alexa ke saved users mein nahi mila. Main Telegram ke tamam users ki private/global directory access nahi kar sakti; user ko bot/group se interact karna hoga taake record ban sake."
+        return "Is naam se exact match clear nahi mila. @username, numeric Telegram ID, ya us user ke group message ka reply bhejo taake main sahi profile identify kar sakoon."
     lines = ["🔎 <b>Alexa saved-user search</b>"]
     for user in rows:
         if not user:
