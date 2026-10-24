@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from bot.database.models import (
     Group, GroupMember, GroupSettings, WelcomeSettings, GoodbyeSettings,
-    SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig, CaptchaChallenge, GroupStats, User, GroupFilter, GroupBlocklist
+    SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig, CaptchaChallenge, GroupStats, User, GroupFilter, GroupBlocklist, ActionLog
 )
 from bot.services.security_service import (
     check_message_violations, is_raid_detected, create_captcha_challenge,
@@ -270,18 +270,38 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
                         await event.bot.ban_chat_member(chat.id, user.id)
                         await event.bot.unban_chat_member(chat.id, user.id)
                         notice = "🚫 Member removed: profile bio contains a link."
+                        await _send_temporary_notice(event.bot, chat.id, notice)
                     elif action == "mute":
-                        from datetime import timedelta
-                        from aiogram.types import ChatPermissions
-                        until = datetime.now(timezone.utc) + timedelta(seconds=max(60, duration))
-                        await event.bot.restrict_chat_member(
-                            chat.id, user.id, permissions=ChatPermissions(can_send_messages=False),
-                            until_date=until,
+                        # Use the shared moderation service so the configured duration,
+                        # full muted permissions, member state, and audit log stay in sync.
+                        applied_duration = max(60, int(duration or 3600))
+                        muted = await mute_user(
+                            event.bot, db_session, chat.id, user.id, event.bot.id,
+                            applied_duration, "Link found in profile bio (Bio Link Protection)"
                         )
-                        notice = f"🔇 Member muted for {max(1, duration // 60)} minutes because their profile bio contains a link."
+                        if muted:
+                            minutes = max(1, applied_duration // 60)
+                            builder = InlineKeyboardBuilder()
+                            builder.button(
+                                text="🔓 Verify Bio & Unmute",
+                                callback_data=f"bio_unmute:{chat.id}:{user.id}",
+                            )
+                            builder.adjust(1)
+                            await event.bot.send_message(
+                                chat.id,
+                                f"🔇 <a href=\"tg://user?id={user.id}\">Member</a> muted for {minutes} minute(s) because their profile bio contains a link.\n"
+                                "Remove the link from your bio, then tap the button below. ALEXA will verify it before unmuting.",
+                                parse_mode="HTML",
+                                reply_markup=builder.as_markup(),
+                            )
+                        else:
+                            await _send_temporary_notice(
+                                event.bot, chat.id,
+                                "⚠️ Bio-link protection found a link in the member's profile, but the mute failed. Check ALEXA's Restrict Members permission."
+                            )
                     else:
                         notice = "⚠️ Warning: profile bio contains a link. Please remove it to avoid moderation."
-                    await _send_temporary_notice(event.bot, chat.id, notice)
+                        await _send_temporary_notice(event.bot, chat.id, notice)
                 except Exception as action_exc:
                     logger.warning("Bio-link action failed", chat_id=chat.id, user_id=user.id, action=action, error=str(action_exc))
                 logger.info("Member bio contains a link", chat_id=chat.id, user_id=user.id, action=action)
@@ -386,6 +406,96 @@ async def _handle_captcha(event, db_session, security, user, chat, _):
             challenge.message_id = msg.message_id
         except Exception as e:
             logger.error("Captcha message failed", error=str(e))
+
+
+@router.callback_query(F.data.startswith("bio_unmute:"))
+async def bio_unmute_after_profile_fix(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    """Unmute only the member whose bio-link mute created this verification button."""
+    try:
+        _, raw_group_id, raw_user_id = (callback.data or "").split(":", 2)
+        group_id, user_id = int(raw_group_id), int(raw_user_id)
+    except (ValueError, TypeError):
+        await callback.answer("This verification button is invalid.", show_alert=True)
+        return
+
+    if not callback.message or callback.message.chat.id != group_id:
+        await callback.answer("This button belongs to a different group.", show_alert=True)
+        return
+    if callback.from_user.id != user_id:
+        await callback.answer("Only the muted member can use this unmute button.", show_alert=True)
+        return
+
+    member = await db_session.scalar(
+        select(GroupMember).where(
+            GroupMember.group_id == group_id,
+            GroupMember.user_id == user_id,
+        )
+    )
+    if not member or not member.is_muted:
+        await callback.answer("You are not currently muted by this protection.", show_alert=True)
+        return
+
+    # Verify that the latest mute for this member was specifically caused by bio-link protection.
+    recent_logs = (await db_session.execute(
+        select(ActionLog)
+        .where(
+            ActionLog.group_id == group_id,
+            ActionLog.user_id == user_id,
+            ActionLog.action == "mute",
+        )
+        .order_by(ActionLog.created_at.desc())
+        .limit(10)
+    )).scalars().all()
+    bio_mute = False
+    for log in recent_logs:
+        details = log.details or {}
+        reason = details.get("reason", "") if isinstance(details, dict) else ""
+        if reason:
+            bio_mute = reason == "Link found in profile bio (Bio Link Protection)"
+            break
+    if not bio_mute:
+        await callback.answer("This mute was not caused by Bio Link Protection.", show_alert=True)
+        return
+
+    try:
+        profile = await callback.bot.get_chat(user_id)
+        if not hasattr(profile, "bio") or profile.bio is None:
+            await callback.answer("Telegram did not make your bio available to verify. Try again later.", show_alert=True)
+            return
+        bio = profile.bio or ""
+        if contains_non_alexa_link(bio):
+            await callback.answer("A link is still in your bio. Remove it first, then try again.", show_alert=True)
+            return
+    except Exception as exc:
+        logger.warning("Could not verify bio before unmute", chat_id=group_id, user_id=user_id, error=str(exc))
+        await callback.answer("Could not verify your bio right now. Please try again later.", show_alert=True)
+        return
+
+    ok = await unmute_user(callback.bot, db_session, group_id, user_id, callback.bot.id)
+    if not ok:
+        await callback.answer("Unmute failed. Please ask a group admin to check ALEXA's permissions.", show_alert=True)
+        return
+    try:
+        await db_session.commit()
+    except Exception as exc:
+        await db_session.rollback()
+        logger.warning("Could not save bio-link unmute", chat_id=group_id, user_id=user_id, error=str(exc))
+        await callback.answer("Unmute could not be saved. Please try again.", show_alert=True)
+        return
+
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await callback.answer("Bio verified — you have been unmuted.")
+    try:
+        await callback.bot.send_message(
+            group_id,
+            f"✅ <a href=\"tg://user?id={user_id}\">Member</a> removed the bio link and has been unmuted.",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
 
 
 @router.callback_query(F.data.startswith("captcha_verify:"))
