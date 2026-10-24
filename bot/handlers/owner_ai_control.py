@@ -175,6 +175,41 @@ async def _classify_request(text: str) -> dict:
     return {"action": action, "type": kind, "duration_seconds": max(60, min(int(result.get("duration_seconds") or 3600), 2419200)), "reason": str(result.get("reason") or "Owner AI command")[:180]}
 
 
+async def _answer_owner_question(prompt: str) -> str:
+    """General owner Q&A; this never executes actions or invents private account access."""
+    key = get_gemini_api_key()
+    if not key:
+        return "General AI answer ke liye Gemini connection configured nahi hai. Koi action execute nahi hua."
+    model = (settings.GEMINI_MODEL or "gemini-2.5-flash").strip()
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    system = (
+        "You are Alexa, the owner's helpful Roman Urdu/Hinglish assistant. Answer general knowledge, explanations, "
+        "planning and everyday questions directly and clearly in the user's language. Be honest about uncertainty. "
+        "Never claim you accessed Telegram's private/global directory, private chats, phone numbers, or data not supplied "
+        "or stored by this bot. Never claim a moderation/configuration action was performed. If the request asks for a bot action "
+        "that the control layer has not implemented, say it is not connected yet. Do not expose API keys or internal setup."
+    )
+    payload = {
+        "systemInstruction": {"parts": [{"text": system}]},
+        "contents": [{"role": "user", "parts": [{"text": prompt[:3000]}]}],
+        "generationConfig": {"temperature": 0.55, "maxOutputTokens": 500},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=8.0)) as client:
+            response = await client.post(url, params={"key": key}, json=payload)
+            response.raise_for_status()
+            data = response.json()
+        candidates = data.get("candidates") or []
+        parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
+        answer = " ".join(p.get("text", "").strip() for p in parts if isinstance(p, dict) and p.get("text")).strip()
+        if not answer:
+            return "Is sawal ka clear jawab generate nahi ho saka—dobara thora detail se poochho."
+        return html.escape(answer[:3500])
+    except Exception as exc:
+        logger.warning("Owner general Q&A failed: %s", type(exc).__name__)
+        return "Abhi general AI answer nahi aa saka. Gemini connection/model check karo."
+
+
 async def _today_report(session: AsyncSession) -> str:
     now_local = datetime.now(_PK)
     start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -419,7 +454,7 @@ async def _moderation_action(message: Message, session: AsyncSession, action: st
         "kick": "kicked", "unban": "unbanned", "unmute": "unmuted",
         "promote": "promoted to admin", "promote_self": "promoted you to admin", "demote": "demoted", "demote_self": "removed from admin",
     }.get(action, action.replace("_", " "))
-    return "✅ <b>" + html.escape(target.first_name or "Member") + "</b> " + html.escape(verb) + " successfully in <b>" + html.escape(message.chat.title or "this group") + "</b>."
+    return "✅ <b>" + html.escape(target.first_name or "Member") + "</b> " + html.escape(verb) + " successfully in <b>" + html.escape(group_title) + "</b>."
 
 
 async def _run_request(message: Message, session: AsyncSession, prompt: str) -> str:
@@ -441,7 +476,10 @@ async def _run_request(message: Message, session: AsyncSession, prompt: str) -> 
         intent = await _classify_request(prompt)
     except Exception as exc:
         logger.warning("Owner AI request classification failed: %s", type(exc).__name__)
-        return "AI command process nahi ho saki. Gemini connection/configuration check karo; koi action execute nahi hua."
+        action_words = r"\\b(ban|mute|kick|promote|demote|unban|unmute|warn|lock|unlock|admin|hatao|karo|kar do|remove|restrict)\\b"
+        if re.search(action_words, normalized):
+            return "Owner action classify nahi ho saka, isliye kuch execute nahi hua. Request ko target user aur group ke saath dobara likho."
+        return await _answer_owner_question(prompt)
     action = intent["action"]
     if action == "report_today":
         return await _today_report(session)
@@ -460,19 +498,19 @@ async def _run_request(message: Message, session: AsyncSession, prompt: str) -> 
         return await _moderation_action(message, session, action, intent, prompt, target_group.id, target_group.title)
     if action == "help":
         return (
-            "👑 <b>Owner AI abhi ye requests support karti hai:</b>\n"
-            "• Aaj ke registered users aur active groups ki report\n"
-            "• Active registered groups ki list\n"
-            "• Current group mein Alexa ki permissions/status\n"
-            "• Current group mein text/links/photos/videos/stickers/all lock ya unlock\n"
-            "• Mention/reply wale member ko ban, mute, kick, promote, demote, unban, unmute, warn ya warnings reset\n"
-            "• Tumhein admin banana ya admin se hatana, agar Alexa ke paas Add New Admins permission ho; Alexa ko khud admin banane ke liye group owner ko manually promote karna hoga\n\n"
-            "Baaki commands ko safely connect karne ke liye additional actions implement karne honge."
+            "👑 <b>Owner AI Control</b>\n"
+            "• General knowledge aur normal questions ka jawab\n"
+            "• Saved users se name/@username/Telegram ID lookup\n"
+            "• Aaj ki report aur active groups list\n"
+            "• Registered target group ka status/locks\n"
+            "• Target group mein ban, mute, kick, promote, demote, unban, unmute, warn aur warning reset\n"
+            "Remote actions ke liye group ka naam/ID aur member ka @username, ID, ya group message ka reply zaroori hai. "
+            "Har action se pehle Alexa admin status aur permissions verify karti hai."
         )
-    return (
-        "Is request ka safe action abhi connect nahi hai, isliye maine kuch execute nahi kiya. "
-        "Filhaal bolo: aaj ki report, active groups ki list, group status, ya links/text/photos/videos/stickers lock/unlock."
-    )
+    action_words = r"\\b(ban|mute|kick|promote|demote|unban|unmute|warn|lock|unlock|admin|hatao|remove|restrict)\\b"
+    if re.search(action_words, normalized):
+        return "Is specific bot action ka safe handler abhi connected nahi, isliye maine kuch execute nahi kiya."
+    return await _answer_owner_question(prompt)
 
 
 def _ai_control_kb(enabled: bool):
