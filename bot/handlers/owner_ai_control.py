@@ -29,7 +29,7 @@ router = Router(name="owner_ai_control")
 logger = logging.getLogger(__name__)
 _OWNER_PREFIX = re.compile(r"^\s*(?:alexa\b|@alexasuper_bot\b)[\s,!:.-]*(.*)$", re.I)
 _BOT_USERNAME = None
-_PK = ZoneInfo("Asia/Karachi")
+_PK = ZoneInfo("Asia/Kolkata")
 
 
 class OwnerAIState(StatesGroup):
@@ -245,7 +245,7 @@ async def _today_report(session: AsyncSession) -> str:
         f"👤 Aaj registered naye users: <b>{new_users or 0}</b>\n"
         f"👥 Total registered users: <b>{total_users or 0}</b>\n"
         f"🌐 Active registered groups: <b>{active_groups or 0}</b>\n"
-        f"🕒 Date (Pakistan): <b>{now_local.strftime('%d %b %Y')}</b>\n\n"
+        f"🕒 Date (India): <b>{now_local.strftime('%d %b %Y')}</b>\n\n"
         "<i>Counts database ke recorded users par based hain; Telegram ke tamam users ka count nahi.</i>"
     )
 
