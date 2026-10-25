@@ -1,8 +1,6 @@
 import asyncio
 import time
-from datetime import timezone
-from zoneinfo import ZoneInfo
-from datetime import datetime
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery, Message, BotCommand, BotCommandScopeDefault, BotCommandScopeChat, ReplyParameters
