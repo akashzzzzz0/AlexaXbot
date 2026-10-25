@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import get_gemini_api_key, settings
 from bot.database.models import (GlobalSetting, Group, GroupMember, GroupSettings, SecuritySettings, User, Warning,
-    Economy, Wallet, Referral, AffiliateRequest, ActionLog, GroupStats, InboxMessage, ScamReview)
+    Economy, Wallet, Referral, AffiliateRequest, ActionLog, GroupStats, InboxMessage, ScamReview, DailyGroupMessageStat)
 from bot.services.moderation_service import ban_user, unban_user, kick_user, mute_user, unmute_user, warn_user
 
 router = Router(name="owner_ai_control")
@@ -356,6 +356,11 @@ async def _group_activity_report(message: Message, session: AsyncSession, prompt
     if not group:
         return "Group activity ke liye registered group ka naam ya ID likho."
     stats = await session.scalar(select(GroupStats).where(GroupStats.group_id == group.id))
+    today_key = datetime.now(_PK).date().isoformat()
+    today_stats = await session.scalar(select(DailyGroupMessageStat).where(
+        DailyGroupMessageStat.group_id == group.id,
+        DailyGroupMessageStat.day_key == today_key,
+    ))
     total_logs = await session.scalar(select(func.count()).select_from(ActionLog).where(ActionLog.group_id == group.id))
     recent = (await session.scalars(
         select(ActionLog).where(ActionLog.group_id == group.id).order_by(ActionLog.created_at.desc()).limit(8)
@@ -363,7 +368,8 @@ async def _group_activity_report(message: Message, session: AsyncSession, prompt
     lines = [
         f"📈 <b>Group activity — {html.escape(group.title or str(group.id))}</b>",
         f"Group ID: <code>{group.id}</code>",
-        f"Tracked messages: <b>{getattr(stats, 'total_messages', 0) or 0}</b>",
+        f"Today's messages (India time): <b>{getattr(today_stats, 'message_count', 0) or 0}</b>",
+        f"All-time tracked messages: <b>{getattr(stats, 'total_messages', 0) or 0}</b>",
         f"Joins: <b>{getattr(stats, 'total_joins', 0) or 0}</b> · Leaves: <b>{getattr(stats, 'total_leaves', 0) or 0}</b> · Bans: <b>{getattr(stats, 'total_bans', 0) or 0}</b>",
         f"Recorded moderation/activity logs: <b>{total_logs or 0}</b>",
     ]
@@ -669,7 +675,9 @@ async def _run_request(message: Message, session: AsyncSession, prompt: str) -> 
         return await _global_controls_report(session)
     if re.search(r"\b(group settings|settings for|security settings|which locks|lock status|settings status)\b", normalized):
         return await _group_settings_report(message, session, prompt)
-    if re.search(r"\b(group activity|joins and leaves|messages in group|activity report)\b", normalized):
+    if re.search(r"\b(group status|status of (?:this )?group|this group status|is alexa admin|alexa status|bot status in (?:this )?group)\b", normalized):
+        return await _group_status(message)
+    if re.search(r"\b(group activity|joins and leaves|messages in group|activity report|today.?s? (?:total )?(?:chat|messages)|aaj (?:ki )?(?:total )?(?:chat|messages)|aaj kitni (?:chat|messages)|today group messages)\b", normalized):
         return await _group_activity_report(message, session, prompt)
     if re.search(r"\b(list|show|all)\b", normalized) and re.search(r"\b(groups|group list|active groups)\b", normalized):
         return await _groups_report(session)
@@ -870,9 +878,10 @@ async def is_owner_direct_ai_message(message: Message, state: FSMContext) -> boo
 
 @router.message(F.chat.type == ChatType.PRIVATE, F.text, StateFilter(None), is_owner_direct_ai_message)
 async def owner_ai_direct_dm(message: Message, db_session: AsyncSession, **kwargs):
-    # Owner global AI commands must never fall through to casual AI while the switch is OFF.
+    # Global AI OFF means normal Alexa casual chat remains available.
     if not await _global_ai_enabled(db_session):
-        await message.answer("Global AI OFF hai. Owner Panel → Global AI Control se ON karo.")
+        from bot.handlers.ai_chat import alexa_ai_chat
+        await alexa_ai_chat(message)
         return
     result = await _run_request(message, db_session, (message.text or "").strip())
     await message.answer(result, parse_mode="HTML", disable_web_page_preview=True)
@@ -885,7 +894,9 @@ async def owner_ai_direct_dm(message: Message, db_session: AsyncSession, **kwarg
 )
 async def owner_ai_group_prompt(message: Message, db_session: AsyncSession, **kwargs):
     if not await _global_ai_enabled(db_session):
-        # Do not execute owner AI commands or fall back to casual AI while disabled.
+        # Global AI OFF: let normal Alexa casual chat handle the addressed message.
+        from bot.handlers.ai_chat import alexa_ai_chat
+        await alexa_ai_chat(message)
         return
     prompt = _strip_prefix(message.text or "")
     if not prompt and message.reply_to_message:
