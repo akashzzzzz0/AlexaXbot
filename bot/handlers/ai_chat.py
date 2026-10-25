@@ -73,6 +73,12 @@ async def _maybe_react(message: Message) -> None:
 async def _maybe_send_sticker(message: Message) -> None:
     """Send a configured Alexa sticker occasionally; without file IDs, do nothing."""
     raw_ids = os.getenv("ALEXA_STICKER_FILE_IDS", "").strip()
+    if not raw_ids:
+        try:
+            from bot.gemini_secret import ALEXA_STICKER_FILE_IDS
+            raw_ids = str(ALEXA_STICKER_FILE_IDS or "").strip()
+        except (ImportError, AttributeError, TypeError):
+            raw_ids = ""
     if not raw_ids or random.random() >= 0.045:
         return
     file_ids = [item.strip() for item in raw_ids.split(",") if item.strip()]
