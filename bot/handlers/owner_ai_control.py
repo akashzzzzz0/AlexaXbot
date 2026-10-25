@@ -107,7 +107,7 @@ async def _lookup_user(session: AsyncSession, prompt: str) -> str:
         user = await session.scalar(select(User).where(func.lower(User.username) == username.group(1).casefold()))
         rows = [user] if user else []
     else:
-        query = re.sub(r"(?i)\b(please|alexa|find|search|lookup|look up|who is|tell me|show me|user|member|id|telegram|saved|ki|ka|ke|hai|he|batao|btao|mujhe|iska|iski|naam|name|details|profile|about)\b", " ", prompt)
+        query = re.sub(r"(?i)\b(owner\s+panel|add\s+members|database|records?|recorded|please|alexa|find|search|lookup|look up|who is|tell me|show me|user|members?|id|telegram|saved|from|mein|me|se|say|nikaal|nikal|lo|lao|ki|ka|ke|hai|he|batao|btao|mujhe|mere|meri|iska|iski|naam|name|details|profile|about|list)\b", " ", prompt)
         query = re.sub(r"\s+", " ", query).strip(" @#:-")
         if len(query) < 2:
             return "Kis user ka naam, @username ya Telegram ID check karni hai?"
