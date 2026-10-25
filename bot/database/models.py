@@ -988,3 +988,23 @@ class InboxMessage(Base):
     preview = Column(Text, nullable=True)
     is_read = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+
+class GroupPromotionRequest(Base):
+    """A verified group waiting for owner approval and promotion."""
+    __tablename__ = "group_promotion_requests"
+    __table_args__ = (
+        Index("ix_group_promotion_status_requested", "status", "requested_at"),
+        Index("ix_group_promotion_group_status", "group_id", "status"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    group_id = Column(BigInteger, nullable=False, index=True)
+    group_title = Column(String(256), nullable=False)
+    group_link = Column(String(512), nullable=False)
+    status = Column(String(16), nullable=False, default="pending", index=True)
+    requested_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    promoted_at = Column(DateTime(timezone=True), nullable=True)
