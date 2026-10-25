@@ -267,7 +267,7 @@ async def _ask_gemini(user_text: str, history: deque) -> str:
     payload = {
         "systemInstruction": {"parts": [{"text": system_instruction}]},
         "contents": contents,
-        "generationConfig": {"temperature": 0.92, "topP": 0.94, "maxOutputTokens": 180},
+        "generationConfig": {"temperature": 0.92, "topP": 0.94, "maxOutputTokens": 130},
     }
 
     client = _get_gemini_client()
