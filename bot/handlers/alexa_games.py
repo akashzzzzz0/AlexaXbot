@@ -79,13 +79,12 @@ async def kill(message: Message, db_session: AsyncSession, db_user, **kwargs):
         await message.reply("🛡 That player is protected.")
         return
     killer = await profile(db_session, db_user.id)
-    if random.random() < 0.5:
-        killer.kills = (killer.kills or 0) + 1
-        victim.deaths = (victim.deaths or 0) + 1
-        killer.last_kill_at = now
-        await message.reply(f"🎮 {escape(target.first_name)} was defeated in the virtual game. Kill score +1.")
-    else:
-        await message.reply("🎮 The action failed. No score changed.")
+    # A valid /kill action should register consistently; the previous 50% random
+    # failure was confusing users and left the kill/death scores unchanged.
+    killer.kills = (killer.kills or 0) + 1
+    victim.deaths = (victim.deaths or 0) + 1
+    killer.last_kill_at = now
+    await message.reply(f"🎮 {escape(target.first_name)} was defeated in the virtual game. Kill score +1.")
 
 @router.message(Command("rob"))
 async def rob(message: Message, db_session: AsyncSession, db_user, **kwargs):
