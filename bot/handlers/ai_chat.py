@@ -70,8 +70,68 @@ async def _maybe_react(message: Message) -> None:
         pass
 
 
-async def _maybe_send_sticker(message: Message) -> None:
-    """Send a configured Alexa sticker occasionally; without file IDs, do nothing."""
+# Emotion-aware sticker selection from the public pack configured below.
+_STICKER_SET_NAME = os.getenv("ALEXA_STICKER_SET_NAME", "video6104468803_by_vzrobot").strip()
+_STICKER_SET_CACHE: list[tuple[str, str]] | None = None
+
+
+def _emotion_category(text: str) -> str | None:
+    value = text.casefold()
+    rules = (
+        ("funny", r"haha|hehe|lol|lmao|mazak|mazaak|😂|🤣|😹"),
+        ("sad", r"sad|cry|dukhi|udaas|udas|mood off|😢|😭|🥺|💔"),
+        ("angry", r"angry|gussa|ghussa|naraz|😡|🤬|😠|😤"),
+        ("love", r"thanks|thank you|shukriya|pyaar|pyar|cute|❤️|😍|🥰|😘|💕"),
+        ("surprise", r"wow|omg|shocked|surprised|😮|😱|🤯|😳"),
+        ("greeting", r"^\\s*(hi+|hello+|hey+|salam|aoa|bye+|good night|good morning)\\b"),
+        ("attitude", r"attitude|boss|savage|swag|😎|😏|🔥"),
+    )
+    for category, pattern in rules:
+        if re.search(pattern, value, re.IGNORECASE):
+            return category
+    return None
+
+
+_EMOTION_EMOJIS = {
+    "funny": {"😂", "🤣", "😹", "😆", "😁", "😜", "🤪"},
+    "sad": {"😢", "😭", "🥺", "😔", "💔", "😞"},
+    "angry": {"😡", "🤬", "😠", "😤"},
+    "love": {"❤️", "❤", "😍", "🥰", "😘", "💕", "💖", "💗", "💞"},
+    "surprise": {"😮", "😱", "🤯", "😳", "🙀"},
+    "greeting": {"👋", "😊", "🤗", "🙋", "😄"},
+    "attitude": {"😎", "😏", "🔥"},
+}
+
+
+async def _maybe_send_sticker(message: Message, user_text: str) -> None:
+    """Send an occasional sticker matching the user's emotional cue."""
+    global _STICKER_SET_CACHE
+    category = _emotion_category(user_text)
+    if not category or random.random() >= 0.35:
+        return
+    if _STICKER_SET_CACHE is None:
+        try:
+            sticker_set = await message.bot.get_sticker_set(name=_STICKER_SET_NAME)
+            _STICKER_SET_CACHE = [
+                (sticker.file_id, getattr(sticker, "emoji", "") or "")
+                for sticker in sticker_set.stickers
+                if getattr(sticker, "file_id", None)
+            ]
+        except Exception:
+            _STICKER_SET_CACHE = []
+    matching = [
+        file_id for file_id, emoji in (_STICKER_SET_CACHE or [])
+        if emoji in _EMOTION_EMOJIS.get(category, set())
+    ]
+    if matching:
+        try:
+            await message.answer_sticker(random.choice(matching))
+        except Exception:
+            pass
+        return
+    # If pack lookup failed, keep existing manually configured IDs as fallback.
+    if _STICKER_SET_CACHE:
+        return
     raw_ids = os.getenv("ALEXA_STICKER_FILE_IDS", "").strip()
     if not raw_ids:
         try:
@@ -79,16 +139,12 @@ async def _maybe_send_sticker(message: Message) -> None:
             raw_ids = str(ALEXA_STICKER_FILE_IDS or "").strip()
         except (ImportError, AttributeError, TypeError):
             raw_ids = ""
-    if not raw_ids or random.random() >= 0.045:
-        return
     file_ids = [item.strip() for item in raw_ids.split(",") if item.strip()]
-    if not file_ids:
-        return
-    try:
-        await message.answer_sticker(random.choice(file_ids))
-    except Exception:
-        # A missing/invalid sticker ID must never break AI replies.
-        pass
+    if file_ids:
+        try:
+            await message.answer_sticker(random.choice(file_ids))
+        except Exception:
+            pass
 
 
 def _history_db_init() -> None:
@@ -365,5 +421,5 @@ async def alexa_ai_chat(message: Message) -> None:
     except Exception:
         # Telegram reply failures should not interrupt bot polling.
         return
-    asyncio.create_task(_maybe_send_sticker(message))
+    asyncio.create_task(_maybe_send_sticker(message, text))
 
