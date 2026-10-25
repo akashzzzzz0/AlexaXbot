@@ -32,11 +32,11 @@ _VIP_NOT_READY = (
     "👑 <b>Alexa — Together We Shine!</b>"
 )
 _PROMOTION_CONFIRMED = (
-    "🎉💜 <b>GREAT NEWS! YOUR GROUP IS VERIFIED!</b> 👑\\n\\n"
-    "✅ Alexa has successfully verified your group and confirmed her Admin permissions.\\n\\n"
-    "🚀 <b>Your group has been added to Alexa's Free Group Promotion list!</b>\\n\\n"
-    "⏳ Please wait while your request is reviewed by the Owner. Once approved, Alexa will start promoting your group within 24 hours.\\n\\n"
-    "💎 Thank you for choosing Alexa!\\n\\n"
+    "🎉💜 <b>GREAT NEWS! YOUR GROUP IS VERIFIED!</b> 👑\n\n"
+    "✅ Alexa has successfully verified your group and confirmed her Admin permissions.\n\n"
+    "🚀 <b>Your group has been added to Alexa's Free Group Promotion list!</b>\n\n"
+    "⏳ Please wait while your request is reviewed by the Owner. Once approved, Alexa will start promoting your group within 24 hours.\n\n"
+    "💎 Thank you for choosing Alexa!\n\n"
     "👑 <b>Alexa — Together We Shine!</b> 💜"
 )
 
