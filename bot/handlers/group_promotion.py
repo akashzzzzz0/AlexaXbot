@@ -19,6 +19,23 @@ router = Router(name="alexa_group_promotion")
 
 _TRIGGER_RE = re.compile(r"(?is)^\s*\.done\b.*|.*t\.me/.*$")
 _LINK_RE = re.compile(r"(?i)(?:https?://)?t\.me/(?:\+[\w-]+|joinchat/[\w-]+|[A-Za-z0-9_]{5,})")
+_PROMOTION_STATUS_RE = re.compile(
+    r"(?i)\b(?:promotion|promote|promoting)\b.*\b(?:not yet|not done|still waiting|pending|status|update|when|please|my group|group|kro|kar[o]?|hua|hui|hoyi|abhi tak|kab)\b"
+    r"|\b(?:abhi tak|still waiting|promotion status|promote my group)\b"
+)
+_VIP_NOT_READY = (
+    "👑 <b>ALEXA VIP GROUP PROMOTION</b> 💜\n\n"
+    "Oops! ✨ Alexa isn't in your group yet!\n\n"
+    "🚀 <b>Ready to grow your community?</b>\n"
+    "💎 Add Alexa to your group and promote me to Admin, then send your group link again for verification.\n\n"
+    "🌟 <i>Your Growth Journey Starts Here!</i>"
+)
+_PROMOTION_CONFIRMED = (
+    "🎉 <b>Great News! Your Group Is on the Promotion List!</b> 💜\n\n"
+    "✅ Your group has been successfully verified and added to Alexa's promotion list.\n\n"
+    "⏳ Please wait! We'll promote your group within <b>24 hours</b>.\n\n"
+    "🚀 Thank you for choosing Alexa. Your community deserves to shine! 👑"
+)
 
 
 def _is_owner(user_id: int) -> bool:
@@ -78,22 +95,12 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
     chat = None
 
     if is_private_invite:
-        known_groups = (await db_session.scalars(
-            select(Group).where(Group.is_active.is_(True), Group.invite_link.is_not(None))
-        )).all()
-        group = next((g for g in known_groups if _normalize_link(g.invite_link or "") == group_link), None)
-        if group is None:
-            await message.answer(
-                "I couldn't match this private invite link to a group I can verify. "
-                "Please send the group's public <code>t.me/GroupName</code> link, or ask the owner to register the private invite link first.",
-                parse_mode="HTML",
-            )
-            return
-        try:
-            chat = await message.bot.get_chat(group.id)
-        except Exception:
-            await message.answer("I couldn't access that group to verify it. Please check the link and try again.")
-            return
+        await message.answer(
+            "🔗 Please send your group's <b>direct public link</b> (for example, <code>https://t.me/YourGroup</code>) "
+            "instead of a join-request/private invite link so Alexa can verify the group and Admin status.",
+            parse_mode="HTML",
+        )
+        return
     else:
         slug = group_link.split("t.me/", 1)[1].split("?", 1)[0].strip("/")
         if not slug or "/" in slug:
@@ -102,9 +109,7 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
         try:
             chat = await message.bot.get_chat("@" + slug)
         except Exception:
-            await message.answer(
-                "I couldn't find that group. Please check the link, add Alexa to the group, promote Alexa to Admin, and send the link again."
-            )
+            await message.answer(_VIP_NOT_READY, parse_mode="HTML")
             return
 
     chat_type = getattr(chat.type, "value", chat.type)
@@ -118,11 +123,7 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
     except Exception:
         bot_status = "unknown"
     if bot_status not in {"administrator", "creator"}:
-        await message.answer(
-            "Oops! 💜 It looks like you haven't added Alexa to your group as an Admin yet.\n\n"
-            "Please add me to your group and promote me to Admin first. Then send your group link again, "
-            "and I'll verify it for you. ✨",
-        )
+        await message.answer(_VIP_NOT_READY, parse_mode="HTML")
         return
 
     group = await db_session.get(Group, chat.id)
@@ -149,17 +150,21 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
         select(GroupPromotionRequest)
         .where(
             GroupPromotionRequest.group_id == chat.id,
-            GroupPromotionRequest.status.in_(["pending", "approved"]),
+            GroupPromotionRequest.status.in_(["pending", "approved", "promoted"]),
         )
         .order_by(desc(GroupPromotionRequest.id))
         .limit(1)
     )
     if existing:
         await db_session.commit()
-        if existing.status == "pending":
-            await message.answer("💜 Your group is already on the Free Group Promotion list and is waiting for the owner's verification.")
+        if existing.status == "promoted":
+            await message.answer(
+                "🎉💜 Your group has already been promoted by Alexa! "
+                "Thanks for growing your community with us. 👑",
+                parse_mode="HTML",
+            )
         else:
-            await message.answer("💜 Your group has already been approved and is waiting for promotion to finish.")
+            await message.answer(_PROMOTION_CONFIRMED, parse_mode="HTML")
         return
 
     request = GroupPromotionRequest(
@@ -173,14 +178,59 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
     await db_session.commit()
     await db_session.refresh(request)
 
-    await message.answer(
-        "Yay! 🎉💜 Your group has been added to the Free Group Promotion list!\n\n"
-        "⏳ Your request is now waiting for the owner's verification. Once approved, your group will be promoted "
-        "within <b>24 hours of approval</b>. 🚀\n\n"
-        "Thank you for choosing Alexa! 💖",
-        parse_mode="HTML",
-    )
+    await message.answer(_PROMOTION_CONFIRMED, parse_mode="HTML")
     await _send_owner_request(message.bot, request)
+
+
+@router.message(
+    F.chat.type == ChatType.PRIVATE,
+    F.text.regexp(_PROMOTION_STATUS_RE),
+)
+async def answer_promotion_status(message: Message, db_session: AsyncSession, **kwargs):
+    """Answer promotion follow-ups from the user's actual request status."""
+    if not message.from_user or (message.text or "").lstrip().startswith("/"):
+        return
+
+    request = await db_session.scalar(
+        select(GroupPromotionRequest)
+        .where(GroupPromotionRequest.user_id == message.from_user.id)
+        .order_by(desc(GroupPromotionRequest.requested_at))
+        .limit(1)
+    )
+    if request is None:
+        await message.answer(
+            "🔗 Please send your group's direct link (for example, <code>https://t.me/YourGroup</code>) "
+            "so Alexa can verify it and check the promotion request.",
+            parse_mode="HTML",
+        )
+        return
+
+    if request.status == "pending":
+        await message.answer(
+            "👑 <b>Your Group Is on Alexa's Promotion List!</b> 💜\n\n"
+            "⏳ Your request is awaiting review. Please be patient; we aim to promote verified groups within "
+            "<b>24 hours</b>.\n\n"
+            "✨ Thank you for growing with Alexa!",
+            parse_mode="HTML",
+        )
+    elif request.status == "approved":
+        await message.answer(
+            "💜 Your group request is approved and awaiting promotion. "
+            "Please be patient while Alexa completes the promotion within <b>24 hours</b>. 🚀",
+            parse_mode="HTML",
+        )
+    elif request.status == "promoted":
+        await message.answer(
+            "🎉💜 Alexa has already started promoting your group! "
+            "Thank you for being part of the Alexa community. 👑",
+            parse_mode="HTML",
+        )
+    else:
+        await message.answer(
+            "💜 I couldn't find an active promotion request for your group. "
+            "Please send your group's direct link again so Alexa can verify it.",
+            parse_mode="HTML",
+        )
 
 
 async def _run_promotion(request: GroupPromotionRequest, bot, session: AsyncSession):
