@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import re
 from datetime import datetime, timezone
 from html import escape
@@ -14,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import settings
 from bot.database.models import Group, GroupPromotionRequest
+
+logger = logging.getLogger(__name__)
 
 router = Router(name="alexa_group_promotion")
 
@@ -108,6 +111,7 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
         try:
             chat = await message.bot.get_chat("@" + slug)
         except Exception:
+            logger.exception("Group promotion verification: get_chat failed for public group link %s", group_link)
             await message.answer(_VIP_NOT_READY, parse_mode="HTML")
             return
 
@@ -117,11 +121,24 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
         return
 
     try:
-        bot_member = await message.bot.get_chat_member(chat.id, message.bot.id)
-        bot_status = str(getattr(bot_member.status, "value", bot_member.status))
+        # Resolve the bot's actual Telegram ID from the active token rather than
+        # relying on a cached/optional Bot.id attribute in the runtime.
+        bot_identity = await message.bot.get_me()
+        bot_member = await message.bot.get_chat_member(chat.id, bot_identity.id)
+        bot_status = str(getattr(bot_member.status, "value", bot_member.status)).lower()
+        logger.info(
+            "Group promotion verification: chat_id=%s chat_type=%s bot_id=%s bot_status=%s",
+            chat.id, chat_type, bot_identity.id, bot_status,
+        )
     except Exception:
-        bot_status = "unknown"
+        logger.exception("Group promotion verification: get_chat_member failed for chat_id=%s", chat.id)
+        await message.answer(_VIP_NOT_READY, parse_mode="HTML")
+        return
     if bot_status not in {"administrator", "creator"}:
+        logger.warning(
+            "Group promotion verification denied: bot is not an admin; chat_id=%s status=%s",
+            chat.id, bot_status,
+        )
         await message.answer(_VIP_NOT_READY, parse_mode="HTML")
         return
 
