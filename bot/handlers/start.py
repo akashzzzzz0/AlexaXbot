@@ -171,11 +171,11 @@ async def start_group_promotion(callback: CallbackQuery, **kwargs):
     text = (
         "📣 <b>FREE GROUP PROMOTION</b>\n\n"
         "Promote your Telegram group through ALEXA.\n\n"
-        "1. Add ALEXA to your Telegram group.\n"
-        "2. Give ALEXA the required administrator permissions.\n"
-        "3. Return to this DM and send <code>.done</code>.\n"
-        "4. Send your group link to ALEXA in this private chat.\n\n"
-        "ALEXA must be able to verify the group before a promotion can be reviewed."
+        "1. Add ALEXA to your Telegram group and promote her to Admin.\n"
+        "2. Send your group link here by itself, or send <code>.done https://t.me/YourGroup</code>.\n"
+        "3. Alexa will verify that she is an Admin in the group.\n"
+        "4. After verification, your request will wait for the owner's approval.\n\n"
+        "Once approved, your group will be promoted within <b>24 hours of approval</b>. 🚀"
     )
     try:
         markup = InlineKeyboardMarkup(inline_keyboard=[
