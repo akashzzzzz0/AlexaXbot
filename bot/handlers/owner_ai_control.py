@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from aiogram import F, Router
+from aiogram.filters import StateFilter
 from aiogram.enums import ChatType
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -862,7 +863,7 @@ async def is_owner_direct_ai_message(message: Message) -> bool:
     )
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text, is_owner_direct_ai_message)
+@router.message(F.chat.type == ChatType.PRIVATE, F.text, StateFilter(None), is_owner_direct_ai_message)
 async def owner_ai_direct_dm(message: Message, db_session: AsyncSession, **kwargs):
     # When Global AI is ON, owner can ask Alexa from a plain DM without opening the panel first.
     # When OFF, pass the message to normal casual AI chat instead.
