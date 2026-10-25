@@ -269,6 +269,25 @@ async def is_alexa_trigger(message: Message) -> bool:
     return time.monotonic() < _active_until.get(session_key, 0.0)
 
 
+async def _ask_gemini_with_typing(message: Message, user_text: str, history: deque) -> str:
+    """Keep Telegram's typing indicator active while Alexa prepares an AI reply."""
+    task = asyncio.create_task(_ask_gemini(user_text, history))
+    while not task.done():
+        try:
+            await message.bot.send_chat_action(
+                chat_id=message.chat.id,
+                action="typing",
+            )
+        except Exception:
+            # Typing status is optional; never block or break the actual reply.
+            pass
+        try:
+            return await asyncio.wait_for(asyncio.shield(task), timeout=4.0)
+        except asyncio.TimeoutError:
+            continue
+    return await task
+
+
 async def _ask_gemini(user_text: str, history: deque) -> str:
     api_key = get_gemini_api_key()
     if not api_key:
@@ -395,7 +414,7 @@ async def alexa_ai_chat(message: Message) -> None:
             )
             history.extend(persisted_history)
             _history_loaded.add(key)
-        answer = await _ask_gemini(text, history)
+        answer = await _ask_gemini_with_typing(message, text, history)
     except (httpx.HTTPError, ValueError, TypeError):
         return
     except Exception:
