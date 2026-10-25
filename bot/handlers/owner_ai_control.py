@@ -21,7 +21,8 @@ from sqlalchemy import func, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import get_gemini_api_key, settings
-from bot.database.models import GlobalSetting, Group, GroupMember, GroupSettings, SecuritySettings, User, Warning
+from bot.database.models import (GlobalSetting, Group, GroupMember, GroupSettings, SecuritySettings, User, Warning,
+    Economy, Wallet, Referral, AffiliateRequest, ActionLog, GroupStats, InboxMessage, ScamReview)
 from bot.services.moderation_service import ban_user, unban_user, kick_user, mute_user, unmute_user, warn_user
 
 router = Router(name="owner_ai_control")
@@ -163,10 +164,10 @@ async def _classify_request(text: str) -> dict:
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     instructions = (
         "Classify the user's Roman Urdu/English request into JSON only. "
-        "Allowed action values: report_today, list_groups, lookup_user, group_status, lock_content, unlock_content, ban, mute, kick, promote, demote, demote_self, promote_self, make_bot_admin, unban, unmute, warn, reset_warnings, help, unsupported. "
+        "Allowed action values: report_today, list_groups, list_users, lookup_user, user_details, referral_report, group_activity, bot_health, global_controls_status, inbox_summary, group_settings_status, group_status, lock_content, unlock_content, ban, mute, kick, promote, demote, demote_self, promote_self, make_bot_admin, unban, unmute, warn, reset_warnings, help, unsupported. "
         "Schema: {\"action\": string, \"type\": string, \"duration_seconds\": integer, \"reason\": string}. "
         "For lock/unlock, type must be one of text, links, photos, videos, stickers, all. "
-        "For global daily user counts choose report_today. For listing active registered groups choose list_groups. For a user's saved name, username or Telegram ID choose lookup_user. "
+        "For global daily user counts choose report_today. For listing active registered groups choose list_groups. For listing recent recorded users choose list_users. For a user's saved name, username or Telegram ID or full saved profile choose lookup_user or user_details. For referral/Stars requests choose referral_report. For group activity choose group_activity. For bot process/database status choose bot_health. For global anti-spam/flood/lockdown overview choose global_controls_status. For unread user inbox counts choose inbox_summary. For group security/lock configuration choose group_settings_status. "
         "For current chat bot permissions/status choose group_status. If owner says remove me/myself from admin, choose demote_self. If owner says make me/myself admin, choose promote_self. If owner asks to make Alexa/the bot an admin, choose make_bot_admin (never pretend the bot can promote itself). For ban/mute/kick/promote/demote/unban/unmute/warn/reset warnings choose the matching action only when clearly requested. Mute duration is seconds, default 3600. Keep reason short. Target is resolved separately from an explicit mention, reply, or user ID. If not clearly supported choose unsupported. "
         "Never output code, commands, explanations, or extra JSON fields."
     )
@@ -184,7 +185,7 @@ async def _classify_request(text: str) -> dict:
     result = json.loads(raw)
     action = result.get("action")
     kind = str(result.get("type", "")).lower()
-    allowed = {"report_today", "list_groups", "lookup_user", "group_status", "lock_content", "unlock_content", "ban", "mute", "kick", "promote", "demote", "demote_self", "promote_self", "make_bot_admin", "unban", "unmute", "warn", "reset_warnings", "help", "unsupported"}
+    allowed = {"report_today", "list_groups", "list_users", "lookup_user", "user_details", "referral_report", "group_activity", "bot_health", "global_controls_status", "inbox_summary", "group_settings_status", "group_status", "lock_content", "unlock_content", "ban", "mute", "kick", "promote", "demote", "demote_self", "promote_self", "make_bot_admin", "unban", "unmute", "warn", "reset_warnings", "help", "unsupported"}
     if action not in allowed:
         return {"action": "unsupported", "type": ""}
     if action in {"lock_content", "unlock_content"} and kind not in {"text", "links", "photos", "videos", "stickers", "all"}:
@@ -258,6 +259,173 @@ async def _groups_report(session: AsyncSession) -> str:
     lines = [f"• {html.escape(g.title or 'Untitled')} — <code>{g.id}</code>" for g in rows]
     more = "\n<i>Showing up to 30 groups.</i>" if len(rows) == 30 else ""
     return "🌐 <b>Active registered groups</b>\n\n" + "\n".join(lines) + more
+
+
+
+async def _users_report(session: AsyncSession, limit: int = 20) -> str:
+    rows = (await session.scalars(
+        select(User).order_by(User.created_at.desc(), User.id.desc()).limit(limit)
+    )).all()
+    if not rows:
+        return "Alexa ke database mein abhi koi saved user record nahi hai."
+    lines = ["👥 <b>Recent saved users</b>"]
+    for user in rows:
+        name = html.escape(" ".join(x for x in (user.first_name, user.last_name) if x) or "Unknown")
+        handle = f" (@{html.escape(user.username)})" if user.username else ""
+        lines.append(f"• <b>{name}</b>{handle} — <code>{user.id}</code> · DM: {'Yes' if user.dm_started else 'No'}")
+    return "\n".join(lines) + ("\n\n<i>Showing up to 20 recorded users.</i>" if len(rows) == limit else "")
+
+
+async def _user_details(session: AsyncSession, prompt: str) -> str:
+    base = await _lookup_user(session, prompt)
+    if "exact match clear nahi mila" in base or "Kis user ka naam" in base:
+        return base
+    numeric = re.search(r"(?<!\d)(\d{5,20})(?!\d)", prompt)
+    username = re.search(r"(?<!\w)@([A-Za-z0-9_]{5,32})\b", prompt)
+    if numeric:
+        user = await session.get(User, int(numeric.group(1)))
+    elif username:
+        user = await session.scalar(select(User).where(func.lower(User.username) == username.group(1).casefold()))
+    else:
+        cleaned = re.sub(r"(?i)\b(please|alexa|find|search|lookup|look up|who is|tell me|show me|user|member|id|telegram|saved|ki|ka|ke|hai|he|batao|btao|mujhe|iska|iski|naam|name|details|profile|about|full|complete|all)\b", " ", prompt)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" @#:-")
+        user = await session.scalar(select(User).where(
+            or_(func.lower(User.first_name).contains(cleaned.casefold()),
+                func.lower(User.username).contains(cleaned.casefold()))
+        ).order_by(User.first_name.asc()))
+    if not user:
+        return base
+    wallet = await session.scalar(select(Wallet).where(Wallet.user_id == user.id))
+    economy = await session.scalar(select(Economy).where(Economy.user_id == user.id))
+    refs = await session.scalar(select(func.count()).select_from(Referral).where(Referral.referrer_id == user.id))
+    memberships = (await session.scalars(
+        select(GroupMember).where(GroupMember.user_id == user.id).order_by(GroupMember.joined_at.desc()).limit(10)
+    )).all()
+    lines = [
+        "🪪 <b>Saved user profile</b>",
+        f"Name: <b>{html.escape(' '.join(x for x in (user.first_name, user.last_name) if x) or 'Unknown')}</b>",
+        f"Username: <b>{'@' + html.escape(user.username) if user.username else 'Not recorded'}</b>",
+        f"Telegram ID: <code>{user.id}</code>",
+        f"DM started: <b>{'Yes' if user.dm_started else 'No'}</b> · Bot DB banned flag: <b>{'Yes' if user.is_banned else 'No'}</b>",
+        f"Telegram Premium flag: <b>{'Yes' if user.is_premium else 'No'}</b>",
+        f"Wallet balance: <b>{getattr(wallet, 'balance', 0) or 0}</b> · Bank: <b>{getattr(wallet, 'bank_balance', 0) or 0}</b>",
+        f"Level: <b>{getattr(economy, 'level', 1) or 1}</b> · XP: <b>{getattr(economy, 'total_xp', 0) or 0}</b>",
+        f"Recorded referrals: <b>{refs or 0}</b>",
+        f"Tracked group memberships: <b>{len(memberships)}</b>",
+    ]
+    if memberships:
+        group_ids = [m.group_id for m in memberships]
+        groups = (await session.scalars(select(Group).where(Group.id.in_(group_ids)))).all()
+        by_id = {g.id: g.title for g in groups}
+        lines.extend(["", "<b>Recent tracked groups</b>"])
+        lines.extend(f"• {html.escape(by_id.get(m.group_id, str(m.group_id)))} — role: {html.escape(m.role or 'member')}" for m in memberships)
+    return "\n".join(lines)
+
+
+async def _referral_report(session: AsyncSession) -> str:
+    total = await session.scalar(select(func.count()).select_from(Referral))
+    rewarded = await session.scalar(select(func.count()).select_from(Referral).where(Referral.reward_given.is_(True)))
+    pending = await session.scalar(select(func.count()).select_from(AffiliateRequest).where(AffiliateRequest.status == "pending"))
+    stars_pending = await session.scalar(select(func.count()).select_from(AffiliateRequest).where(
+        AffiliateRequest.status == "pending", AffiliateRequest.request_type == "stars"
+    ))
+    premium_pending = await session.scalar(select(func.count()).select_from(AffiliateRequest).where(
+        AffiliateRequest.status == "pending", AffiliateRequest.request_type == "premium"
+    ))
+    top = (await session.execute(
+        select(User, func.count(Referral.id).label("ref_count"))
+        .join(Referral, Referral.referrer_id == User.id)
+        .group_by(User.id).order_by(func.count(Referral.id).desc()).limit(5)
+    )).all()
+    lines = [
+        "🎁 <b>Referral / Affiliate overview</b>",
+        f"Total recorded referrals: <b>{total or 0}</b>",
+        f"Rewards marked given: <b>{rewarded or 0}</b>",
+        f"Pending requests: <b>{pending or 0}</b> (Stars: {stars_pending or 0}, Premium: {premium_pending or 0})",
+    ]
+    if top:
+        lines.extend(["", "<b>Top referrers</b>"])
+        lines.extend(f"• {html.escape(u.first_name or 'User')} — <code>{u.id}</code> · {count} referrals" for u, count in top)
+    return "\n".join(lines)
+
+
+async def _group_activity_report(message: Message, session: AsyncSession, prompt: str) -> str:
+    group = await _find_target_group(message, session, prompt)
+    if not group:
+        return "Group activity ke liye registered group ka naam ya ID likho."
+    stats = await session.scalar(select(GroupStats).where(GroupStats.group_id == group.id))
+    total_logs = await session.scalar(select(func.count()).select_from(ActionLog).where(ActionLog.group_id == group.id))
+    recent = (await session.scalars(
+        select(ActionLog).where(ActionLog.group_id == group.id).order_by(ActionLog.created_at.desc()).limit(8)
+    )).all()
+    lines = [
+        f"📈 <b>Group activity — {html.escape(group.title or str(group.id))}</b>",
+        f"Group ID: <code>{group.id}</code>",
+        f"Tracked messages: <b>{getattr(stats, 'total_messages', 0) or 0}</b>",
+        f"Joins: <b>{getattr(stats, 'total_joins', 0) or 0}</b> · Leaves: <b>{getattr(stats, 'total_leaves', 0) or 0}</b> · Bans: <b>{getattr(stats, 'total_bans', 0) or 0}</b>",
+        f"Recorded moderation/activity logs: <b>{total_logs or 0}</b>",
+    ]
+    if recent:
+        lines.extend(["", "<b>Recent recorded actions</b>"])
+        lines.extend(f"• {html.escape(log.action)} · {html.escape(log.created_at.strftime('%d %b %H:%M') if log.created_at else 'time unknown')}" for log in recent)
+    return "\n".join(lines)
+
+
+async def _global_controls_report(session: AsyncSession) -> str:
+    groups = (await session.scalars(select(Group).where(Group.is_active.is_(True)).order_by(Group.title.asc()))).all()
+    anti_spam = anti_flood = lockdown = 0
+    for group in groups:
+        security = await session.scalar(select(SecuritySettings).where(SecuritySettings.group_id == group.id))
+        if security:
+            anti_spam += int(bool(security.anti_spam))
+            anti_flood += int(bool(security.anti_flood))
+            lockdown += int(bool(security.emergency_mode))
+    return ("🌐 <b>Global controls status</b>\n"
+            f"Active groups: <b>{len(groups)}</b>\n"
+            f"Anti-spam ON: <b>{anti_spam}</b> groups\n"
+            f"Anti-flood ON: <b>{anti_flood}</b> groups\n"
+            f"Emergency lockdown ON: <b>{lockdown}</b> groups\n"
+            f"Global Owner AI: <b>{'ON' if await _global_ai_enabled(session) else 'OFF'}</b>")
+
+
+async def _inbox_report(session: AsyncSession) -> str:
+    total = await session.scalar(select(func.count()).select_from(InboxMessage))
+    unread = await session.scalar(select(func.count()).select_from(InboxMessage).where(InboxMessage.is_read.is_(False)))
+    conversations = await session.scalar(select(func.count(func.distinct(InboxMessage.user_id))))
+    return ("📩 <b>Owner inbox overview</b>\n"
+            f"Conversations: <b>{conversations or 0}</b>\n"
+            f"Saved messages: <b>{total or 0}</b>\nUnread messages: <b>{unread or 0}</b>\n"
+            "Use Owner Panel → User Messages to open/reply to individual conversations.")
+
+
+async def _bot_health_report(session: AsyncSession) -> str:
+    users = await session.scalar(select(func.count()).select_from(User))
+    dm_users = await session.scalar(select(func.count()).select_from(User).where(User.dm_started.is_(True)))
+    groups = await session.scalar(select(func.count()).select_from(Group).where(Group.is_active.is_(True)))
+    pending_reviews = await session.scalar(select(func.count()).select_from(ScamReview).where(ScamReview.status == "pending"))
+    return ("🩺 <b>Alexa database health snapshot</b>\n"
+            f"Recorded users: <b>{users or 0}</b>\nDM starters: <b>{dm_users or 0}</b>\n"
+            f"Active groups: <b>{groups or 0}</b>\nPending scam reviews: <b>{pending_reviews or 0}</b>\n"
+            "Process uptime/host sleep cannot be verified from this database-only check.")
+
+
+async def _group_settings_report(message: Message, session: AsyncSession, prompt: str) -> str:
+    group = await _find_target_group(message, session, prompt)
+    if not group:
+        return "Group settings ke liye registered group ka naam ya ID likho."
+    sec = await session.scalar(select(SecuritySettings).where(SecuritySettings.group_id == group.id))
+    gs = await session.scalar(select(GroupSettings).where(GroupSettings.group_id == group.id))
+    fields = [
+        ("Anti-spam", "anti_spam"), ("Anti-flood", "anti_flood"), ("Anti-scam", "anti_scam"),
+        ("Anti-link", "anti_link"), ("Emergency lockdown", "emergency_mode"),
+        ("Lock text", "lock_text"), ("Lock links", "lock_links"), ("Lock photos", "lock_photos"),
+        ("Lock videos", "lock_videos"), ("Lock stickers", "lock_stickers"),
+    ]
+    lines = [f"⚙️ <b>Group settings — {html.escape(group.title or str(group.id))}</b>", f"Group ID: <code>{group.id}</code>"]
+    lines.extend(f"• {label}: {'ON' if bool(getattr(sec, field, False)) else 'OFF'}" for label, field in fields)
+    lines.append(f"• Silent service messages: {'ON' if bool(getattr(gs, 'silent_service_messages', False)) else 'OFF'}")
+    lines.append(f"• Warning limit: {getattr(gs, 'max_warns', 3) if gs else 3} · limit action: {html.escape(getattr(gs, 'warn_action', 'mute') if gs else 'mute')}")
+    return "\n".join(lines)
 
 
 async def _group_status(message: Message, target_group_id: int | None = None, target_group_title: str | None = None) -> str:
@@ -510,8 +678,24 @@ async def _run_request(message: Message, session: AsyncSession, prompt: str) -> 
         return await _today_report(session)
     if action == "list_groups":
         return await _groups_report(session)
+    if action == "list_users":
+        return await _users_report(session)
     if action == "lookup_user":
         return await _lookup_user(session, prompt)
+    if action == "user_details":
+        return await _user_details(session, prompt)
+    if action == "referral_report":
+        return await _referral_report(session)
+    if action == "group_activity":
+        return await _group_activity_report(message, session, prompt)
+    if action == "bot_health":
+        return await _bot_health_report(session)
+    if action == "global_controls_status":
+        return await _global_controls_report(session)
+    if action == "inbox_summary":
+        return await _inbox_report(session)
+    if action == "group_settings_status":
+        return await _group_settings_report(message, session, prompt)
     if action in {"group_status", "lock_content", "unlock_content", "ban", "mute", "kick", "promote", "promote_self", "demote", "demote_self", "make_bot_admin", "unban", "unmute", "warn", "reset_warnings"}:
         target_group = await _find_target_group(message, session, prompt)
         if target_group is None:
@@ -526,7 +710,8 @@ async def _run_request(message: Message, session: AsyncSession, prompt: str) -> 
             "👑 <b>Owner AI Control</b>\n"
             "• General knowledge aur normal questions ka jawab\n"
             "• Saved users se name/@username/Telegram ID lookup\n"
-            "• Aaj ki report aur active groups list\n"
+            "• Aaj ki report, saved user list/profile, referral/Stars overview, inbox counts, bot/database snapshot\n"
+            "• Active groups, group activity, global controls status, per-group security settings/locks\n"
             "• Registered target group ka status/locks\n"
             "• Target group mein ban, mute, kick, promote, demote, unban, unmute, warn aur warning reset\n"
             "Remote actions ke liye group ka naam/ID aur member ka @username, ID, ya group message ka reply zaroori hai. "
