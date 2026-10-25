@@ -83,7 +83,7 @@ async def configure_command_visibility(bot) -> None:
     # the complete command guide in private chat without exposing admin controls
     # in the Telegram slash-command menu.
     public_commands = [
-        ("start", "Start ALEXA"), ("help", "Open full command guide"),
+        ("start", "Start ALEXA"), ("help", "Open full command guide"), ("g", "Guess the World Event number"),
         ("menu", "Open main menu"), ("games", "Open games"),
         ("dice", "Play dice"), ("rps", "Play Rock Paper Scissors"),
         ("quiz", "Play quiz"), ("wheel", "Spin the wheel"),
@@ -253,6 +253,13 @@ async def on_startup(bot) -> None:
 
     logger.info('Bot startup complete', db_ready=db_ok)
 
+    try:
+        from bot.handlers.world_events import start_event_scheduler
+        start_event_scheduler(bot)
+        logger.info('Alexa World Events scheduler started')
+    except Exception as exc:
+        logger.warning('Alexa World Events scheduler could not start', error=str(exc))
+
     # Notify the configured owner privately whenever ALEXA starts successfully.
     owner_id = settings.effective_owner_id
     if owner_id:
@@ -272,6 +279,11 @@ async def on_startup(bot) -> None:
 
 async def on_shutdown(bot, runner) -> None:
     logger.info('Bot shutting down')
+    try:
+        from bot.handlers.world_events import stop_event_scheduler
+        await stop_event_scheduler()
+    except Exception:
+        pass
     try:
         from bot.database.connection import close_db
         await close_db()
