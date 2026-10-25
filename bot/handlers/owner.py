@@ -43,7 +43,6 @@ class OwnerStates(StatesGroup):
     waiting_purge_range = State()
     waiting_inbox_reply = State()
     waiting_inbox_direct = State()
-    waiting_inbox_direct_message = State()
 
 
 def is_owner(user_id: int) -> bool:
@@ -2010,7 +2009,6 @@ async def _render_inbox_conversation(callback: CallbackQuery, db_session: AsyncS
     for item in reversed(messages):
         builder.button(text=f"↩️ Reply to message #{item.id}", callback_data=f"owner:inbox_reply:{user_id}:{item.id}")
         builder.button(text=f"🗑️ Delete message #{item.id}", callback_data=f"owner:inbox_delete:{user_id}:{item.id}")
-    builder.button(text="✉️ Direct Message User", callback_data=f"owner:inbox_dm:{user_id}")
     builder.button(text="✉️ Send Direct Message", callback_data=f"owner:inbox_direct:{user_id}")
     builder.button(text="🔄 Refresh Messages", callback_data=f"owner:inbox:{user_id}")
     builder.button(text="◀️ All User Messages", callback_data="owner:inbox")
@@ -2034,54 +2032,6 @@ async def owner_inbox_conversation(callback: CallbackQuery, db_session: AsyncSes
         return
     await _render_inbox_conversation(callback, db_session, user_id)
     await callback.answer("Messages refreshed.")
-
-
-@router.callback_query(F.data.startswith("owner:inbox_dm:"))
-async def owner_inbox_direct_message_start(callback: CallbackQuery, state: FSMContext, db_session: AsyncSession, **kwargs):
-    if not is_owner(callback.from_user.id) or not callback.message or callback.message.chat.type != "private":
-        await callback.answer("Not available.", show_alert=True)
-        return
-    try:
-        user_id = int(callback.data.rsplit(":", 1)[1])
-    except (ValueError, IndexError):
-        await callback.answer("Invalid user.", show_alert=True)
-        return
-    user = await db_session.get(User, user_id)
-    if not user:
-        await callback.answer("User not found.", show_alert=True)
-        return
-    await state.set_state(OwnerStates.waiting_inbox_direct_message)
-    await state.update_data(inbox_direct_message_user_id=user_id)
-    label = f"@{user.username}" if user.username else (user.first_name or str(user.id))
-    await callback.message.answer(
-        f"✉️ Direct message to <b>{escape(label)}</b> · <code>{user_id}</code>.\n"
-        "Send the message now (text, photo, video, voice, or other Telegram message). It will be sent privately through ALEXA.\n"
-        "Send /cancel to stop.", parse_mode="HTML"
-    )
-    await callback.answer()
-
-
-@router.message(OwnerStates.waiting_inbox_direct_message)
-async def owner_inbox_direct_message_send(message: Message, state: FSMContext, **kwargs):
-    if not is_owner(message.from_user.id) or message.chat.type != "private":
-        await state.clear()
-        return
-    if (message.text or "").strip().lower() == "/cancel":
-        await state.clear()
-        await message.reply("Direct message cancelled.")
-        return
-    data = await state.get_data()
-    try:
-        user_id = int(data.get("inbox_direct_message_user_id"))
-        await message.copy_to(chat_id=user_id)
-        await message.reply(f"✅ Direct message sent through ALEXA to user <code>{user_id}</code>.", parse_mode="HTML")
-    except TelegramForbiddenError:
-        await message.reply("❌ ALEXA cannot message this user. They may have blocked the bot or not started it.")
-    except Exception as exc:
-        logger.warning("Owner inbox direct message failed", error=str(exc))
-        await message.reply("❌ Could not deliver the message. Check that the user has started ALEXA and has not blocked the bot.")
-    finally:
-        await state.clear()
 
 
 @router.callback_query(F.data.startswith("owner:inbox_reply:"))
@@ -2125,17 +2075,25 @@ async def owner_inbox_reply_send(message: Message, state: FSMContext, db_session
         item = await db_session.get(InboxMessage, inbox_id)
         if not item or item.user_id != user_id:
             await message.reply("❌ This inbox message no longer exists. Open the inbox and choose a message again.")
+            await state.clear()
             return
-        await message.copy_to(
-            chat_id=user_id,
-            reply_parameters=ReplyParameters(message_id=item.telegram_message_id, allow_sending_without_reply=True),
-        )
-        await message.reply(f"✅ Reply sent to message #{inbox_id} through ALEXA.")
+        try:
+            await message.copy_to(
+                chat_id=user_id,
+                reply_parameters=ReplyParameters(message_id=item.telegram_message_id, allow_sending_without_reply=True),
+            )
+            reply_mode = "as a reply to the selected message"
+        except TelegramBadRequest as reply_exc:
+            # A stale/unreplyable source message must not prevent delivery of the actual DM.
+            logger.info("Owner inbox threaded reply fallback", error=str(reply_exc))
+            await message.copy_to(chat_id=user_id)
+            reply_mode = "as a direct message"
+        await message.reply(f"✅ Reply sent to user <code>{user_id}</code> through ALEXA ({reply_mode}).", parse_mode="HTML")
     except TelegramForbiddenError:
         await message.reply("❌ ALEXA cannot message this user. They may have blocked the bot.")
     except Exception as exc:
         logger.warning("Owner inbox reply failed", error=str(exc))
-        await message.reply("❌ Could not deliver the reply. Check that the user has started ALEXA.")
+        await message.reply("❌ Could not deliver the reply. Check that the user has started ALEXA and has not blocked the bot.")
     finally:
         await state.clear()
 
