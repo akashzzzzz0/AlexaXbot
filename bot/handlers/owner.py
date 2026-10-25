@@ -43,6 +43,7 @@ class OwnerStates(StatesGroup):
     waiting_unmute_user_id = State()
     waiting_purge_range = State()
     waiting_inbox_reply = State()
+    waiting_inbox_direct = State()
     waiting_inbox_direct_message = State()
 
 
@@ -72,10 +73,11 @@ def owner_kb(_=None) -> object:
     builder.button(text=f"{'🟢 Disable' if _maintenance_mode else '🔧 Enable'} Maintenance", callback_data="owner:maintenance")
     builder.button(text="👤 User List", callback_data="owner:users")
     builder.button(text="📩 User Messages", callback_data="owner:inbox")
+    builder.button(text="🗂 Promotion Requests", callback_data="owner:promo_requests")
     builder.button(text="🧠 Global AI Control", callback_data="owner:ai")
     builder.button(text="📨 Message Selected Groups", callback_data="owner:group_message")
     builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
-    builder.adjust(2, 2, 2, 2, 2, 2, 2, 2, 1)
+    builder.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2)
     return builder.as_markup()
 
 
@@ -2010,6 +2012,7 @@ async def _render_inbox_conversation(callback: CallbackQuery, db_session: AsyncS
         builder.button(text=f"↩️ Reply to message #{item.id}", callback_data=f"owner:inbox_reply:{user_id}:{item.id}")
         builder.button(text=f"🗑️ Delete message #{item.id}", callback_data=f"owner:inbox_delete:{user_id}:{item.id}")
     builder.button(text="✉️ Direct Message User", callback_data=f"owner:inbox_dm:{user_id}")
+    builder.button(text="✉️ Send Direct Message", callback_data=f"owner:inbox_direct:{user_id}")
     builder.button(text="🔄 Refresh Messages", callback_data=f"owner:inbox:{user_id}")
     builder.button(text="◀️ All User Messages", callback_data="owner:inbox")
     builder.button(text="👑 Owner Panel", callback_data="owner:menu")
@@ -2134,6 +2137,57 @@ async def owner_inbox_reply_send(message: Message, state: FSMContext, db_session
     except Exception as exc:
         logger.warning("Owner inbox reply failed", error=str(exc))
         await message.reply("❌ Could not deliver the reply. Check that the user has started ALEXA.")
+    finally:
+        await state.clear()
+
+
+@router.callback_query(F.data.startswith("owner:inbox_direct:"))
+async def owner_inbox_direct_start(callback: CallbackQuery, state: FSMContext, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id) or not callback.message or callback.message.chat.type != "private":
+        await callback.answer("Not available.", show_alert=True)
+        return
+    try:
+        user_id = int(callback.data.rsplit(":", 1)[1])
+    except (TypeError, ValueError):
+        await callback.answer("Invalid user.", show_alert=True)
+        return
+    user = await db_session.get(User, user_id)
+    if not user:
+        await callback.answer("User not found.", show_alert=True)
+        return
+    await state.set_state(OwnerStates.waiting_inbox_direct)
+    await state.update_data(inbox_direct_user_id=user_id)
+    await callback.message.answer(
+        f"✉️ Sending a direct message to <b>{escape(user.first_name or 'User')}</b> "
+        f"(<code>{user_id}</code>).\nSend the text or media you want Alexa to deliver.\nSend /cancel to stop.",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(OwnerStates.waiting_inbox_direct)
+async def owner_inbox_direct_send(message: Message, state: FSMContext, db_session: AsyncSession, **kwargs):
+    if not is_owner(message.from_user.id) or message.chat.type != "private":
+        await state.clear()
+        return
+    if (message.text or "").strip().lower() == "/cancel":
+        await state.clear()
+        await message.reply("Direct message cancelled.")
+        return
+    data = await state.get_data()
+    try:
+        user_id = int(data.get("inbox_direct_user_id"))
+        user = await db_session.get(User, user_id)
+        if not user:
+            await message.reply("❌ This user is no longer in Alexa's saved user list.")
+            return
+        await message.copy_to(chat_id=user_id)
+        await message.reply(f"✅ Direct message sent to {escape(user.first_name or 'the user')} (<code>{user_id}</code>) through Alexa.", parse_mode="HTML")
+    except TelegramForbiddenError:
+        await message.reply("❌ Alexa cannot message this user. They may have blocked the bot.")
+    except Exception as exc:
+        logger.warning("Owner inbox direct message failed", error=str(exc))
+        await message.reply("❌ Could not deliver the message. Check that the user has started Alexa.")
     finally:
         await state.clear()
 
