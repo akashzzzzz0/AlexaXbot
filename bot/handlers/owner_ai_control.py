@@ -42,8 +42,9 @@ def _is_owner(user_id: int | None) -> bool:
 
 
 async def _global_ai_enabled(session: AsyncSession) -> bool:
+    # Fail closed: Global AI stays OFF until the owner explicitly enables it in the panel.
     row = await session.get(GlobalSetting, "owner_ai_enabled")
-    return row is None or row.value == "1"
+    return bool(row and row.value == "1")
 
 
 async def _set_global_ai_enabled(session: AsyncSession, enabled: bool) -> None:
@@ -869,11 +870,9 @@ async def is_owner_direct_ai_message(message: Message, state: FSMContext) -> boo
 
 @router.message(F.chat.type == ChatType.PRIVATE, F.text, StateFilter(None), is_owner_direct_ai_message)
 async def owner_ai_direct_dm(message: Message, db_session: AsyncSession, **kwargs):
-    # When Global AI is ON, owner can ask Alexa from a plain DM without opening the panel first.
-    # When OFF, pass the message to normal casual AI chat instead.
+    # Owner global AI commands must never fall through to casual AI while the switch is OFF.
     if not await _global_ai_enabled(db_session):
-        from bot.handlers.ai_chat import alexa_ai_chat
-        await alexa_ai_chat(message)
+        await message.answer("Global AI OFF hai. Owner Panel → Global AI Control se ON karo.")
         return
     result = await _run_request(message, db_session, (message.text or "").strip())
     await message.answer(result, parse_mode="HTML", disable_web_page_preview=True)
@@ -886,9 +885,7 @@ async def owner_ai_direct_dm(message: Message, db_session: AsyncSession, **kwarg
 )
 async def owner_ai_group_prompt(message: Message, db_session: AsyncSession, **kwargs):
     if not await _global_ai_enabled(db_session):
-        # Global control is OFF, but owner can still use Alexa for ordinary AI chat.
-        from bot.handlers.ai_chat import alexa_ai_chat
-        await alexa_ai_chat(message)
+        # Do not execute owner AI commands or fall back to casual AI while disabled.
         return
     prompt = _strip_prefix(message.text or "")
     if not prompt and message.reply_to_message:
