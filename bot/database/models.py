@@ -601,6 +601,7 @@ class AffiliateRequest(Base):
     user = relationship("User")
 
 
+
 class GroupStats(Base):
     __tablename__ = "group_stats"
 
@@ -1008,3 +1009,18 @@ class GroupPromotionRequest(Base):
     requested_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     approved_at = Column(DateTime(timezone=True), nullable=True)
     promoted_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class DailyGroupMessageStat(Base):
+    """Per-group message count by India-local calendar date."""
+    __tablename__ = "daily_group_message_stats"
+    __table_args__ = (
+        UniqueConstraint("group_id", "day_key", name="uq_daily_group_message_day"),
+        Index("ix_daily_group_message_day", "day_key"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    group_id = Column(BigInteger, nullable=False, index=True)
+    day_key = Column(String(10), nullable=False)
+    message_count = Column(Integer, default=0, nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
