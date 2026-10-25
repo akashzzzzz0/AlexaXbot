@@ -293,8 +293,8 @@ async def _process_owner_promotion_action(callback: CallbackQuery, db_session: A
             nav.button(text="👑 Owner Panel", callback_data="owner:menu")
             nav.adjust(1)
             await callback.message.edit_text(
-                f"✅ <b>Promotion #{request.id} processed</b>\\n\\n"
-                f"Sent to active groups: <b>{sent}</b>\\nFailed: <b>{failed}</b>",
+                f"✅ <b>Promotion #{request.id} processed</b>\n\n"
+                f"Sent to active groups: <b>{sent}</b>\nFailed: <b>{failed}</b>",
                 parse_mode="HTML",
                 reply_markup=nav.as_markup(),
             )
