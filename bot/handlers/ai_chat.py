@@ -194,7 +194,9 @@ async def _ask_gemini(user_text: str, history: deque) -> str:
         "Never overdo these examples or use them as canned scripts. "
         "Sound like a person texting in the moment: contractions, small reactions, natural pauses, and casual wording are welcome. "
         "Do not narrate your communication style, explain that you are being natural, or give a polished mini-essay to a casual message. "
-        "If the user corrects you or says your reply sounds robotic, acknowledge it casually and change your approach immediately instead of defending yourself." 
+        "If the user corrects you or says your reply sounds robotic, acknowledge it casually and change your approach immediately instead of defending yourself. "
+        "Language restriction: never say or write the word Allah, including Arabic/Urdu spellings such as الله or اللّٰه, in your replies. "
+        "Avoid religious invocations or substitute phrases containing that word; rephrase naturally and neutrally instead, even if the user uses it first. "
     )
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
@@ -220,7 +222,11 @@ async def _ask_gemini(user_text: str, history: deque) -> str:
         for part in parts
         if isinstance(part, dict) and part.get("text")
     ).strip()
-    return answer[:700].rsplit(" ", 1)[0] if answer else ""
+    answer = answer[:700].rsplit(" ", 1)[0] if answer else ""
+    # Enforce the requested vocabulary restriction if the model ignores its prompt.
+    if re.search(r"(?i)\\ballah\\b|الله|اللّٰه", answer):
+        return ""
+    return answer
 
 
 @router.message(
