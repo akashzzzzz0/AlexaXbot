@@ -852,7 +852,11 @@ async def is_owner_ai_message(message: Message) -> bool:
     )
 
 
-async def is_owner_direct_ai_message(message: Message) -> bool:
+async def is_owner_direct_ai_message(message: Message, state: FSMContext) -> bool:
+    # Do not let direct AI chat intercept Owner Panel workflows such as inbox replies,
+    # direct messages, broadcasts, or the explicit AI prompt state.
+    if await state.get_state():
+        return False
     text = (message.text or "").strip()
     return bool(
         message.from_user
