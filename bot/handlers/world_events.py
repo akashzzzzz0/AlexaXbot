@@ -15,7 +15,7 @@ from bot.services.economy_service import add_coins
 
 router = Router()
 EVENT_INTERVAL_SECONDS = 3 * 60 * 60
-EVENT_DURATION_MINUTES = 60
+EVENT_DURATION_MINUTES = 180
 _event_scheduler_task = None
 
 # Each entry contains a recognizable title/name; the first three words are shown.
@@ -35,23 +35,35 @@ PHRASES = [
 
 def _event_text(prize: int, low: int, high: int) -> str:
     return (
-        "📦 <b>WORLD EVENT: Guess the secret number!</b>\n\n"
-        f"💰 Prize: <b>{prize:,} coins</b>\n"
-        f"🎯 Range: <b>{low}–{high}</b>\n"
-        "🕹️ Guess using: <code>/g 250</code>\n"
-        f"⏳ Time limit: <b>{EVENT_DURATION_MINUTES} minutes</b>\n\n"
-        "🏆 First correct guess wins!"
+        "⚡ <b>ALEXA EVENT ACTIVATED</b> ⚡\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🎯 <b>SECRET CODE CHALLENGE</b>\n\n"
+        "📦 A new event just dropped!\n"
+        "🔢 Guess the secret 3-digit number to win.\n\n"
+        f"💰 <b>Prize: {prize:,} Coins</b>\n"
+        f"🎯 <b>Range: {low}–{high}</b>\n"
+        "🕹️ Your guess: <code>/g 250</code>\n"
+        f"⏳ <b>Duration: {EVENT_DURATION_MINUTES // 60} hours</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🏆 <b>First correct guess wins!</b>\n"
+        "🎁 <b>VIP REWARD — SPOILER</b>\n"
+        "✨ The mystery awaits you!"
     )
 
 
 def _phrase_event_text(prize: int, prefix: str) -> str:
     return (
-        "🧩 <b>WORLD EVENT: Guess the rest of the name!</b>\n\n"
-        f"🔎 Alexa gives the first three words: <b>{prefix}</b> …\n"
-        "💬 Guess the remaining words with <code>/n your answer</code>\n"
-        f"💰 Prize: <b>{prize:,} coins</b>\n"
-        f"⏳ Time limit: <b>{EVENT_DURATION_MINUTES} minutes</b>\n\n"
-        "🏆 First correct answer wins!"
+        "⚡ <b>ALEXA EVENT ACTIVATED</b> ⚡\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🧩 <b>SECRET NAME CHALLENGE</b>\n\n"
+        f"🔎 Guess the rest of the name! Alexa reveals: <b>{prefix}</b> …\n"
+        "💬 Your answer: <code>/n your answer</code>\n\n"
+        f"💰 <b>Prize: {prize:,} Coins</b>\n"
+        f"⏳ <b>Duration: {EVENT_DURATION_MINUTES // 60} hours</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🏆 <b>First correct answer wins!</b>\n"
+        "🎁 <b>VIP REWARD — SPOILER</b>\n"
+        "✨ The mystery awaits you!"
     )
 
 
