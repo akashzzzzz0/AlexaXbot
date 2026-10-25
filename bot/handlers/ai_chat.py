@@ -224,7 +224,7 @@ async def _ask_gemini(user_text: str, history: deque) -> str:
     ).strip()
     answer = answer[:700].rsplit(" ", 1)[0] if answer else ""
     # Enforce the requested vocabulary restriction if the model ignores its prompt.
-    if re.search(r"(?i)\\ballah\\b|الله|اللّٰه", answer):
+    if re.search(r"(?i)\ballah\b|الله|اللّٰه", answer):
         return ""
     return answer
 
