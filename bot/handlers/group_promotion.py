@@ -28,7 +28,9 @@ _PROMOTION_STATUS_RE = re.compile(
 )
 _PROMOTION_NOTICE = (
     "👑 <b>ALEXA VIP PROMOTION</b> 💜\n"
-    "⏳ Please allow up to 24 hours. Your group will be promoted after Owner approval.\n\n"
+    "━━━━━━━━━━━━━━━━━━\n"
+    "⏳ <b>Please wait, your group will be promoted within 24 hours.</b>\n"
+    "━━━━━━━━━━━━━━━━━━\n\n"
     "📩 Your group link has been received!\n\n"
     "⚡ Add Alexa as an <b>Admin</b> with the required permissions for quick verification.\n"
     "🔗 Make sure your link is a <b>direct group link</b>. Request-to-join links are not allowed.\n\n"
