@@ -2,6 +2,7 @@ import ssl
 import structlog
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from typing import AsyncGenerator, Optional
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from bot.config import settings
 
@@ -66,6 +67,21 @@ def _init_engine():
             "max_overflow": max(0, settings.MAX_CONNECTIONS - settings.POOL_SIZE),
         })
     _engine = create_async_engine(clean_url, **engine_options)
+    if clean_url.startswith("sqlite+"):
+        # Keep SQLite responsive under concurrent Telegram updates. WAL improves
+        # reader/writer coexistence; the remaining pragmas reduce avoidable I/O.
+        @event.listens_for(_engine.sync_engine, "connect")
+        def _configure_sqlite(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute("PRAGMA busy_timeout=5000")
+                cursor.execute("PRAGMA synchronous=NORMAL")
+                cursor.execute("PRAGMA temp_store=MEMORY")
+                cursor.execute("PRAGMA cache_size=-20000")
+                cursor.execute("PRAGMA foreign_keys=ON")
+                cursor.execute("PRAGMA journal_mode=WAL")
+            finally:
+                cursor.close()
     _session_maker = async_sessionmaker(
         _engine,
         class_=AsyncSession,
