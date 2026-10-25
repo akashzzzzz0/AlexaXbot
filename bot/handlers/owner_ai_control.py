@@ -532,7 +532,7 @@ async def _resolve_target(message: Message, session: AsyncSession, prompt: str, 
         target = await session.scalar(select(User).where(func.lower(User.username) == username_match.group(1).casefold()))
         if target:
             return target
-    id_match = re.search(r"(?<!\d)(\d{5,20})(?!\d)", prompt)
+    id_match = re.search(r"(?<![\d-])(\d{5,20})(?!\d)", prompt)
     if id_match:
         return await session.get(User, int(id_match.group(1)))
     return None
@@ -643,10 +643,36 @@ async def _moderation_action(message: Message, session: AsyncSession, action: st
 
 
 async def _run_request(message: Message, session: AsyncSession, prompt: str) -> str:
-    # Fast deterministic path for the owner's common self-admin requests.
-    # These explicit phrases don't need an LLM round-trip.
-    normalized = re.sub(r"[^a-z0-9@ ]+", " ", (prompt or "").casefold())
+    # Resolve common owner-panel data requests deterministically before Gemini.
+    # This lets saved user records and reports work even if the model endpoint is unavailable.
+    normalized = re.sub(r"[^a-z0-9@ -]+", " ", (prompt or "").casefold())
     normalized = re.sub(r"\s+", " ", normalized).strip()
+    has_user_lookup = bool(
+        re.search(r"(?<!\w)@[a-z0-9_]{5,32}\b", normalized)
+        or re.search(r"(?<![\d-])\d{5,20}(?!\d)", normalized)
+    )
+    if has_user_lookup and re.search(r"\b(id|user|member|profile|details|name|naam|kaun|who|telegram|referral|wallet|balance|xp|level)\b", normalized):
+        if re.search(r"\b(profile|details|full|complete|wallet|balance|xp|level|referral)\b", normalized):
+            return await _user_details(session, prompt)
+        return await _lookup_user(session, prompt)
+    if re.search(r"\b(list|show|all|recent)\b", normalized) and re.search(r"\b(users|members|users list|members list|saved users)\b", normalized):
+        return await _users_report(session)
+    if re.search(r"\b(referral|referrals|affiliate|withdrawal|withdrawals|stars request|premium request)\b", normalized):
+        return await _referral_report(session)
+    if re.search(r"\b(inbox|unread messages|user messages|messages from users)\b", normalized):
+        return await _inbox_report(session)
+    if re.search(r"\b(health|database status|bot status|bot health|is bot running)\b", normalized):
+        return await _bot_health_report(session)
+    if re.search(r"\b(global controls|anti spam status|anti flood status|lockdown status)\b", normalized):
+        return await _global_controls_report(session)
+    if re.search(r"\b(group settings|settings for|security settings|which locks|lock status|settings status)\b", normalized):
+        return await _group_settings_report(message, session, prompt)
+    if re.search(r"\b(group activity|joins and leaves|messages in group|activity report)\b", normalized):
+        return await _group_activity_report(message, session, prompt)
+    if re.search(r"\b(list|show|all)\b", normalized) and re.search(r"\b(groups|group list|active groups)\b", normalized):
+        return await _groups_report(session)
+    if re.search(r"\b(today report|daily report|report today|aaj ki report|aaj ka report|global report)\b", normalized):
+        return await _today_report(session)
     self_admin_phrases = (
         r"\b(?:mujhe|mujhko|me|myself)\s+(?:group\s+)?admin\s+(?:banao|bana do|make|promote)\b",
         r"\b(?:make|promote)\s+me\s+(?:a\s+)?admin\b",
@@ -664,6 +690,9 @@ async def _run_request(message: Message, session: AsyncSession, prompt: str) -> 
         intent = await _classify_request(prompt)
     except Exception as exc:
         logger.warning("Owner AI request classification failed: %s", type(exc).__name__)
+        lookup_hints = ("telegram id", " id", "username", "who is", "who's", "kaun hai", "profile", "details", "member", "user", "naam", "name", "ki id", "ka id", "add members")
+        if "@" in prompt or any(hint in prompt.casefold() for hint in lookup_hints):
+            return await _lookup_user(session, prompt)
         action_words = r"\b(ban|mute|kick|promote|demote|unban|unmute|warn|lock|unlock|admin|hatao|karo|kar do|remove|restrict)\b"
         if re.search(action_words, normalized):
             return "Owner action classify nahi ho saka, isliye kuch execute nahi hua. Request ko target user aur group ke saath dobara likho."
