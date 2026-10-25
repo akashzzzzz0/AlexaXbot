@@ -101,8 +101,27 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
     chat = None
 
     if is_private_invite:
-        await message.answer(_VIP_NOT_READY, parse_mode="HTML")
-        return
+        # Telegram Bot API cannot resolve an invite hash directly. If this invite
+        # link is already associated with a group Alexa knows, resolve that chat by
+        # its stored numeric ID and verify Alexa's current membership/admin status.
+        group = await db_session.scalar(
+            select(Group).where(Group.invite_link == group_link)
+        )
+        if group is None:
+            logger.info(
+                "Group promotion verification: private invite link is not mapped to a known group"
+            )
+            await message.answer(_VIP_NOT_READY, parse_mode="HTML")
+            return
+        try:
+            chat = await message.bot.get_chat(group.id)
+        except Exception:
+            logger.exception(
+                "Group promotion verification: get_chat failed for known private group id=%s",
+                group.id,
+            )
+            await message.answer(_VIP_NOT_READY, parse_mode="HTML")
+            return
     else:
         slug = group_link.split("t.me/", 1)[1].split("?", 1)[0].strip("/")
         if not slug or "/" in slug:
