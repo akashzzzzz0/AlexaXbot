@@ -32,10 +32,12 @@ _VIP_NOT_READY = (
     "👑 <b>Alexa — Together We Shine!</b>"
 )
 _PROMOTION_CONFIRMED = (
-    "🎉 <b>Great News! Your Group Is on the Promotion List!</b> 💜\n\n"
-    "✅ Your group has been successfully verified and added to Alexa's promotion list.\n\n"
-    "⏳ Please wait! We'll promote your group within <b>24 hours</b>.\n\n"
-    "🚀 Thank you for choosing Alexa. Your community deserves to shine! 👑"
+    "🎉💜 <b>GREAT NEWS! YOUR GROUP IS VERIFIED!</b> 👑\\n\\n"
+    "✅ Alexa has successfully verified your group and confirmed her Admin permissions.\\n\\n"
+    "🚀 <b>Your group has been added to Alexa's Free Group Promotion list!</b>\\n\\n"
+    "⏳ Please wait while your request is reviewed by the Owner. Once approved, Alexa will start promoting your group within 24 hours.\\n\\n"
+    "💎 Thank you for choosing Alexa!\\n\\n"
+    "👑 <b>Alexa — Together We Shine!</b> 💜"
 )
 
 
@@ -96,16 +98,12 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
     chat = None
 
     if is_private_invite:
-        await message.answer(
-            "🔗 Please send your group's <b>direct public link</b> (for example, <code>https://t.me/YourGroup</code>) "
-            "instead of a join-request/private invite link so Alexa can verify the group and Admin status.",
-            parse_mode="HTML",
-        )
+        await message.answer(_VIP_NOT_READY, parse_mode="HTML")
         return
     else:
         slug = group_link.split("t.me/", 1)[1].split("?", 1)[0].strip("/")
         if not slug or "/" in slug:
-            await message.answer("Please send a valid public group link such as <code>https://t.me/YourGroup</code>.", parse_mode="HTML")
+            await message.answer(_VIP_NOT_READY, parse_mode="HTML")
             return
         try:
             chat = await message.bot.get_chat("@" + slug)
@@ -115,7 +113,7 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
 
     chat_type = getattr(chat.type, "value", chat.type)
     if chat_type not in {"group", "supergroup"}:
-        await message.answer("That link doesn't point to a Telegram group. Please send a group link.")
+        await message.answer(_VIP_NOT_READY, parse_mode="HTML")
         return
 
     try:
