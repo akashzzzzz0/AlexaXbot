@@ -25,7 +25,7 @@ class CallbackLoggingMiddleware(BaseMiddleware):
             if event.callback_query:
                 cb = event.callback_query
                 user = cb.from_user
-                logger.info(
+                logger.debug(
                     "BUTTON_PRESSED",
                     callback_data=cb.data,
                     user_id=user.id,
@@ -39,7 +39,7 @@ class CallbackLoggingMiddleware(BaseMiddleware):
                 msg = event.message
                 user = msg.from_user
                 if user and not user.is_bot and msg.text:
-                    logger.info(
+                    logger.debug(
                         "MESSAGE_RECEIVED",
                         text=msg.text[:120],
                         user_id=user.id,
@@ -54,7 +54,7 @@ class CallbackLoggingMiddleware(BaseMiddleware):
         # Log result of callback (after handler executed)
         if isinstance(event, Update) and event.callback_query:
             cb = event.callback_query
-            logger.info(
+            logger.debug(
                 "CALLBACK_HANDLED",
                 callback_data=cb.data,
                 user_id=cb.from_user.id,
