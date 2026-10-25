@@ -675,7 +675,7 @@ async def _run_request(message: Message, session: AsyncSession, prompt: str) -> 
         return await _global_controls_report(session)
     if re.search(r"\b(group settings|settings for|security settings|which locks|lock status|settings status)\b", normalized):
         return await _group_settings_report(message, session, prompt)
-    if re.search(r"\b(group status|status of (?:this )?group|this group status|is alexa admin|alexa status|bot status in (?:this )?group)\b", normalized):
+    if re.search(r"\b(group (?:ka|ki|ke )?status|(?:is|iss|ye|this) group (?:ka )?status|status of (?:this )?group|is alexa admin|alexa status|bot status in (?:this )?group)\b", normalized):
         return await _group_status(message)
     if re.search(r"\b(group activity|joins and leaves|messages in group|activity report|today.?s? (?:total )?(?:chat|messages)|aaj (?:ki )?(?:total )?(?:chat|messages)|aaj kitni (?:chat|messages)|today group messages)\b", normalized):
         return await _group_activity_report(message, session, prompt)
