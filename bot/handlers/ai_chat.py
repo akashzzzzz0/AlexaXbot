@@ -7,13 +7,15 @@ import html
 import re
 import sqlite3
 import time
+import os
+import random
 from collections import defaultdict, deque
 from pathlib import Path
 
 import httpx
 from aiogram import F, Router
 from aiogram.enums import ChatType
-from aiogram.types import Message
+from aiogram.types import Message, ReactionTypeEmoji
 
 from bot.config import get_gemini_api_key, settings
 
@@ -21,6 +23,66 @@ router = Router(name="alexa_ai_chat")
 _conversations = defaultdict(lambda: deque(maxlen=12))
 _HISTORY_DB = Path("alexa_chat_history.db")
 _HISTORY_LIMIT = 30
+_history_loaded = set()
+_gemini_client: httpx.AsyncClient | None = None
+
+
+def _get_gemini_client() -> httpx.AsyncClient:
+    """Reuse HTTP connections instead of doing a fresh TLS handshake each turn."""
+    global _gemini_client
+    if _gemini_client is None or _gemini_client.is_closed:
+        _gemini_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(12.0, connect=4.0),
+            limits=httpx.Limits(max_connections=30, max_keepalive_connections=10),
+        )
+    return _gemini_client
+
+
+def _reaction_for_text(text: str) -> str | None:
+    """Return an occasional context-based reaction, not one on every message."""
+    value = text.casefold()
+    options = [
+        (r"\b(haha+|hehe+|lol|lmao|rofl)\b|😂|🤣|😹", "😂"),
+        (r"\b(thanks?|thank you|shukriya|meherbani|love you|i love)\b|❤️|🥰", "❤️"),
+        (r"\b(wow|seriously|really|no way|omg|what)\b|😮|😱|🤯", "😮"),
+        (r"\b(sad|upset|cry|miss you|bura lag|mood off|dukhi)\b|😢|😭|🥺", "🥺"),
+    ]
+    for pattern, emoji in options:
+        if re.search(pattern, value, re.IGNORECASE):
+            return emoji if random.random() < 0.42 else None
+    return None
+
+
+async def _maybe_react(message: Message) -> None:
+    if not message.from_user or message.from_user.is_bot:
+        return
+    emoji = _reaction_for_text(message.text or message.caption or "")
+    if not emoji:
+        return
+    try:
+        await message.bot.set_message_reaction(
+            chat_id=message.chat.id,
+            message_id=message.message_id,
+            reaction=[ReactionTypeEmoji(emoji=emoji)],
+        )
+    except Exception:
+        # Reactions are optional; unsupported chat permissions must not affect chat.
+        pass
+
+
+async def _maybe_send_sticker(message: Message) -> None:
+    """Send a configured Alexa sticker occasionally; without file IDs, do nothing."""
+    raw_ids = os.getenv("ALEXA_STICKER_FILE_IDS", "").strip()
+    if not raw_ids or random.random() >= 0.045:
+        return
+    file_ids = [item.strip() for item in raw_ids.split(",") if item.strip()]
+    if not file_ids:
+        return
+    try:
+        await message.answer_sticker(random.choice(file_ids))
+    except Exception:
+        # A missing/invalid sticker ID must never break AI replies.
+        pass
 
 
 def _history_db_init() -> None:
@@ -208,10 +270,10 @@ async def _ask_gemini(user_text: str, history: deque) -> str:
         "generationConfig": {"temperature": 0.92, "topP": 0.94, "maxOutputTokens": 180},
     }
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=8.0)) as client:
-        response = await client.post(url, params={"key": api_key}, json=payload)
-        response.raise_for_status()
-        data = response.json()
+    client = _get_gemini_client()
+    response = await client.post(url, params={"key": api_key}, json=payload)
+    response.raise_for_status()
+    data = response.json()
 
     candidates = data.get("candidates") or []
     if not candidates:
@@ -262,11 +324,12 @@ async def alexa_ai_chat(message: Message) -> None:
     history = _conversations[key]
     try:
         # Reload from disk every turn: previous chats survive restarts and deployments.
-        persisted_history = await asyncio.to_thread(
-            _history_db_load, message.chat.id, message.from_user.id
-        )
-        history.clear()
-        history.extend(persisted_history)
+        if key not in _history_loaded:
+            persisted_history = await asyncio.to_thread(
+                _history_db_load, message.chat.id, message.from_user.id
+            )
+            history.extend(persisted_history)
+            _history_loaded.add(key)
         answer = await _ask_gemini(text, history)
     except (httpx.HTTPError, ValueError, TypeError):
         return
@@ -286,9 +349,12 @@ async def alexa_ai_chat(message: Message) -> None:
     except Exception:
         # Chat should still work if the history file is temporarily unavailable.
         pass
+    # Social touches run in the background so they don't delay the AI reply.
+    asyncio.create_task(_maybe_react(message))
     try:
         await message.reply(html.escape(answer))
     except Exception:
         # Telegram reply failures should not interrupt bot polling.
-        pass
+        return
+    asyncio.create_task(_maybe_send_sticker(message))
 
