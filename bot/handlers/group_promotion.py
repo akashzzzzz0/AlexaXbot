@@ -28,7 +28,8 @@ _VIP_NOT_READY = (
     "Oops! ✨ Alexa isn't in your group yet!\n\n"
     "🚀 <b>Ready to grow your community?</b>\n"
     "💎 Add Alexa to your group and promote me to Admin, then send your group link again for verification.\n\n"
-    "🌟 <i>Your Growth Journey Starts Here!</i>"
+    "🌟 <i>Your Growth Journey Starts Here!</i>\n\n"
+    "👑 <b>Alexa — Together We Shine!</b>"
 )
 _PROMOTION_CONFIRMED = (
     "🎉 <b>Great News! Your Group Is on the Promotion List!</b> 💜\n\n"
