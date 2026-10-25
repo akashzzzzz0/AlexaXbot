@@ -1024,3 +1024,26 @@ class DailyGroupMessageStat(Base):
     day_key = Column(String(10), nullable=False)
     message_count = Column(Integer, default=0, nullable=False)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class GuessNumberEvent(Base):
+    """Persistent per-group Guess the Number events and their winners."""
+    __tablename__ = "guess_number_events"
+    __table_args__ = (
+        Index("ix_guess_number_events_chat_status", "chat_id", "status"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    chat_id = Column(BigInteger, nullable=False, index=True)
+    chat_title = Column(String(256), nullable=False)
+    secret_number = Column(Integer, nullable=False)
+    prize = Column(Integer, nullable=False)
+    starts_at = Column(DateTime(timezone=True), nullable=False)
+    ends_at = Column(DateTime(timezone=True), nullable=False)
+    status = Column(String(16), default="active", nullable=False)
+    created_by = Column(BigInteger, nullable=True)
+    winner_user_id = Column(BigInteger, nullable=True)
+    winner_telegram_id = Column(BigInteger, nullable=True)
+    winner_name = Column(String(256), nullable=True)
+    winning_guess = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
