@@ -306,7 +306,10 @@ async def _ask_gemini(user_text: str, history: deque) -> str:
     if not api_key:
         return ""
 
-    model = settings.GEMINI_MODEL.strip() or "gemini-2.5-flash"
+    model = settings.GEMINI_MODEL.strip() or "gemini-3.5-flash-lite"
+    # Replace the previous default with the current low-latency model.
+    if model == "gemini-2.5-flash":
+        model = "gemini-3.5-flash-lite"
     contents = [
         {"role": role, "parts": [{"text": old_text}]}
         for role, old_text in history
@@ -332,7 +335,7 @@ async def _ask_gemini(user_text: str, history: deque) -> str:
     payload = {
         "systemInstruction": {"parts": [{"text": system_instruction}]},
         "contents": contents,
-        "generationConfig": {"temperature": 0.92, "topP": 0.94, "maxOutputTokens": 130},
+        "generationConfig": {"temperature": 0.92, "topP": 0.94, "maxOutputTokens": 100},
     }
 
     client = _get_gemini_client()
