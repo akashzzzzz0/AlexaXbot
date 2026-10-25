@@ -1,5 +1,7 @@
 import asyncio
 import time
+from datetime import timezone
+from zoneinfo import ZoneInfo
 from datetime import datetime
 from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery, Message, BotCommand, BotCommandScopeDefault, BotCommandScopeChat, ReplyParameters
@@ -19,6 +21,16 @@ from html import escape
 
 logger = structlog.get_logger()
 router = Router()
+_INBOX_TIMEZONE = ZoneInfo("Asia/Kolkata")
+
+
+def _format_inbox_timestamp(value) -> str:
+    if value is None:
+        return "time unknown"
+    # Database timestamps are stored as UTC; handle both naive and aware values.
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(_INBOX_TIMEZONE).strftime("%d %b %Y, %H:%M")
 
 _maintenance_mode = False
 _PROCESS_STARTED = time.monotonic()
@@ -1988,7 +2000,7 @@ async def _render_inbox_conversation(callback: CallbackQuery, db_session: AsyncS
             body = (item.preview or f"[{item.content_type}]").strip()
             if item.content_type != "text" and not body:
                 body = f"[{item.content_type}]"
-            stamp = item.created_at.strftime("%d %b %H:%M") if item.created_at else "time unknown"
+            stamp = _format_inbox_timestamp(item.created_at)
             lines.append(f"<b>{sender_name}:</b>\n{escape(body[:900])}\n<code>{escape(stamp)}</code>\n")
     else:
         lines.append("No saved messages from this user.")
