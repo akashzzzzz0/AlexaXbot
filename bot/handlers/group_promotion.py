@@ -20,8 +20,8 @@ router = Router(name="alexa_group_promotion")
 _TRIGGER_RE = re.compile(r"(?is)^\s*\.done\b.*|.*t\.me/.*$")
 _LINK_RE = re.compile(r"(?i)(?:https?://)?t\.me/(?:\+[\w-]+|joinchat/[\w-]+|[A-Za-z0-9_]{5,})")
 _PROMOTION_STATUS_RE = re.compile(
-    r"(?i)\b(?:promotion|promote|promoting)\b.*\b(?:not yet|not done|still waiting|pending|status|update|when|please|my group|group|kro|kar[o]?|hua|hui|hoyi|abhi tak|kab)\b"
-    r"|\b(?:abhi tak|still waiting|promotion status|promote my group)\b"
+    r"(?i).*\b(?:promotion|promote|promoting)\b.*"
+    r"|\b(?:abhi tak|still waiting)\b"
 )
 _VIP_NOT_READY = (
     "👑 <b>ALEXA VIP GROUP PROMOTION</b> 💜\n\n"
