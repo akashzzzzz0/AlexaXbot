@@ -83,7 +83,7 @@ def _emotion_category(text: str) -> str | None:
         ("angry", r"angry|gussa|ghussa|naraz|😡|🤬|😠|😤"),
         ("love", r"thanks|thank you|shukriya|pyaar|pyar|cute|❤️|😍|🥰|😘|💕"),
         ("surprise", r"wow|omg|shocked|surprised|😮|😱|🤯|😳"),
-        ("greeting", r"^\\s*(hi+|hello+|hey+|salam|aoa|bye+|good night|good morning)\\b"),
+        ("greeting", r"^\s*(hi+|hello+|hey+|salam|aoa|bye+|good night|good morning)\b"),
         ("attitude", r"attitude|boss|savage|swag|😎|😏|🔥"),
     )
     for category, pattern in rules:
