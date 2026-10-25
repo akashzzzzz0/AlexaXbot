@@ -2,9 +2,62 @@ from aiogram import Router
 from bot.handlers import start, security, moderation, economy, games, duels, statistics, settings, help, affiliate, owner, owner_group_message, owner_group_activity, force_join, welcome, tournaments, alexa_games, group_tools, community_shield, scam_review, ultra_vip, ai, ai_chat, owner_ai_control, missing_games, group_promotion
 from bot.handlers.auto_delete_middleware import StartMenuAutoDeleteMessageMiddleware, StartMenuAutoDeleteCallbackMiddleware
 
+class DailyGroupMessageCounterMiddleware:
+    """Count incoming human group messages for per-day activity reports."""
+    async def __call__(self, handler, event, data):
+        message = event
+        chat_type = getattr(getattr(message, "chat", None), "type", None)
+        has_content = any(getattr(message, field, None) for field in (
+            "text", "caption", "photo", "document", "sticker", "video", "audio", "voice", "animation"
+        ))
+        if (
+            chat_type in {"group", "supergroup"}
+            and getattr(message, "from_user", None)
+            and not message.from_user.is_bot
+            and has_content
+        ):
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            from sqlalchemy import select
+            from sqlalchemy.exc import IntegrityError
+            from bot.database.connection import async_session_maker
+            from bot.database.models import DailyGroupMessageStat
+            day_key = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+            try:
+                async with async_session_maker() as session:
+                    row = await session.scalar(select(DailyGroupMessageStat).where(
+                        DailyGroupMessageStat.group_id == message.chat.id,
+                        DailyGroupMessageStat.day_key == day_key,
+                    ))
+                    if row:
+                        row.message_count = (row.message_count or 0) + 1
+                    else:
+                        session.add(DailyGroupMessageStat(
+                            group_id=message.chat.id, day_key=day_key, message_count=1
+                        ))
+                    await session.commit()
+            except IntegrityError:
+                try:
+                    async with async_session_maker() as session:
+                        row = await session.scalar(select(DailyGroupMessageStat).where(
+                            DailyGroupMessageStat.group_id == message.chat.id,
+                            DailyGroupMessageStat.day_key == day_key,
+                        ))
+                        if row:
+                            row.message_count = (row.message_count or 0) + 1
+                            await session.commit()
+                except Exception:
+                    pass
+            except Exception:
+                # Never interrupt group handlers if optional stats tracking fails.
+                pass
+        return await handler(event, data)
+
+
 
 def get_main_router() -> Router:
     router = Router()
+    router.message.outer_middleware(DailyGroupMessageCounterMiddleware())
     router.message.outer_middleware(StartMenuAutoDeleteMessageMiddleware())
     router.callback_query.outer_middleware(StartMenuAutoDeleteCallbackMiddleware())
     # Register command and feature routers before welcome's broad group-message
