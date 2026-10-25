@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     # Gemini key is loaded from private runtime config; never commit a real key.
     GEMINI_API_KEY: str = ""
     API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-2.5-flash"
+    GEMINI_MODEL: str = "gemini-3.5-flash-lite"
 
     WEBHOOK_URL: str = ""
     WEBHOOK_SECRET: str = "guardian_x_secret"
