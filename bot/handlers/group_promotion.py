@@ -288,7 +288,16 @@ async def _process_owner_promotion_action(callback: CallbackQuery, db_session: A
             except Exception:
                 pass
             await callback.answer(f"Promotion sent to {sent} groups. Failed: {failed}.")
-            await promotion_requests_panel(callback, db_session)
+            nav = InlineKeyboardBuilder()
+            nav.button(text="🗂 Promotion Requests", callback_data="owner:promo_requests")
+            nav.button(text="👑 Owner Panel", callback_data="owner:menu")
+            nav.adjust(1)
+            await callback.message.edit_text(
+                f"✅ <b>Promotion #{request.id} processed</b>\\n\\n"
+                f"Sent to active groups: <b>{sent}</b>\\nFailed: <b>{failed}</b>",
+                parse_mode="HTML",
+                reply_markup=nav.as_markup(),
+            )
             return
 
         await db_session.commit()
@@ -313,7 +322,15 @@ async def _process_owner_promotion_action(callback: CallbackQuery, db_session: A
         except Exception:
             pass
         await callback.answer("Promotion request rejected.")
-        await promotion_requests_panel(callback, db_session)
+        nav = InlineKeyboardBuilder()
+        nav.button(text="🗂 Promotion Requests", callback_data="owner:promo_requests")
+        nav.button(text="👑 Owner Panel", callback_data="owner:menu")
+        nav.adjust(1)
+        await callback.message.edit_text(
+            f"❌ <b>Promotion request #{request.id} rejected</b>",
+            parse_mode="HTML",
+            reply_markup=nav.as_markup(),
+        )
 
 
 @router.callback_query(F.data.startswith("owner:promo_request:approve:"))
