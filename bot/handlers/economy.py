@@ -4,6 +4,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from bot.services.economy_service import (
     get_balance, claim_daily_reward, claim_weekly_reward, claim_monthly_reward,
     deposit_to_bank, withdraw_from_bank, transfer_coins, get_transactions
@@ -216,7 +217,6 @@ async def cmd_transactions(message: Message, _: callable, db_session: AsyncSessi
         sign = '+' if tx.amount > 0 else ''
         text += f'{sign}{format_number(tx.amount)} — {tx.type} — {tx.created_at.strftime("%m/%d %H:%M")}\n'
     await message.reply(text, parse_mode='HTML')
-
 
 #
 # ECONOMY CALLBACK HANDLERS — Make inline buttons fully functional
@@ -437,8 +437,7 @@ async def rewards_achievements(callback: CallbackQuery, _: callable, db_session:
         return
     from bot.services.achievement_service import get_user_achievements
     user_achs = await get_user_achievements(db_session, db_user.id)
-    text = _('achievements_menu') + '\n\n'
-    text += _('achievements_count').format(earned=len(user_achs), total=100) + '\n\n'
+    text = _('achievements_menu') + '\n\n'    text += _('achievements_count').format(earned=len(user_achs), total=100) + '\n\n'
     if user_achs:
         for ua, ach in user_achs[:10]:
             text += f'{ach.icon} <b>{ach.code}</b> — {ach.points} pts\n'
@@ -584,4 +583,3 @@ async def claim_mission(callback: CallbackQuery, _: callable, db_session: AsyncS
     await db_session.flush()
     await callback.answer(f"Reward claimed: {mission.reward_coins} coins + {mission.reward_xp} XP", show_alert=True)
     await callback.message.edit_reply_markup(reply_markup=None)
-
