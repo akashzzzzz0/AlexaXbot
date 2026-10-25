@@ -1047,3 +1047,28 @@ class GuessNumberEvent(Base):
     winner_name = Column(String(256), nullable=True)
     winning_guess = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class GuessPhraseEvent(Base):
+    """Persistent per-group guess-the-rest-of-the-name events."""
+    __tablename__ = "guess_phrase_events"
+    __table_args__ = (
+        Index("ix_guess_phrase_events_chat_status", "chat_id", "status"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    chat_id = Column(BigInteger, nullable=False, index=True)
+    chat_title = Column(String(256), nullable=False)
+    title = Column(String(256), nullable=False)
+    prefix = Column(String(256), nullable=False)
+    answer = Column(String(256), nullable=False)
+    prize = Column(Integer, nullable=False)
+    starts_at = Column(DateTime(timezone=True), nullable=False)
+    ends_at = Column(DateTime(timezone=True), nullable=False)
+    status = Column(String(16), default="active", nullable=False)
+    created_by = Column(BigInteger, nullable=True)
+    winner_user_id = Column(BigInteger, nullable=True)
+    winner_telegram_id = Column(BigInteger, nullable=True)
+    winner_name = Column(String(256), nullable=True)
+    winning_answer = Column(String(256), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
