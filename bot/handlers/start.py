@@ -55,21 +55,21 @@ async def _send_add_group_prompt(message: Message):
             InlineKeyboardButton(text="💬 Discussion Group", url="https://t.me/+dGq9_BqdD5hjYzk0"),
             InlineKeyboardButton(text="📢 Updates Channel", url="https://t.me/+X5aelUHksVRlODQ8"),
         ],
-        [InlineKeyboardButton(text="🎁 Get Free Premium + Stars", callback_data="affiliate:promo")],
+        [InlineKeyboardButton(text="⭐ Get Telegram Premium + Stars", callback_data="affiliate:promo")],
         [InlineKeyboardButton(text="📣 Free Group Promotion", callback_data="start:promotion")],
     ])
     user = message.from_user
     first_name = escape(user.first_name or "there") if user else "there"
     username_line = f"👤 @{escape(user.username)}\n" if user and user.username else ""
     caption = (
-        f"👋 Welcome, {first_name}!\n\n"
-        "🛡️ GROUP SECURITY\n"
-        "Anti-spam • Smart locks • Moderation\n\n"
-        "🎮 GAMES & REWARDS\n"
-        "Games • Economy • Referral rewards\n\n"
-        "🤖 SMART AI ASSISTANT\n"
-        "Friendly chat and useful group tools\n\n"
-        "➕ Add ALEXA to your group and grant admin permissions for protection and management."
+        f"👋 Hey {first_name}! Welcome to ALEXA 💜\n\n"
+        "🤖 Your all-in-one Telegram group companion!\n\n"
+        "🛡️ Smart Moderation • 🎮 Fun Games\n"
+        "🤖 AI Chat • 🎁 Rewards & Referrals\n"
+        "📢 Free Group Promotion\n\n"
+        "✨ Make your groups safer, smarter, and more fun!\n\n"
+        "🚀 Add ALEXA to your group and grant admin permissions to unlock the full experience.\n\n"
+        "👇 Choose an option below to get started."
     )
     # Use ordinary Unicode emoji and plain text. This avoids invalid custom-emoji
     # entities and ensures /start does not depend on a profile-photo/document ID.
