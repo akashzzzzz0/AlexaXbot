@@ -1,5 +1,6 @@
 import asyncio
 import random
+import re
 from datetime import datetime, timedelta, timezone
 
 from aiogram import Router, F
@@ -9,62 +10,115 @@ from sqlalchemy import select, update
 
 from bot.config import settings
 from bot.database.connection import async_session_maker
-from bot.database.models import Group, GuessNumberEvent
+from bot.database.models import Group, GuessNumberEvent, GuessPhraseEvent
 from bot.services.economy_service import add_coins
 
 router = Router()
-EVENT_INTERVAL_SECONDS = 6 * 60 * 60
+EVENT_INTERVAL_SECONDS = 3 * 60 * 60
 EVENT_DURATION_MINUTES = 60
 _event_scheduler_task = None
+
+# Each entry contains a recognizable title/name; the first three words are shown.
+PHRASES = [
+    ("Harry Potter and the Philosopher's Stone", "Harry Potter and", "the Philosopher's Stone"),
+    ("The Lord of the Rings", "The Lord of", "the Rings"),
+    ("The Legend of Zelda", "The Legend of", "Zelda"),
+    ("The Fast and the Furious", "The Fast and", "the Furious"),
+    ("Pirates of the Caribbean", "Pirates of the", "Caribbean"),
+    ("Beauty and the Beast", "Beauty and the", "Beast"),
+    ("The Wizard of Oz", "The Wizard of", "Oz"),
+    ("Charlie and the Chocolate Factory", "Charlie and the", "Chocolate Factory"),
+    ("The Chronicles of Narnia", "The Chronicles of", "Narnia"),
+    ("Guardians of the Galaxy", "Guardians of the", "Galaxy"),
+]
 
 
 def _event_text(prize: int, low: int, high: int) -> str:
     return (
-        "📦 <b>New event dropped: Guess the secret number to win coins!</b>\n\n"
+        "📦 <b>WORLD EVENT: Guess the secret number!</b>\n\n"
         f"💰 Prize: <b>{prize:,} coins</b>\n"
-        f"🎯 Range: [ <b>{low} ──── {high}</b> ]\n"
-        "🕹️ Guess using: <code>/g &lt;number&gt;</code>\n"
+        f"🎯 Range: <b>{low}–{high}</b>\n"
+        "🕹️ Guess using: <code>/g 250</code>\n"
         f"⏳ Time limit: <b>{EVENT_DURATION_MINUTES} minutes</b>\n\n"
-        "🏆 First person to guess the right number wins!"
+        "🏆 First correct guess wins!"
     )
 
 
+def _phrase_event_text(prize: int, prefix: str) -> str:
+    return (
+        "🧩 <b>WORLD EVENT: Guess the rest of the name!</b>\n\n"
+        f"🔎 Alexa gives the first three words: <b>{prefix}</b> …\n"
+        "💬 Guess the remaining words with <code>/n your answer</code>\n"
+        f"💰 Prize: <b>{prize:,} coins</b>\n"
+        f"⏳ Time limit: <b>{EVENT_DURATION_MINUTES} minutes</b>\n\n"
+        "🏆 First correct answer wins!"
+    )
+
+
+async def _has_active_event(session, chat_id: int, now: datetime) -> bool:
+    number_event = await session.scalar(
+        select(GuessNumberEvent.id).where(
+            GuessNumberEvent.chat_id == chat_id,
+            GuessNumberEvent.status == "active",
+            GuessNumberEvent.ends_at > now,
+        ).limit(1)
+    )
+    if number_event:
+        return True
+    phrase_event = await session.scalar(
+        select(GuessPhraseEvent.id).where(
+            GuessPhraseEvent.chat_id == chat_id,
+            GuessPhraseEvent.status == "active",
+            GuessPhraseEvent.ends_at > now,
+        ).limit(1)
+    )
+    return phrase_event is not None
+
+
 async def _create_event(bot, chat_id: int, chat_title: str, created_by: int | None = None) -> bool:
-    low, high = 100, 500
     now = datetime.now(timezone.utc)
+    prize = random.randint(500, 2000)
+    event_type = random.choice(("number", "phrase"))
+    low, high = 100, 500
+    phrase_row = None
+
     async with async_session_maker() as session:
-        active = await session.scalar(
-            select(GuessNumberEvent).where(
-                GuessNumberEvent.chat_id == chat_id,
-                GuessNumberEvent.status == "active",
-                GuessNumberEvent.ends_at > now,
-            )
-        )
-        if active:
+        if await _has_active_event(session, chat_id, now):
             return False
-        prize = random.randint(500, 2000)
-        session.add(GuessNumberEvent(
-            chat_id=chat_id,
-            chat_title=chat_title[:256],
-            secret_number=random.randint(low, high),
-            prize=prize,
-            starts_at=now,
-            ends_at=now + timedelta(minutes=EVENT_DURATION_MINUTES),
-            status="active",
-            created_by=created_by,
-        ))
+        if event_type == "number":
+            session.add(GuessNumberEvent(
+                chat_id=chat_id, chat_title=chat_title[:256],
+                secret_number=random.randint(low, high), prize=prize,
+                starts_at=now, ends_at=now + timedelta(minutes=EVENT_DURATION_MINUTES),
+                status="active", created_by=created_by,
+            ))
+        else:
+            title, prefix, answer = random.choice(PHRASES)
+            phrase_row = GuessPhraseEvent(
+                chat_id=chat_id, chat_title=chat_title[:256],
+                title=title, prefix=prefix, answer=answer, prize=prize,
+                starts_at=now, ends_at=now + timedelta(minutes=EVENT_DURATION_MINUTES),
+                status="active", created_by=created_by,
+            )
+            session.add(phrase_row)
         await session.commit()
+        phrase_id = phrase_row.id if phrase_row else None
+
     try:
-        await bot.send_message(chat_id, _event_text(prize, low, high))
+        if event_type == "number":
+            await bot.send_message(chat_id, _event_text(prize, low, high))
+        else:
+            await bot.send_message(chat_id, _phrase_event_text(prize, prefix))
     except Exception:
         async with async_session_maker() as session:
-            saved = await session.scalar(
-                select(GuessNumberEvent).where(
+            if event_type == "number":
+                saved = await session.scalar(select(GuessNumberEvent).where(
                     GuessNumberEvent.chat_id == chat_id,
                     GuessNumberEvent.status == "active",
                     GuessNumberEvent.starts_at == now,
-                )
-            )
+                ))
+            else:
+                saved = await session.get(GuessPhraseEvent, phrase_id)
             if saved:
                 saved.status = "cancelled"
                 await session.commit()
@@ -75,41 +129,41 @@ async def _create_event(bot, chat_id: int, chat_title: str, created_by: int | No
 async def _close_expired_events(bot) -> None:
     now = datetime.now(timezone.utc)
     async with async_session_maker() as session:
-        rows = (await session.scalars(
-            select(GuessNumberEvent).where(
-                GuessNumberEvent.status == "active",
-                GuessNumberEvent.ends_at <= now,
-            )
-        )).all()
-        notices = [row.chat_id for row in rows]
-        for row in rows:
+        number_rows = (await session.scalars(select(GuessNumberEvent).where(
+            GuessNumberEvent.status == "active", GuessNumberEvent.ends_at <= now,
+        ))).all()
+        phrase_rows = (await session.scalars(select(GuessPhraseEvent).where(
+            GuessPhraseEvent.status == "active", GuessPhraseEvent.ends_at <= now,
+        ))).all()
+        notices = [(row.chat_id, "number") for row in number_rows]
+        notices.extend((row.chat_id, "phrase") for row in phrase_rows)
+        for row in [*number_rows, *phrase_rows]:
             row.status = "expired"
         await session.commit()
-    for chat_id in notices:
+    for chat_id, kind in notices:
         try:
-            await bot.send_message(
-                chat_id,
-                "⏳ <b>Guess event ended!</b> Nobody guessed the secret number in time. The next event drops automatically.",
+            message = (
+                "⏳ <b>Guess event ended!</b> Nobody guessed the number in time."
+                if kind == "number" else
+                "⏳ <b>Name event ended!</b> Nobody guessed the remaining words in time."
             )
+            await bot.send_message(chat_id, message + " The next event arrives in the event cycle.")
         except Exception:
             pass
 
 
 async def _event_scheduler(bot) -> None:
-    # First event is dropped on startup; subsequent drops are six hours apart.
+    # Drop an event at startup, then every three hours.
     while True:
         try:
             await _close_expired_events(bot)
             async with async_session_maker() as session:
-                groups = (await session.scalars(
-                    select(Group).where(Group.is_active.is_(True))
-                )).all()
+                groups = (await session.scalars(select(Group).where(Group.is_active.is_(True)))).all()
                 targets = [(group.id, group.title) for group in groups]
             for chat_id, title in targets:
                 try:
                     await _create_event(bot, chat_id, title)
                 except Exception:
-                    # A single group's failure must not stop other groups' events.
                     continue
         except asyncio.CancelledError:
             raise
@@ -149,53 +203,77 @@ async def guess_number(message: Message, db_session, db_user, **kwargs):
     if not 100 <= guess <= 500:
         await message.reply("🎯 The number must be between 100 and 500.")
         return
-
     now = datetime.now(timezone.utc)
-    event = await db_session.scalar(
-        select(GuessNumberEvent).where(
-            GuessNumberEvent.chat_id == message.chat.id,
-            GuessNumberEvent.status == "active",
-            GuessNumberEvent.ends_at > now,
-        ).order_by(GuessNumberEvent.starts_at.desc())
-    )
+    event = await db_session.scalar(select(GuessNumberEvent).where(
+        GuessNumberEvent.chat_id == message.chat.id,
+        GuessNumberEvent.status == "active", GuessNumberEvent.ends_at > now,
+    ).order_by(GuessNumberEvent.starts_at.desc()))
     if not event:
-        await message.reply("🎮 There is no active guessing event right now. Watch for the next event drop!")
+        await message.reply("🎮 There is no active number event right now.")
         return
     if guess != event.secret_number:
         await message.reply("❌ Not the secret number. Try again!")
         return
-
-    # Atomic status change ensures only the first correct guess can win.
-    result = await db_session.execute(
-        update(GuessNumberEvent)
+    result = await db_session.execute(update(GuessNumberEvent)
         .where(GuessNumberEvent.id == event.id, GuessNumberEvent.status == "active")
-        .values(
-            status="won",
-            winner_user_id=db_user.id,
-            winner_telegram_id=message.from_user.id,
-            winner_name=message.from_user.full_name[:256],
-            winning_guess=guess,
-        )
-    )
+        .values(status="won", winner_user_id=db_user.id,
+                winner_telegram_id=message.from_user.id,
+                winner_name=message.from_user.full_name[:256], winning_guess=guess))
     if result.rowcount != 1:
         await db_session.rollback()
         await message.reply("🏁 This event has already been won.")
         return
-
-    await add_coins(
-        db_session,
-        db_user.id,
-        event.prize,
+    await add_coins(db_session, db_user.id, event.prize,
         tx_type="world_event_reward",
         description=f"Guess the number event prize in chat {message.chat.id}",
-        reference_id=f"guess_event:{event.id}",
-    )
+        reference_id=f"guess_event:{event.id}")
     await db_session.commit()
     await message.reply(
         "🎉 <b>We have a winner!</b>\n\n"
         f"🏆 {message.from_user.mention_html()} guessed <b>{guess}</b> correctly!\n"
-        f"🪙 Prize: <b>+{event.prize:,} coins</b>\n"
-        "📦 The next event will drop automatically."
+        f"🪙 Prize: <b>+{event.prize:,} coins</b>"
+    )
+
+
+def _normalize_answer(value: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9']+", value.casefold()))
+
+
+@router.message(Command(commands=["n", "name"]), F.chat.type.in_({"group", "supergroup"}))
+async def guess_name(message: Message, db_session, db_user, **kwargs):
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) != 2:
+        await message.reply("🧩 Use <code>/n remaining words</code> to guess the rest of the name.")
+        return
+    now = datetime.now(timezone.utc)
+    event = await db_session.scalar(select(GuessPhraseEvent).where(
+        GuessPhraseEvent.chat_id == message.chat.id,
+        GuessPhraseEvent.status == "active", GuessPhraseEvent.ends_at > now,
+    ).order_by(GuessPhraseEvent.starts_at.desc()))
+    if not event:
+        await message.reply("🎮 There is no active name event right now.")
+        return
+    if _normalize_answer(parts[1]) != _normalize_answer(event.answer):
+        await message.reply("❌ Not quite! Guess the remaining words.")
+        return
+    result = await db_session.execute(update(GuessPhraseEvent)
+        .where(GuessPhraseEvent.id == event.id, GuessPhraseEvent.status == "active")
+        .values(status="won", winner_user_id=db_user.id,
+                winner_telegram_id=message.from_user.id,
+                winner_name=message.from_user.full_name[:256], winning_answer=parts[1][:256]))
+    if result.rowcount != 1:
+        await db_session.rollback()
+        await message.reply("🏁 This event has already been won.")
+        return
+    await add_coins(db_session, db_user.id, event.prize,
+        tx_type="world_event_reward",
+        description=f"Guess the name event prize in chat {message.chat.id}",
+        reference_id=f"name_event:{event.id}")
+    await db_session.commit()
+    await message.reply(
+        "🎉 <b>We have a winner!</b>\n\n"
+        f"🏆 {message.from_user.mention_html()} completed <b>{event.title}</b>!\n"
+        f"🪙 Prize: <b>+{event.prize:,} coins</b>"
     )
 
 
@@ -204,11 +282,7 @@ async def owner_start_event(message: Message, **kwargs):
     if not settings.effective_owner_id or message.from_user.id != settings.effective_owner_id:
         await message.reply("⛔ This command is available only to the bot owner.")
         return
-    created = await _create_event(
-        message.bot,
-        message.chat.id,
-        message.chat.title or "Group",
-        created_by=message.from_user.id,
-    )
+    created = await _create_event(message.bot, message.chat.id, message.chat.title or "Group",
+                                  created_by=message.from_user.id)
     if not created:
-        await message.reply("🎮 This group already has an active guessing event.")
+        await message.reply("🎮 This group already has an active World Event.")
