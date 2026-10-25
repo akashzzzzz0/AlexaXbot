@@ -3,6 +3,7 @@ import time
 from datetime import timezone
 from zoneinfo import ZoneInfo
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery, Message, BotCommand, BotCommandScopeDefault, BotCommandScopeChat, ReplyParameters
 from aiogram.exceptions import TelegramRetryAfter, TelegramBadRequest, TelegramForbiddenError
@@ -1868,7 +1869,7 @@ async def process_group_promotion(message: Message, _: callable, db_session: Asy
     summary = f"📣 <b>Group Promotion Result</b>\n\nSent: <b>{sent}</b>\nFailed: <b>{len(failed)}</b>"
     if details:
         summary += "\n\n<b>Failed groups (first 20):</b>\n" + details
-    summary += f"\n\nCompleted at: <code>{datetime.now().strftime('%Y-%m-%d %H:%M')}</code> (24-hour time)"
+    summary += f"\n\nCompleted at: <code>{datetime.now(ZoneInfo('Asia/Kolkata')).strftime('%Y-%m-%d %H:%M')}</code> (24-hour time)"
     await message.reply(summary, parse_mode="HTML")
 
 
