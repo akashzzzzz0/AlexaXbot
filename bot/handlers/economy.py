@@ -437,7 +437,8 @@ async def rewards_achievements(callback: CallbackQuery, _: callable, db_session:
         return
     from bot.services.achievement_service import get_user_achievements
     user_achs = await get_user_achievements(db_session, db_user.id)
-    text = _('achievements_menu') + '\n\n'    text += _('achievements_count').format(earned=len(user_achs), total=100) + '\n\n'
+    text = _('achievements_menu') + '\n\n'
+    text += _('achievements_count').format(earned=len(user_achs), total=100) + '\n\n'
     if user_achs:
         for ua, ach in user_achs[:10]:
             text += f'{ach.icon} <b>{ach.code}</b> — {ach.points} pts\n'
