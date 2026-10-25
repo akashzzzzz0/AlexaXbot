@@ -1,5 +1,5 @@
 from aiogram import Router
-from bot.handlers import start, security, moderation, economy, games, duels, statistics, settings, help, affiliate, owner, owner_group_message, owner_group_activity, force_join, welcome, tournaments, alexa_games, group_tools, community_shield, scam_review, ultra_vip, ai, ai_chat, owner_ai_control, missing_games, group_promotion
+from bot.handlers import start, security, moderation, economy, games, duels, statistics, settings, help, affiliate, owner, owner_group_message, owner_group_activity, force_join, welcome, tournaments, alexa_games, group_tools, community_shield, scam_review, ultra_vip, ai, ai_chat, owner_ai_control, missing_games, group_promotion, sticker_id
 from bot.handlers.auto_delete_middleware import StartMenuAutoDeleteMessageMiddleware, StartMenuAutoDeleteCallbackMiddleware
 
 class DailyGroupMessageCounterMiddleware:
@@ -92,6 +92,8 @@ def get_main_router() -> Router:
     router.include_router(scam_review.router)
     router.include_router(ultra_vip.router)
     router.include_router(ai.router)
+    # Owner-only utility; intentionally omitted from Telegram's public command menu.
+    router.include_router(sticker_id.router)
     # General casual AI chat runs after owner action handling.
     router.include_router(ai_chat.router)
     # Keep welcome/join-leave/captcha processing, but after feature handlers.
