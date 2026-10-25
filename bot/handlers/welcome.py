@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from bot.database.models import (
     Group, GroupMember, GroupSettings, WelcomeSettings, GoodbyeSettings,
-    SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig, CaptchaChallenge, GroupStats, User, GroupFilter, GroupBlocklist, ActionLog
+    SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig, CaptchaChallenge, GroupStats, User, GroupFilter, GroupBlocklist, ActionLog, DailyGroupMessageStat
 )
 from bot.services.security_service import (
     check_message_violations, is_raid_detected, create_captcha_challenge,
@@ -1155,8 +1155,26 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
     )
     if member:
         member.message_count = (member.message_count or 0) + 1
-        from datetime import datetime, timezone
         member.last_activity = datetime.now(timezone.utc)
+
+    # Track per-group daily totals using India-local calendar dates so the
+    # owner AI activity report reflects actual messages received today.
+    from zoneinfo import ZoneInfo
+    day_key = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    daily_stats = await db_session.scalar(
+        select(DailyGroupMessageStat).where(
+            DailyGroupMessageStat.group_id == db_group.id,
+            DailyGroupMessageStat.day_key == day_key,
+        )
+    )
+    if daily_stats is None:
+        db_session.add(DailyGroupMessageStat(
+            group_id=db_group.id,
+            day_key=day_key,
+            message_count=1,
+        ))
+    else:
+        daily_stats.message_count = (daily_stats.message_count or 0) + 1
 
     gs_settings = await db_session.scalar(select(GroupSettings).where(GroupSettings.group_id == db_group.id))
     if gs_settings and gs_settings.xp_enabled:
