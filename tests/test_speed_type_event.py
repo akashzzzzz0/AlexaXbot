@@ -1,10 +1,9 @@
 import unittest
 
 from bot.handlers.world_events import (
-    FIRST_PLACE_REWARD,
-    SECOND_PLACE_REWARD,
-    THIRD_PLACE_REWARD,
-    STREAK_BONUS,
+    WINNER_REWARD,
+    EVENT_INTERVAL_SECONDS,
+    EVENT_DURATION_MINUTES,
     _event_caption,
     _normalize_text,
 )
@@ -13,21 +12,20 @@ from bot.handlers.world_events import (
 class SpeedTypeEventTests(unittest.TestCase):
     def test_normalization_ignores_case_and_extra_whitespace(self):
         self.assertEqual(
-            _normalize_text("  Alexa   makes\n every group fun! "),
-            _normalize_text("alexa makes every group fun!"),
+            _normalize_text("  Alexa   makes\n every group fun "),
+            _normalize_text("alexa makes every group fun"),
         )
 
-    def test_reward_tiers_match_approved_values(self):
-        self.assertEqual((FIRST_PLACE_REWARD, SECOND_PLACE_REWARD, THIRD_PLACE_REWARD), (500, 250, 100))
-        self.assertEqual(STREAK_BONUS, 200)
+    def test_event_timing_and_winner_reward(self):
+        self.assertEqual(WINNER_REWARD, 50)
+        self.assertEqual(EVENT_INTERVAL_SECONDS, 3 * 60 * 60)
+        self.assertEqual(EVENT_DURATION_MINUTES, 180)
 
-    def test_caption_hides_prompt_and_lists_all_reward_places(self):
-        caption = _event_caption("Alexa makes every group fun!")
-        self.assertIn("<tg-spoiler>Alexa makes every group fun!</tg-spoiler>", caption)
-        self.assertIn("500", caption)
-        self.assertIn("250", caption)
-        self.assertIn("100", caption)
-        self.assertIn("200", caption)
+    def test_caption_says_text_is_inside_spoiler_image(self):
+        caption = _event_caption()
+        self.assertIn("text written inside it", caption)
+        self.assertIn("50 coins", caption)
+        self.assertIn("First member", caption)
 
 
 if __name__ == "__main__":
