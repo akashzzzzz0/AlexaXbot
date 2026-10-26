@@ -207,6 +207,12 @@ _active_until = {}
 _SESSION_SECONDS = 10 * 60
 _bot_username = None
 
+# Opportunistic group replies are deliberately rate-limited to avoid flooding chats.
+_smart_reply_last_check: dict[int, float] = {}
+_smart_reply_user_last_check: dict[tuple[int, int], float] = {}
+_SMART_REPLY_GROUP_COOLDOWN_SECONDS = 15.0
+_SMART_REPLY_USER_COOLDOWN_SECONDS = 45.0
+
 _GREETING_RE = re.compile(
     r"^\s*(?:hi+|hello+|helo+|hey+|salam|assalamualaikum|aoa)(?:\b.*)?$",
     re.IGNORECASE,
@@ -214,8 +220,38 @@ _GREETING_RE = re.compile(
 _ALEXA_PREFIX_RE = re.compile(r"^\s*alexa\b[\s,!:.-]*(.*)$", re.IGNORECASE)
 
 
+def _looks_like_smart_reply_candidate(text: str) -> bool:
+    """Filter low-value group chatter before spending an Ollama request."""
+    value = text.strip().casefold()
+    if len(value) < 8:
+        return False
+    if re.fullmatch(r"(?:ok(?:ay)?|acha|hmm+|huh|nice|same|true|right|👍+|👌+|❤️+|😂+|🤣+|🙏+)[.!?\s]*", value):
+        return False
+    if re.search(r"[?؟]|\b(?:kya|kyun|kaise|kaisa|kaisi|kab|kahan|kon|kaun|who|what|why|how|when|where|which|anyone|suggest|opinion|batao|help)\b|😂|🤣|😹|😢|😭|😮|😱", value, re.IGNORECASE):
+        return True
+    # Longer conversational statements may be worth a response; the model decides.
+    return len(value.split()) >= 7 or len(value) >= 45
+
+
+def _should_smart_reply(message: Message, text: str) -> bool:
+    """Allow one model-judged, unaddressed reply per group/user cooldown."""
+    if not _looks_like_smart_reply_candidate(text):
+        return False
+    now = time.monotonic()
+    chat_id = message.chat.id
+    user_id = message.from_user.id if message.from_user else 0
+    user_key = (chat_id, user_id)
+    if now - _smart_reply_last_check.get(chat_id, 0.0) < _SMART_REPLY_GROUP_COOLDOWN_SECONDS:
+        return False
+    if now - _smart_reply_user_last_check.get(user_key, 0.0) < _SMART_REPLY_USER_COOLDOWN_SECONDS:
+        return False
+    _smart_reply_last_check[chat_id] = now
+    _smart_reply_user_last_check[user_key] = now
+    return True
+
+
 async def is_alexa_trigger(message: Message) -> bool:
-    """Only consume messages addressed to Alexa or a simple greeting."""
+    """Trigger direct chat normally and selectively sample group messages for smart replies."""
     global _bot_username
     text = (message.text or "").strip()
     if not text or not message.from_user or message.from_user.is_bot:
@@ -274,10 +310,14 @@ async def is_alexa_trigger(message: Message) -> bool:
     # an explicit Alexa address, a reply to Alexa, or a short follow-up in an
     # already active one-to-one conversation with Alexa.
     session_key = (message.chat.id, message.from_user.id)
-    return time.monotonic() < _active_until.get(session_key, 0.0)
+    if time.monotonic() < _active_until.get(session_key, 0.0):
+        return True
+    return _should_smart_reply(message, text)
 
 
-async def _ask_ollama_with_typing(message: Message, user_text: str, history: deque) -> str:
+async def _ask_ollama_with_typing(
+    message: Message, user_text: str, history: deque, *, smart_mode: bool = False
+) -> str:
     """Keep Telegram's typing indicator active while Alexa prepares an AI reply."""
     # Typing is a best-effort background hint; it must never delay the answer.
     async def _typing_hint() -> None:
@@ -290,10 +330,12 @@ async def _ask_ollama_with_typing(message: Message, user_text: str, history: deq
             pass
 
     asyncio.create_task(_typing_hint())
-    return await _ask_ollama(user_text, history)
+    return await _ask_ollama(user_text, history, smart_mode=smart_mode)
 
 
-async def _ask_ollama(user_text: str, history: deque) -> str:
+async def _ask_ollama(
+    user_text: str, history: deque, *, smart_mode: bool = False
+) -> str:
     """Generate a casual reply through the shared Ollama provider."""
     system_instruction = (
         "You are Alexa, a lively feminine Telegram chat persona fluent in Pakistani Roman Urdu/Hinglish. "
@@ -308,6 +350,14 @@ async def _ask_ollama(user_text: str, history: deque) -> str:
         "If corrected for sounding robotic, acknowledge it casually and adjust. "
         "Never use the word Allah or its Arabic/Urdu spellings (الله or اللّٰه); rephrase religious invocations neutrally. "
     )
+    if smart_mode:
+        system_instruction += (
+            "This is a SMART GROUP REPLY decision: the user did not address you directly. "
+            "Reply only if your message would genuinely add value to the group conversation, such as a useful answer, a natural joke, or a brief empathetic reaction. "
+            "If the message is part of a private conversation between members, is just routine chatter, is unclear, or you have nothing useful to add, output exactly __IGNORE__ and nothing else. "
+            "Do not mention or tag everyone, do not interrupt replies directed at another person, and do not invent missing context. "
+            "When replying, keep it short and natural in Pakistani Roman Urdu/Hinglish when appropriate."
+        )
     messages = [
         {"role": role, "content": old_text}
         for role, old_text in history
@@ -359,8 +409,24 @@ async def alexa_ai_chat(message: Message) -> None:
         text = "Say hello and start a friendly conversation."
 
     key = (message.chat.id, message.from_user.id)
-    # Refresh the short group-chat session whenever this user talks to Alexa.
-    if message.chat.type != ChatType.PRIVATE:
+    original_text = (message.text or "").strip()
+    replied_to_alexa = bool(
+        message.reply_to_message
+        and message.reply_to_message.from_user
+        and message.reply_to_message.from_user.id == message.bot.id
+    )
+    directly_addressed = replied_to_alexa or bool(
+        re.search(r"(?i)(?<!\w)alexa(?!\w)", original_text)
+        or (username and re.search(rf"(?<!\w)@{re.escape(username)}\b", original_text, re.IGNORECASE))
+    )
+    session_was_active = time.monotonic() < _active_until.get(key, 0.0)
+    smart_mode = (
+        message.chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}
+        and not directly_addressed
+        and not session_was_active
+    )
+    # Only explicit Alexa conversations refresh the session; smart sampling must not.
+    if message.chat.type != ChatType.PRIVATE and not smart_mode:
         _active_until[key] = time.monotonic() + _SESSION_SECONDS
     history = _conversations[key]
     try:
@@ -371,7 +437,7 @@ async def alexa_ai_chat(message: Message) -> None:
             )
             history.extend(persisted_history)
             _history_loaded.add(key)
-        answer = await _ask_ollama_with_typing(message, text, history)
+        answer = await _ask_ollama_with_typing(message, text, history, smart_mode=smart_mode)
     except (httpx.HTTPError, ValueError, TypeError) as exc:
         logger.warning("Alexa AI reply failed for chat_id=%s: %s", message.chat.id, type(exc).__name__)
         return
@@ -380,7 +446,7 @@ async def alexa_ai_chat(message: Message) -> None:
         return
 
     # Never send a fallback/fictional AI response when Ollama is unavailable.
-    if not answer:
+    if not answer or answer.strip().casefold() == "__ignore__":
         return
 
     history.append(("user", text))
