@@ -4,6 +4,7 @@ ALEXA stays silent on missing keys, API errors, or network failures.
 """
 import asyncio
 import html
+import logging
 import re
 import sqlite3
 import threading
@@ -21,6 +22,8 @@ from aiogram.types import Message, ReactionTypeEmoji
 from bot.config import get_gemini_api_key, settings
 
 router = Router(name="alexa_ai_chat")
+logger = logging.getLogger(__name__)
+_missing_key_logged = False
 _conversations = defaultdict(lambda: deque(maxlen=12))
 _HISTORY_DB = Path("alexa_chat_history.db")
 _HISTORY_LIMIT = 30
@@ -302,14 +305,23 @@ async def _ask_gemini_with_typing(message: Message, user_text: str, history: deq
 
 
 async def _ask_gemini(user_text: str, history: deque) -> str:
+    global _missing_key_logged
     api_key = get_gemini_api_key()
     if not api_key:
+        if not _missing_key_logged:
+            logger.error("Alexa AI chat is disabled because GEMINI_API_KEY/API_KEY is missing from runtime configuration")
+            _missing_key_logged = True
         return ""
 
-    model = settings.GEMINI_MODEL.strip() or "gemini-3.5-flash-lite"
-    # Replace the previous default with the current low-latency model.
-    if model == "gemini-2.5-flash":
-        model = "gemini-3.5-flash-lite"
+    configured_model = (settings.GEMINI_MODEL or "").strip()
+    models = []
+    for candidate in (configured_model, "gemini-3.5-flash-lite", "gemini-3.8-flash"):
+        # Older model setting was previously returning 404 for this deployment.
+        if candidate == "gemini-2.5-flash":
+            candidate = "gemini-3.5-flash-lite"
+        if candidate and candidate not in models:
+            models.append(candidate)
+
     contents = [
         {"role": role, "parts": [{"text": old_text}]}
         for role, old_text in history
@@ -328,10 +340,6 @@ async def _ask_gemini(user_text: str, history: deque) -> str:
         "If corrected for sounding robotic, acknowledge it casually and adjust. "
         "Never use the word Allah or its Arabic/Urdu spellings (الله or اللّٰه); rephrase religious invocations neutrally. "
     )
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{model}:generateContent"
-    )
     payload = {
         "systemInstruction": {"parts": [{"text": system_instruction}]},
         "contents": contents,
@@ -339,24 +347,40 @@ async def _ask_gemini(user_text: str, history: deque) -> str:
     }
 
     client = _get_gemini_client()
-    response = await client.post(url, params={"key": api_key}, json=payload)
-    response.raise_for_status()
-    data = response.json()
+    for index, model in enumerate(models):
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        try:
+            response = await client.post(url, params={"key": api_key}, json=payload)
+            response.raise_for_status()
+            data = response.json()
+        except httpx.HTTPStatusError as exc:
+            code = exc.response.status_code
+            logger.warning("Alexa Gemini request failed: model=%s status=%s", model, code)
+            # Try a known current model if the configured model name is invalid or temporarily unavailable.
+            if code in (400, 404, 503) and index + 1 < len(models):
+                continue
+            raise
+        except httpx.HTTPError:
+            logger.warning("Alexa Gemini network/timeout error: model=%s", model)
+            raise
 
-    candidates = data.get("candidates") or []
-    if not candidates:
-        return ""
-    parts = candidates[0].get("content", {}).get("parts", [])
-    answer = " ".join(
-        part.get("text", "").strip()
-        for part in parts
-        if isinstance(part, dict) and part.get("text")
-    ).strip()
-    answer = answer[:700].rsplit(" ", 1)[0] if answer else ""
-    # Enforce the requested vocabulary restriction if the model ignores its prompt.
-    if re.search(r"(?i)\ballah\b|الله|اللّٰه", answer):
-        return ""
-    return answer
+        candidates = data.get("candidates") or []
+        if not candidates:
+            logger.warning("Alexa Gemini returned no candidates: model=%s", model)
+            return ""
+        parts = candidates[0].get("content", {}).get("parts", [])
+        answer = " ".join(
+            part.get("text", "").strip()
+            for part in parts
+            if isinstance(part, dict) and part.get("text")
+        ).strip()
+        answer = answer[:700].rsplit(" ", 1)[0] if answer else ""
+        # Enforce the existing vocabulary restriction if the model ignores its prompt.
+        if re.search(r"(?i)\ballah\b|الله|اللّٰه", answer):
+            logger.warning("Alexa Gemini response was rejected by the existing vocabulary filter")
+            return ""
+        return answer
+    return ""
 
 
 @router.message(
@@ -399,9 +423,11 @@ async def alexa_ai_chat(message: Message) -> None:
             history.extend(persisted_history)
             _history_loaded.add(key)
         answer = await _ask_gemini_with_typing(message, text, history)
-    except (httpx.HTTPError, ValueError, TypeError):
+    except (httpx.HTTPError, ValueError, TypeError) as exc:
+        logger.warning("Alexa AI reply failed for chat_id=%s: %s", message.chat.id, type(exc).__name__)
         return
     except Exception:
+        logger.exception("Unexpected Alexa AI chat failure for chat_id=%s", message.chat.id)
         return
 
     # Never send a fallback/fictional AI response when Gemini is unavailable.
@@ -421,8 +447,9 @@ async def alexa_ai_chat(message: Message) -> None:
     asyncio.create_task(_maybe_react(message))
     try:
         await message.reply(html.escape(answer))
-    except Exception:
-        # Telegram reply failures should not interrupt bot polling.
+    except Exception as exc:
+        # Telegram reply failures should not interrupt bot polling, but must be visible in host logs.
+        logger.warning("Telegram rejected Alexa AI reply for chat_id=%s: %s", message.chat.id, type(exc).__name__)
         return
     asyncio.create_task(_maybe_send_sticker(message, text))
 
