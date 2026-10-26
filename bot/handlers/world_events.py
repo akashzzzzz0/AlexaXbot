@@ -14,7 +14,7 @@ from sqlalchemy import select, update
 
 from bot.config import settings
 from bot.database.connection import async_session_maker
-from bot.database.models import Group, SpeedTypeEvent, SpeedTypeStreak, SpeedTypeSubmission
+from bot.database.models import Group, SpeedTypeEvent, SpeedTypeSubmission
 from bot.services.economy_service import add_coins
 
 router = Router()
@@ -114,19 +114,6 @@ def _as_utc(value: datetime) -> datetime:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
 
-
-def _event_caption(challenge: str) -> str:
-    return (
-        "⚡ <b>ALEXA SPEED TYPE CHALLENGE</b> ⚡\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "🖼️ Tap the spoiler to reveal the attached challenge image.\n"
-        "⌨️ Type the exact hidden text below directly in this group.\n\n"
-        f"🙈 <tg-spoiler>{challenge}</tg-spoiler>\n\n"
-        f"🏆 <b>Top 3 correct entries win:</b>\n🥇 {FIRST_PLACE_REWARD} · 🥈 {SECOND_PLACE_REWARD} · 🥉 {THIRD_PLACE_REWARD} coins\n"
-        "🔒 The challenge closes after 3 correct entries.\n"
-        f"🔥 Win 3 consecutive events for a +{STREAK_BONUS} coin streak bonus.\n"
-        f"⏳ Duration: {EVENT_DURATION_MINUTES // 60} hours"
-    )
 
 
 async def _has_active_event(session, chat_id: int, now: datetime) -> bool:
