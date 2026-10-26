@@ -29,20 +29,6 @@ _conversations = defaultdict(lambda: deque(maxlen=12))
 _HISTORY_DB = Path("alexa_chat_history.db")
 _HISTORY_LIMIT = 30
 _history_loaded = set()
-_gemini_client: httpx.AsyncClient | None = None
-
-
-def _get_gemini_client() -> httpx.AsyncClient:
-    """Reuse HTTP connections instead of doing a fresh TLS handshake each turn."""
-    global _gemini_client
-    if _gemini_client is None or _gemini_client.is_closed:
-        _gemini_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(8.0, connect=3.0),
-            limits=httpx.Limits(max_connections=30, max_keepalive_connections=10),
-        )
-    return _gemini_client
-
-
 def _reaction_for_text(text: str) -> str | None:
     """Return an occasional context-based reaction, not one on every message."""
     value = text.casefold()
@@ -291,7 +277,7 @@ async def is_alexa_trigger(message: Message) -> bool:
     return time.monotonic() < _active_until.get(session_key, 0.0)
 
 
-async def _ask_gemini_with_typing(message: Message, user_text: str, history: deque) -> str:
+async def _ask_ollama_with_typing(message: Message, user_text: str, history: deque) -> str:
     """Keep Telegram's typing indicator active while Alexa prepares an AI reply."""
     # Typing is a best-effort background hint; it must never delay the answer.
     async def _typing_hint() -> None:
@@ -393,7 +379,7 @@ async def alexa_ai_chat(message: Message) -> None:
         logger.exception("Unexpected Alexa AI chat failure for chat_id=%s", message.chat.id)
         return
 
-    # Never send a fallback/fictional AI response when Gemini is unavailable.
+    # Never send a fallback/fictional AI response when Ollama is unavailable.
     if not answer:
         return
 
