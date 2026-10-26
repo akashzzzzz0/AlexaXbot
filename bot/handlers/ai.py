@@ -103,3 +103,19 @@ async def _handle(message: Message, prompt: Optional[str]) -> None:
 
     # Only publish AI text after a successful, non-empty Ollama response.
     await status.edit_text(html.escape(answer[:3500]))
+
+
+@router.message(Command("ai"))
+async def ai_command(message: Message) -> None:
+    """Answer a direct AI question or a replied-to text message."""
+    await _handle(message, _message_text(message))
+
+
+@router.message(Command("summarize", "summary"))
+async def summarize_command(message: Message) -> None:
+    """Summarize command arguments or the text in a replied-to message."""
+    source = _message_text(message)
+    if not source:
+        await _handle(message, None)
+        return
+    await _handle(message, "Summarize the following text in the same language, preserving key points and keeping it concise:\\n\\n" + source)
