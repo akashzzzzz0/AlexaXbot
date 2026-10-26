@@ -83,7 +83,7 @@ async def configure_command_visibility(bot) -> None:
     # the complete command guide in private chat without exposing admin controls
     # in the Telegram slash-command menu.
     public_commands = [
-        ("start", "Start ALEXA"), ("help", "Open full command guide"), ("g", "Guess the World Event number"), ("n", "Guess the rest of a name"),
+        ("start", "Start ALEXA"), ("help", "Open full command guide"), ("g", "World Event typing / legacy number guess"), ("n", "Guess the rest of a name"),
         ("menu", "Open main menu"), ("games", "Open games"),
         ("dice", "Play dice"), ("rps", "Play Rock Paper Scissors"),
         ("quiz", "Play quiz"), ("wheel", "Spin the wheel"),
