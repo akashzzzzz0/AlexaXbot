@@ -416,8 +416,8 @@ async def alexa_ai_chat(message: Message) -> None:
         and message.reply_to_message.from_user.id == message.bot.id
     )
     directly_addressed = replied_to_alexa or bool(
-        re.search(r"(?i)(?<!\\w)alexa(?!\\w)", original_text)
-        or (username and re.search(rf"(?<!\\w)@{re.escape(username)}\\b", original_text, re.IGNORECASE))
+        re.search(r"(?i)(?<!\w)alexa(?!\w)", original_text)
+        or (username and re.search(rf"(?<!\w)@{re.escape(username)}\b", original_text, re.IGNORECASE))
     )
     session_was_active = time.monotonic() < _active_until.get(key, 0.0)
     smart_mode = (
