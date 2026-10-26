@@ -67,8 +67,8 @@ async def _handle(message: Message, prompt: Optional[str]) -> None:
     except RuntimeError as exc:
         if str(exc) == "missing_key":
             await status.edit_text(
-                "⚠️ Ollama AI is not configured yet. Add OLLAMA_API_KEY privately in "
-                "OLLAMA_API_KEY or the local-only bot/ollama_secret.py file."
+                "⚠️ Ollama AI is not configured yet. Set OLLAMA_API_KEY in your host settings "
+                "or the local-only bot/ollama_secret.py file."
             )
         else:
             await status.edit_text(
