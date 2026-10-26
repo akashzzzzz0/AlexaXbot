@@ -6,11 +6,12 @@ from datetime import datetime, timedelta, timezone
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
+from aiogram.dispatcher.event.bases import SkipHandler
 from sqlalchemy import select, update
 
 from bot.config import settings
 from bot.database.connection import async_session_maker
-from bot.database.models import Group, SpeedTypeEvent, SpeedTypeStreak
+from bot.database.models import Group, SpeedTypeEvent, SpeedTypeStreak, SpeedTypeSubmission
 from bot.services.economy_service import add_coins
 
 router = Router()
@@ -197,10 +198,10 @@ async def submit_speed_type(message: Message, db_session, db_user, **kwargs):
         SpeedTypeEvent.ends_at > now,
     ).order_by(SpeedTypeEvent.starts_at.desc()).limit(1))
     if not event:
-        return
+        raise SkipHandler
 
     if _normalize_text(message.text or "") != _normalize_text(event.challenge_text):
-        return
+        raise SkipHandler
 
     # Atomically claim the event so only one member can win, even if two correct
     # messages arrive nearly simultaneously.
@@ -216,34 +217,44 @@ async def submit_speed_type(message: Message, db_session, db_user, **kwargs):
     elapsed_ms = max(0, int((now - event.starts_at).total_seconds() * 1000))
     elapsed_seconds = elapsed_ms / 1000.0
 
+    previous_winner = await db_session.scalar(
+        select(SpeedTypeSubmission.user_id)
+        .where(SpeedTypeSubmission.chat_id == message.chat.id)
+        .order_by(SpeedTypeSubmission.submitted_at.desc())
+        .limit(1)
+    )
     streak = await db_session.scalar(select(SpeedTypeStreak).where(
         SpeedTypeStreak.chat_id == message.chat.id,
         SpeedTypeStreak.user_id == db_user.id,
     ))
-    if streak is None:
-        # A new champion breaks any previous member's consecutive-win run.
+    if previous_winner == db_user.id and streak is not None:
+        streak.streak_count = (streak.streak_count or 0) + 1
+    else:
+        # A different member won the previous event, so this is a fresh streak.
         await db_session.execute(
             update(SpeedTypeStreak)
             .where(SpeedTypeStreak.chat_id == message.chat.id)
             .values(streak_count=0)
         )
-        streak = SpeedTypeStreak(chat_id=message.chat.id, user_id=db_user.id, streak_count=1)
-        db_session.add(streak)
-    else:
-        previous_streak = streak.streak_count or 0
-        if previous_streak == 0:
-            await db_session.execute(
-                update(SpeedTypeStreak)
-                .where(
-                    SpeedTypeStreak.chat_id == message.chat.id,
-                    SpeedTypeStreak.user_id != db_user.id,
-                )
-                .values(streak_count=0)
+        if streak is None:
+            streak = SpeedTypeStreak(
+                chat_id=message.chat.id, user_id=db_user.id, streak_count=1
             )
-            streak.streak_count = 1
+            db_session.add(streak)
         else:
-            streak.streak_count = previous_streak + 1
+            streak.streak_count = 1
 
+    db_session.add(SpeedTypeSubmission(
+        event_id=event.id,
+        chat_id=message.chat.id,
+        user_id=db_user.id,
+        telegram_id=message.from_user.id,
+        winner_name=message.from_user.full_name[:256],
+        elapsed_ms=elapsed_ms,
+        placement=1,
+        reward=FIRST_PLACE_REWARD,
+        submitted_at=now,
+    ))
     bonus = STREAK_BONUS if streak.streak_count == STREAK_TARGET else 0
     total_reward = FIRST_PLACE_REWARD + bonus
     await add_coins(
