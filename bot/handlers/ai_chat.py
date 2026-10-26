@@ -319,18 +319,26 @@ async def _ask_ollama_with_typing(
     message: Message, user_text: str, history: deque, *, smart_mode: bool = False
 ) -> str:
     """Keep Telegram's typing indicator active while Alexa prepares an AI reply."""
-    # Typing is a best-effort background hint; it must never delay the answer.
+    # Keep the typing indicator alive while the model is working.
     async def _typing_hint() -> None:
         try:
-            await message.bot.send_chat_action(
-                chat_id=message.chat.id,
-                action="typing",
-            )
+            while True:
+                await message.bot.send_chat_action(
+                    chat_id=message.chat.id,
+                    action="typing",
+                )
+                await asyncio.sleep(4)
+        except asyncio.CancelledError:
+            raise
         except Exception:
+            # Typing is optional; do not affect response generation.
             pass
 
-    asyncio.create_task(_typing_hint())
-    return await _ask_ollama(user_text, history, smart_mode=smart_mode)
+    typing_task = asyncio.create_task(_typing_hint())
+    try:
+        return await _ask_ollama(user_text, history, smart_mode=smart_mode)
+    finally:
+        typing_task.cancel()
 
 
 async def _ask_ollama(
@@ -352,11 +360,11 @@ async def _ask_ollama(
     )
     if smart_mode:
         system_instruction += (
-            "This is a SMART GROUP REPLY decision: the user did not address you directly. "
-            "Reply only if your message would genuinely add value to the group conversation, such as a useful answer, a natural joke, or a brief empathetic reaction. "
-            "If the message is part of a private conversation between members, is just routine chatter, is unclear, or you have nothing useful to add, output exactly __IGNORE__ and nothing else. "
-            "Do not mention or tag everyone, do not interrupt replies directed at another person, and do not invent missing context. "
-            "When replying, keep it short and natural in Pakistani Roman Urdu/Hinglish when appropriate."
+            "This is a SMART GROUP REPLY to an unaddressed message that has already passed relevance filters. "
+            "Give a short, useful, natural reply to the message. Answer clear questions, join a joke naturally, or offer a brief empathetic reaction. "
+            "Do not output __IGNORE__ for a clear question or a message that invites a normal response. "
+            "Do not mention or tag everyone, do not invent missing context, and do not write long explanations. "
+            "Use Pakistani Roman Urdu/Hinglish when appropriate, usually in one short sentence."
         )
     messages = [
         {"role": role, "content": old_text}
@@ -367,8 +375,8 @@ async def _ask_ollama(
         answer = await ollama_chat(
             messages,
             system=system_instruction,
-            temperature=0.92,
-            max_tokens=100,
+            temperature=0.72,
+            max_tokens=64,
         )
     except RuntimeError as exc:
         if str(exc) == "ollama_not_configured":
