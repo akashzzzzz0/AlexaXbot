@@ -60,6 +60,13 @@ def _normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", (value or "").strip()).casefold()
 
 
+def _as_utc(value: datetime) -> datetime:
+    """Treat naive database datetimes as UTC and normalize aware values to UTC."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _event_caption(challenge: str) -> str:
     return (
         "⚡ <b>ALEXA SPEED TYPE CHALLENGE</b> ⚡\n"
@@ -227,7 +234,7 @@ async def submit_speed_type(message: Message, db_session, db_user, **kwargs):
     if placement > 3:
         raise SkipHandler
 
-    elapsed_ms = max(0, int((now - event.starts_at).total_seconds() * 1000))
+    elapsed_ms = max(0, int((now - _as_utc(event.starts_at)).total_seconds() * 1000))
     elapsed_seconds = elapsed_ms / 1000.0
     rewards = (event.prize_first, event.prize_second, event.prize_third)
     reward = rewards[placement - 1]
