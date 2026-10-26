@@ -1026,6 +1026,58 @@ class DailyGroupMessageStat(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
+class SpeedTypeEvent(Base):
+    """Per-group spoiler-based typing challenge and its reward schedule."""
+    __tablename__ = "speed_type_events"
+    __table_args__ = (Index("ix_speed_type_events_chat_status", "chat_id", "status"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    chat_id = Column(BigInteger, nullable=False, index=True)
+    chat_title = Column(String(256), nullable=False)
+    challenge_text = Column(Text, nullable=False)
+    prize_first = Column(Integer, default=500, nullable=False)
+    prize_second = Column(Integer, default=250, nullable=False)
+    prize_third = Column(Integer, default=100, nullable=False)
+    starts_at = Column(DateTime(timezone=True), nullable=False)
+    ends_at = Column(DateTime(timezone=True), nullable=False)
+    status = Column(String(16), default="active", nullable=False)
+    created_by = Column(BigInteger, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class SpeedTypeSubmission(Base):
+    """One rewarded, correct typing entry per member and event."""
+    __tablename__ = "speed_type_submissions"
+    __table_args__ = (
+        UniqueConstraint("event_id", "user_id", name="uq_speed_type_event_user"),
+        Index("ix_speed_type_submissions_event_place", "event_id", "placement"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(Integer, ForeignKey("speed_type_events.id", ondelete="CASCADE"), nullable=False)
+    chat_id = Column(BigInteger, nullable=False, index=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    telegram_id = Column(BigInteger, nullable=False)
+    winner_name = Column(String(256), nullable=False)
+    elapsed_ms = Column(Integer, nullable=False)
+    placement = Column(Integer, nullable=False)
+    reward = Column(Integer, nullable=False)
+    submitted_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class SpeedTypeStreak(Base):
+    """Consecutive first-place typing-event wins per member and group."""
+    __tablename__ = "speed_type_streaks"
+    __table_args__ = (
+        UniqueConstraint("chat_id", "user_id", name="uq_speed_type_streak_chat_user"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    chat_id = Column(BigInteger, nullable=False, index=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    streak_count = Column(Integer, default=0, nullable=False)
+
+
 class GuessNumberEvent(Base):
     """Persistent per-group Guess the Number events and their winners."""
     __tablename__ = "guess_number_events"
