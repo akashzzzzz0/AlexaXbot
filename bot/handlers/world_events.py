@@ -84,10 +84,14 @@ async def _has_active_event(session, chat_id: int, now: datetime) -> bool:
 
 async def _create_event(bot, chat_id: int, chat_title: str, created_by: int | None = None) -> bool:
     now = datetime.now(timezone.utc)
-    challenge = random.choice(CHALLENGES)
     async with async_session_maker() as session:
         if await _has_active_event(session, chat_id, now):
             return False
+        active_challenges = set((await session.scalars(select(SpeedTypeEvent.challenge_text).where(
+            SpeedTypeEvent.status == "active", SpeedTypeEvent.ends_at > now,
+        ))).all())
+        unused_challenges = [item for item in CHALLENGES if item not in active_challenges]
+        challenge = random.choice(unused_challenges or CHALLENGES)
         event = SpeedTypeEvent(
             chat_id=chat_id,
             chat_title=(chat_title or "Group")[:256],
