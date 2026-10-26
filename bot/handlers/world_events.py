@@ -1,13 +1,16 @@
 import asyncio
+import io
 import random
 import re
 from datetime import datetime, timedelta, timezone
 
+from PIL import Image, ImageDraw, ImageFont
+
 from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import BufferedInputFile, Message
 from aiogram.dispatcher.event.bases import SkipHandler
-from sqlalchemy import select, update, func
+from sqlalchemy import select, update
 
 from bot.config import settings
 from bot.database.connection import async_session_maker
@@ -17,42 +20,87 @@ from bot.services.economy_service import add_coins
 router = Router()
 EVENT_INTERVAL_SECONDS = 3 * 60 * 60
 EVENT_DURATION_MINUTES = 180
-FIRST_PLACE_REWARD = 500
-SECOND_PLACE_REWARD = 250
-THIRD_PLACE_REWARD = 100
-STREAK_BONUS = 200
-STREAK_TARGET = 3
+WINNER_REWARD = 50
 _event_scheduler_task = None
 
-# Short, varied typing prompts. A prompt is selected separately for each group/event.
 CHALLENGES = [
-    "Alexa makes every group more fun!",
-    "Speed typing champion is here!",
-    "Neon lights, fast fingers, big wins!",
-    "Teamwork makes the dream work!",
-    "Stay sharp and type it right!",
-    "Every second counts in this challenge!",
-    "Mystery unlocked, challenge accepted!",
-    "Fast typing wins the Alexa event!",
-    "Keep calm and type with speed!",
-    "One group, one champion, one reward!",
-    "Cyber stars shine brighter at night!",
-    "Practice makes progress every single day!",
-    "Quick fingers and a focused mind!",
-    "Your next win starts with one word!",
-    "Alexa brings a new challenge to the group!",
-    "Never rush so much that you miss a letter!",
-    "Type the exact phrase to claim victory!",
-    "The fastest correct answer takes the crown!",
-    "Make every character count today!",
-    "A new mystery is waiting for you!",
+    "Alexa makes every group more fun",
+    "Speed typing champion is here",
+    "Neon lights fast fingers big wins",
+    "Teamwork makes the dream work",
+    "Stay sharp and type it right",
+    "Every second counts in this challenge",
+    "Mystery unlocked challenge accepted",
+    "Fast typing wins the Alexa event",
+    "Keep calm and type with speed",
+    "One group one champion one reward",
+    "Cyber stars shine brighter at night",
+    "Practice makes progress every single day",
+    "Quick fingers and a focused mind",
+    "Your next win starts with one word",
+    "Alexa brings a new challenge to the group",
+    "Never rush so much that you miss a letter",
+    "Type the exact phrase to claim victory",
+    "The fastest correct answer takes the crown",
+    "Make every character count today",
+    "A new mystery is waiting for you",
 ]
 
-# Public image URL used as the event's attached, spoiler-hidden artwork.
-CHALLENGE_IMAGE = (
-    "https://images.unsplash.com/photo-1516321318423-f06f85e504b3"
-    "?auto=format&fit=crop&fm=jpg&q=80&w=1200"
-)
+
+def _make_spoiler_image(challenge: str) -> BufferedInputFile:
+    """Draw the prompt into the actual picture; Telegram hides the complete image as a spoiler."""
+    width, height = 1200, 800
+    image = Image.new("RGB", (width, height), (7, 8, 25))
+    draw = ImageDraw.Draw(image)
+    for y in range(height):
+        shade = int(16 * y / height)
+        draw.line((0, y, width, y), fill=(7 + shade // 3, 8 + shade // 4, 25 + shade * 2))
+    draw.rounded_rectangle((35, 35, width - 35, height - 35), radius=34, outline=(0, 240, 255), width=5)
+    draw.rounded_rectangle((48, 48, width - 48, height - 48), radius=28, outline=(190, 40, 255), width=2)
+    for x in range(90, width - 90, 100):
+        draw.line((x, 90, x + 24, 90), fill=(0, 125, 190), width=3)
+        draw.line((x, height - 90, x + 24, height - 90), fill=(120, 35, 190), width=3)
+    try:
+        title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 44)
+        prompt_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 52)
+        hint_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 27)
+    except OSError:
+        title_font = prompt_font = hint_font = ImageFont.load_default()
+    title = "ALEXA  SPEED TYPE"
+    title_box = draw.textbbox((0, 0), title, font=title_font)
+    draw.text(((width - (title_box[2] - title_box[0])) / 2, 150), title, font=title_font, fill=(0, 245, 255), stroke_width=1, stroke_fill=(170, 35, 255))
+    draw.text((width / 2, 245), "HIDDEN CHALLENGE", font=hint_font, fill=(210, 180, 255), anchor="mm")
+    lines, line = [], ""
+    for word in challenge.split():
+        candidate = f"{line} {word}".strip()
+        if draw.textbbox((0, 0), candidate, font=prompt_font)[2] > width - 190 and line:
+            lines.append(line)
+            line = word
+        else:
+            line = candidate
+    if line:
+        lines.append(line)
+    line_height = 75
+    start_y = 400 - (len(lines) * line_height) // 2
+    for i, text_line in enumerate(lines):
+        draw.text((width / 2, start_y + i * line_height), text_line, font=prompt_font, fill=(255, 255, 255), anchor="mm", stroke_width=2, stroke_fill=(0, 160, 255))
+    draw.text((width / 2, 635), "TAP TO REVEAL - TYPE IT EXACTLY", font=hint_font, fill=(255, 70, 220), anchor="mm")
+    output = io.BytesIO()
+    image.save(output, format="PNG", optimize=True)
+    return BufferedInputFile(output.getvalue(), filename="alexa_speed_type_spoiler.png")
+
+
+def _event_caption() -> str:
+    return (
+        "⚡ <b>ALEXA SPEED TYPE CHALLENGE</b> ⚡\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🖼️ Tap the spoiler image to reveal the text written inside it.\n"
+        "⌨️ Type that exact text in this group. No command needed.\n"
+        f"🏆 First member with the correct text wins <b>{WINNER_REWARD} coins</b>!\n"
+        "⏱️ Alexa will announce the winner and their typing time.\n"
+        f"⏳ Challenge duration: {EVENT_DURATION_MINUTES // 60} hours"
+    )
+
 
 
 def _normalize_text(value: str) -> str:
@@ -105,9 +153,9 @@ async def _create_event(bot, chat_id: int, chat_title: str, created_by: int | No
             chat_id=chat_id,
             chat_title=(chat_title or "Group")[:256],
             challenge_text=challenge,
-            prize_first=FIRST_PLACE_REWARD,
-            prize_second=SECOND_PLACE_REWARD,
-            prize_third=THIRD_PLACE_REWARD,
+            prize_first=WINNER_REWARD,
+            prize_second=0,
+            prize_third=0,
             starts_at=now,
             ends_at=now + timedelta(minutes=EVENT_DURATION_MINUTES),
             status="active",
@@ -116,12 +164,11 @@ async def _create_event(bot, chat_id: int, chat_title: str, created_by: int | No
         session.add(event)
         await session.commit()
         event_id = event.id
-
     try:
         await bot.send_photo(
             chat_id=chat_id,
-            photo=CHALLENGE_IMAGE,
-            caption=_event_caption(challenge),
+            photo=_make_spoiler_image(challenge),
+            caption=_event_caption(),
             parse_mode="HTML",
             has_spoiler=True,
         )
@@ -201,9 +248,9 @@ async def stop_event_scheduler() -> None:
     ~F.text.startswith("/"),
 )
 async def submit_speed_type(message: Message, db_session, db_user, **kwargs):
+    # Ordinary members and admins can win; no command or special permission is needed.
     if not message.from_user or message.from_user.is_bot or db_user is None:
         return
-
     now = datetime.now(timezone.utc)
     event = await db_session.scalar(select(SpeedTypeEvent).where(
         SpeedTypeEvent.chat_id == message.chat.id,
@@ -212,65 +259,24 @@ async def submit_speed_type(message: Message, db_session, db_user, **kwargs):
     ).order_by(SpeedTypeEvent.starts_at.desc()).limit(1))
     if not event:
         raise SkipHandler
-
     if _normalize_text(message.text or "") != _normalize_text(event.challenge_text):
-        raise SkipHandler
-
-    existing = await db_session.scalar(
-        select(SpeedTypeSubmission.id).where(
-            SpeedTypeSubmission.event_id == event.id,
-            SpeedTypeSubmission.user_id == db_user.id,
-        ).limit(1)
-    )
-    if existing:
-        raise SkipHandler
-
-    submitted_count = await db_session.scalar(
-        select(func.count(SpeedTypeSubmission.id)).where(
-            SpeedTypeSubmission.event_id == event.id,
-        )
-    )
-    placement = int(submitted_count or 0) + 1
-    if placement > 3:
         raise SkipHandler
 
     elapsed_ms = max(0, int((now - _as_utc(event.starts_at)).total_seconds() * 1000))
     elapsed_seconds = elapsed_ms / 1000.0
-    rewards = (event.prize_first, event.prize_second, event.prize_third)
-    reward = rewards[placement - 1]
-
-    bonus = 0
-    streak = None
-    if placement == 1:
-        previous_winner = await db_session.scalar(
-            select(SpeedTypeSubmission.user_id)
-            .where(
-                SpeedTypeSubmission.chat_id == message.chat.id,
-                SpeedTypeSubmission.placement == 1,
-                SpeedTypeSubmission.event_id != event.id,
-            )
-            .order_by(SpeedTypeSubmission.submitted_at.desc())
-            .limit(1)
+    # Conditional claim ensures only the first correct entry receives the reward.
+    claim = await db_session.execute(
+        update(SpeedTypeEvent)
+        .where(
+            SpeedTypeEvent.id == event.id,
+            SpeedTypeEvent.status == "active",
+            SpeedTypeEvent.ends_at > now,
         )
-        streak = await db_session.scalar(select(SpeedTypeStreak).where(
-            SpeedTypeStreak.chat_id == message.chat.id,
-            SpeedTypeStreak.user_id == db_user.id,
-        ))
-        if previous_winner == db_user.id and streak is not None:
-            streak.streak_count = (streak.streak_count or 0) + 1
-        else:
-            await db_session.execute(
-                update(SpeedTypeStreak)
-                .where(SpeedTypeStreak.chat_id == message.chat.id)
-                .values(streak_count=0)
-            )
-            if streak is None:
-                streak = SpeedTypeStreak(chat_id=message.chat.id, user_id=db_user.id, streak_count=1)
-                db_session.add(streak)
-            else:
-                streak.streak_count = 1
-        if streak.streak_count == STREAK_TARGET:
-            bonus = STREAK_BONUS
+        .values(status="completed")
+    )
+    if claim.rowcount != 1:
+        await db_session.rollback()
+        raise SkipHandler
 
     db_session.add(SpeedTypeSubmission(
         event_id=event.id,
@@ -279,43 +285,27 @@ async def submit_speed_type(message: Message, db_session, db_user, **kwargs):
         telegram_id=message.from_user.id,
         winner_name=message.from_user.full_name[:256],
         elapsed_ms=elapsed_ms,
-        placement=placement,
-        reward=reward,
+        placement=1,
+        reward=WINNER_REWARD,
         submitted_at=now,
     ))
     await add_coins(
         db_session,
         db_user.id,
-        reward,
+        WINNER_REWARD,
         tx_type="world_event_reward",
-        description=f"Alexa Speed Type Challenge place {placement} in chat {message.chat.id}",
-        reference_id=f"speed_type_event:{event.id}:place:{placement}",
+        description=f"Alexa Speed Type Challenge winner in chat {message.chat.id}",
+        reference_id=f"speed_type_event:{event.id}:winner",
     )
-    if bonus:
-        await add_coins(
-            db_session,
-            db_user.id,
-            bonus,
-            tx_type="world_event_streak_bonus",
-            description=f"Three consecutive Alexa Speed Type Challenge first-place wins in chat {message.chat.id}",
-            reference_id=f"speed_type_streak:{message.chat.id}:{db_user.id}:{streak.streak_count}",
-        )
-    if placement == 3:
-        event.status = "completed"
     await db_session.commit()
-
-    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-    response = (
-        f"{medals[placement]} <b>ALEXA SPEED TYPE RESULT!</b>\\n"
-        f"👤 {message.from_user.mention_html()} got place <b>#{placement}</b>\\n"
-        f"⏱️ Time from event post: <b>{elapsed_seconds:.2f} seconds</b>\\n"
-        f"🪙 Reward: <b>+{reward:,} coins</b>"
+    await message.reply(
+        "🏆 <b>ALEXA SPEED TYPE WINNER!</b> 🏆\n"
+        f"👑 {message.from_user.mention_html()} typed the challenge correctly first!\n"
+        f"⚡ Typing time: <b>{elapsed_seconds:.2f} seconds</b>\n"
+        f"🪙 Reward: <b>+{WINNER_REWARD} coins</b>\n"
+        "🎉 The challenge is now closed. Next event arrives in the next 3-hour cycle!",
+        parse_mode="HTML",
     )
-    if bonus:
-        response += f"\\n🔥 3-win streak bonus: <b>+{bonus:,} coins</b>!"
-    if placement == 3:
-        response += "\\n🔒 All 3 reward places are filled; this event is now closed."
-    await message.reply(response, parse_mode="HTML")
 
 
 @router.message(Command("eventnow"), F.chat.type.in_({"group", "supergroup"}))
