@@ -36,7 +36,7 @@ def _get_gemini_client() -> httpx.AsyncClient:
     global _gemini_client
     if _gemini_client is None or _gemini_client.is_closed:
         _gemini_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(12.0, connect=4.0),
+            timeout=httpx.Timeout(8.0, connect=3.0),
             limits=httpx.Limits(max_connections=30, max_keepalive_connections=10),
         )
     return _gemini_client
@@ -275,6 +275,11 @@ async def is_alexa_trigger(message: Message) -> bool:
         ):
             return False
 
+    # Recognize Alexa's name anywhere in a group message, not only at the start.
+    # This makes natural phrases like "yaar Alexa zara help" trigger reliably.
+    if re.search(r"(?i)(?<![\\w])alexa(?![\\w])", text):
+        return True
+
     if _ALEXA_PREFIX_RE.match(text):
         return True
 
@@ -287,21 +292,18 @@ async def is_alexa_trigger(message: Message) -> bool:
 
 async def _ask_gemini_with_typing(message: Message, user_text: str, history: deque) -> str:
     """Keep Telegram's typing indicator active while Alexa prepares an AI reply."""
-    task = asyncio.create_task(_ask_gemini(user_text, history))
-    while not task.done():
+    # Typing is a best-effort background hint; it must never delay the answer.
+    async def _typing_hint() -> None:
         try:
             await message.bot.send_chat_action(
                 chat_id=message.chat.id,
                 action="typing",
             )
         except Exception:
-            # Typing status is optional; never block or break the actual reply.
             pass
-        try:
-            return await asyncio.wait_for(asyncio.shield(task), timeout=4.0)
-        except asyncio.TimeoutError:
-            continue
-    return await task
+
+    asyncio.create_task(_typing_hint())
+    return await _ask_gemini(user_text, history)
 
 
 async def _ask_gemini(user_text: str, history: deque) -> str:
@@ -315,7 +317,8 @@ async def _ask_gemini(user_text: str, history: deque) -> str:
 
     configured_model = (settings.GEMINI_MODEL or "").strip()
     models = []
-    for candidate in (configured_model, "gemini-3.5-flash-lite", "gemini-3.8-flash"):
+    # Prefer the lightweight fast model first; only try alternates on model errors.
+    for candidate in ("gemini-3.5-flash-lite", configured_model, "gemini-3.8-flash"):
         # Older model setting was previously returning 404 for this deployment.
         if candidate == "gemini-2.5-flash":
             candidate = "gemini-3.5-flash-lite"
