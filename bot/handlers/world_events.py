@@ -55,7 +55,7 @@ CHALLENGE_IMAGE = (
 
 def _normalize_text(value: str) -> str:
     """Ignore case and repeated/outer whitespace, but preserve punctuation and words."""
-    return re.sub(r"\\s+", " ", (value or "").strip()).casefold()
+    return re.sub(r"\s+", " ", (value or "").strip()).casefold()
 
 
 def _event_caption(prize: int, challenge: str) -> str:
