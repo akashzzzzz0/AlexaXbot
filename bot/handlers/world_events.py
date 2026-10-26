@@ -107,6 +107,16 @@ def _phrase_event_text(prize: int, prefix: str) -> str:
 
 
 async def _has_active_event(session, chat_id: int, now: datetime) -> bool:
+    # Let any legacy number event finish before starting the new alternating cycle.
+    legacy_id = await session.scalar(
+        select(GuessNumberEvent.id).where(
+            GuessNumberEvent.chat_id == chat_id,
+            GuessNumberEvent.status == "active",
+            GuessNumberEvent.ends_at > now,
+        ).limit(1)
+    )
+    if legacy_id:
+        return True
     typing_id = await session.scalar(
         select(SpeedTypeEvent.id).where(
             SpeedTypeEvent.chat_id == chat_id,
@@ -315,6 +325,54 @@ async def guess_name(message: Message, db_session, db_user, **kwargs):
     )
 
 
+@router.message(Command("g"), F.chat.type.in_({"group", "supergroup"}))
+async def legacy_guess_number(message: Message, db_session, db_user, **kwargs):
+    """Compatibility for any already-active legacy number event; new events use typing."""
+    parts = (message.text or "").split(maxsplit=1)
+    now = datetime.now(timezone.utc)
+    event = await db_session.scalar(select(GuessNumberEvent).where(
+        GuessNumberEvent.chat_id == message.chat.id,
+        GuessNumberEvent.status == "active", GuessNumberEvent.ends_at > now,
+    ).order_by(GuessNumberEvent.starts_at.desc()).limit(1))
+    if not event:
+        await message.reply("⌨️ Current Speed Type event: tap the spoiler image and type the revealed text directly in the group.")
+        return
+    if len(parts) != 2:
+        await message.reply("🕹️ Use /g followed by a number for the older number event.")
+        return
+    try:
+        guess = int(parts[1].strip())
+    except ValueError:
+        await message.reply("Please enter a whole number between 100 and 500.")
+        return
+    if not 100 <= guess <= 500:
+        await message.reply("🎯 The number must be between 100 and 500.")
+        return
+    if guess != event.secret_number:
+        await message.reply("❌ Not the secret number. Try again!")
+        return
+    event.status = "won"
+    event.winner_user_id = db_user.id
+    event.winner_telegram_id = message.from_user.id
+    event.winner_name = message.from_user.full_name[:256]
+    event.winning_guess = guess
+    await add_coins(
+        db_session, db_user.id, event.prize,
+        tx_type="world_event_reward",
+        description=f"Legacy guess number event prize in chat {message.chat.id}",
+        reference_id=f"guess_event:{event.id}",
+    )
+    await db_session.commit()
+    await message.reply(
+        "🎉 <b>We have a winner!</b>\n\n"
+        f"🏆 {message.from_user.mention_html()} guessed <b>{guess}</b> correctly!\n"
+        f"🪙 Prize: <b>+{event.prize:,} coins</b>",
+        parse_mode="HTML",
+    )
+
+
+
+
 @router.message(F.chat.type.in_({"group", "supergroup"}), F.text)
 async def speed_type_submission(message: Message, db_session, db_user, **kwargs):
     """Check ordinary group messages against the current spoiler typing prompt."""
@@ -400,52 +458,6 @@ async def speed_type_submission(message: Message, db_session, db_user, **kwargs)
     if bonus:
         response += f"\n🔥 3-win streak bonus: <b>+{bonus:,} coins</b>!"
     await message.reply(response, parse_mode="HTML")
-
-
-@router.message(Command("g"), F.chat.type.in_({"group", "supergroup"}))
-async def legacy_guess_number(message: Message, db_session, db_user, **kwargs):
-    """Compatibility for any already-active legacy number event; new events use typing."""
-    parts = (message.text or "").split(maxsplit=1)
-    now = datetime.now(timezone.utc)
-    event = await db_session.scalar(select(GuessNumberEvent).where(
-        GuessNumberEvent.chat_id == message.chat.id,
-        GuessNumberEvent.status == "active", GuessNumberEvent.ends_at > now,
-    ).order_by(GuessNumberEvent.starts_at.desc()).limit(1))
-    if not event:
-        await message.reply("⌨️ Current Speed Type event: tap the spoiler image and type the revealed text directly in the group.")
-        return
-    if len(parts) != 2:
-        await message.reply("🕹️ Use /g followed by a number for the older number event.")
-        return
-    try:
-        guess = int(parts[1].strip())
-    except ValueError:
-        await message.reply("Please enter a whole number between 100 and 500.")
-        return
-    if not 100 <= guess <= 500:
-        await message.reply("🎯 The number must be between 100 and 500.")
-        return
-    if guess != event.secret_number:
-        await message.reply("❌ Not the secret number. Try again!")
-        return
-    event.status = "won"
-    event.winner_user_id = db_user.id
-    event.winner_telegram_id = message.from_user.id
-    event.winner_name = message.from_user.full_name[:256]
-    event.winning_guess = guess
-    await add_coins(
-        db_session, db_user.id, event.prize,
-        tx_type="world_event_reward",
-        description=f"Legacy guess number event prize in chat {message.chat.id}",
-        reference_id=f"guess_event:{event.id}",
-    )
-    await db_session.commit()
-    await message.reply(
-        "🎉 <b>We have a winner!</b>\n\n"
-        f"🏆 {message.from_user.mention_html()} guessed <b>{guess}</b> correctly!\n"
-        f"🪙 Prize: <b>+{event.prize:,} coins</b>",
-        parse_mode="HTML",
-    )
 
 
 @router.message(Command("eventnow"), F.chat.type.in_({"group", "supergroup"}))
