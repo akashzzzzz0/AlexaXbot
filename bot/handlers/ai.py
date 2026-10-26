@@ -118,4 +118,4 @@ async def summarize_command(message: Message) -> None:
     if not source:
         await _handle(message, None)
         return
-    await _handle(message, "Summarize the following text in the same language, preserving key points and keeping it concise:\\n\\n" + source)
+    await _handle(message, "Summarize the following text in the same language, preserving key points and keeping it concise:\n\n" + source)
