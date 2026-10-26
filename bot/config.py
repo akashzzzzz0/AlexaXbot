@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     # Ollama-compatible AI provider settings; keys remain runtime-only.
     OLLAMA_API_KEY: str = ""
     OLLAMA_BASE_URL: str = "https://ollama.com"
-    OLLAMA_MODEL: str = "qwen3:235b-cloud"
+    OLLAMA_MODEL: str = "gemma4:31b"
 
     WEBHOOK_URL: str = ""
     WEBHOOK_SECRET: str = "guardian_x_secret"
