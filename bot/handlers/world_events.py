@@ -7,7 +7,7 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.dispatcher.event.bases import SkipHandler
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func
 
 from bot.config import settings
 from bot.database.connection import async_session_maker
@@ -17,7 +17,9 @@ from bot.services.economy_service import add_coins
 router = Router()
 EVENT_INTERVAL_SECONDS = 3 * 60 * 60
 EVENT_DURATION_MINUTES = 180
-FIRST_PLACE_REWARD = 250
+FIRST_PLACE_REWARD = 500
+SECOND_PLACE_REWARD = 250
+THIRD_PLACE_REWARD = 100
 STREAK_BONUS = 200
 STREAK_TARGET = 3
 _event_scheduler_task = None
@@ -58,15 +60,15 @@ def _normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", (value or "").strip()).casefold()
 
 
-def _event_caption(prize: int, challenge: str) -> str:
+def _event_caption(challenge: str) -> str:
     return (
         "⚡ <b>ALEXA SPEED TYPE CHALLENGE</b> ⚡\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "🖼️ Tap the spoiler to reveal the attached challenge image.\n"
         "⌨️ Type the exact hidden text below directly in this group.\n\n"
         f"🙈 <tg-spoiler>{challenge}</tg-spoiler>\n\n"
-        f"🏆 <b>First correct entry wins {prize:,} coins!</b>\n"
-        "🔒 Once someone wins, this event closes immediately.\n"
+        f"🏆 <b>Top 3 correct entries win:</b>\n🥇 {FIRST_PLACE_REWARD} · 🥈 {SECOND_PLACE_REWARD} · 🥉 {THIRD_PLACE_REWARD} coins\n"
+        "🔒 The challenge closes after 3 correct entries.\n"
         f"🔥 Win 3 consecutive events for a +{STREAK_BONUS} coin streak bonus.\n"
         f"⏳ Duration: {EVENT_DURATION_MINUTES // 60} hours"
     )
@@ -97,8 +99,8 @@ async def _create_event(bot, chat_id: int, chat_title: str, created_by: int | No
             chat_title=(chat_title or "Group")[:256],
             challenge_text=challenge,
             prize_first=FIRST_PLACE_REWARD,
-            prize_second=0,
-            prize_third=0,
+            prize_second=SECOND_PLACE_REWARD,
+            prize_third=THIRD_PLACE_REWARD,
             starts_at=now,
             ends_at=now + timedelta(minutes=EVENT_DURATION_MINUTES),
             status="active",
@@ -112,7 +114,7 @@ async def _create_event(bot, chat_id: int, chat_title: str, created_by: int | No
         await bot.send_photo(
             chat_id=chat_id,
             photo=CHALLENGE_IMAGE,
-            caption=_event_caption(FIRST_PLACE_REWARD, challenge),
+            caption=_event_caption(challenge),
             parse_mode="HTML",
             has_spoiler=True,
         )
@@ -207,46 +209,61 @@ async def submit_speed_type(message: Message, db_session, db_user, **kwargs):
     if _normalize_text(message.text or "") != _normalize_text(event.challenge_text):
         raise SkipHandler
 
-    # Atomically claim the event so only one member can win, even if two correct
-    # messages arrive nearly simultaneously.
-    result = await db_session.execute(
-        update(SpeedTypeEvent)
-        .where(SpeedTypeEvent.id == event.id, SpeedTypeEvent.status == "active")
-        .values(status="won")
+    existing = await db_session.scalar(
+        select(SpeedTypeSubmission.id).where(
+            SpeedTypeSubmission.event_id == event.id,
+            SpeedTypeSubmission.user_id == db_user.id,
+        ).limit(1)
     )
-    if result.rowcount != 1:
-        await db_session.rollback()
-        return
+    if existing:
+        raise SkipHandler
+
+    submitted_count = await db_session.scalar(
+        select(func.count(SpeedTypeSubmission.id)).where(
+            SpeedTypeSubmission.event_id == event.id,
+        )
+    )
+    placement = int(submitted_count or 0) + 1
+    if placement > 3:
+        raise SkipHandler
 
     elapsed_ms = max(0, int((now - event.starts_at).total_seconds() * 1000))
     elapsed_seconds = elapsed_ms / 1000.0
+    rewards = (event.prize_first, event.prize_second, event.prize_third)
+    reward = rewards[placement - 1]
 
-    previous_winner = await db_session.scalar(
-        select(SpeedTypeSubmission.user_id)
-        .where(SpeedTypeSubmission.chat_id == message.chat.id)
-        .order_by(SpeedTypeSubmission.submitted_at.desc())
-        .limit(1)
-    )
-    streak = await db_session.scalar(select(SpeedTypeStreak).where(
-        SpeedTypeStreak.chat_id == message.chat.id,
-        SpeedTypeStreak.user_id == db_user.id,
-    ))
-    if previous_winner == db_user.id and streak is not None:
-        streak.streak_count = (streak.streak_count or 0) + 1
-    else:
-        # A different member won the previous event, so this is a fresh streak.
-        await db_session.execute(
-            update(SpeedTypeStreak)
-            .where(SpeedTypeStreak.chat_id == message.chat.id)
-            .values(streak_count=0)
-        )
-        if streak is None:
-            streak = SpeedTypeStreak(
-                chat_id=message.chat.id, user_id=db_user.id, streak_count=1
+    bonus = 0
+    streak = None
+    if placement == 1:
+        previous_winner = await db_session.scalar(
+            select(SpeedTypeSubmission.user_id)
+            .where(
+                SpeedTypeSubmission.chat_id == message.chat.id,
+                SpeedTypeSubmission.placement == 1,
+                SpeedTypeSubmission.event_id != event.id,
             )
-            db_session.add(streak)
+            .order_by(SpeedTypeSubmission.submitted_at.desc())
+            .limit(1)
+        )
+        streak = await db_session.scalar(select(SpeedTypeStreak).where(
+            SpeedTypeStreak.chat_id == message.chat.id,
+            SpeedTypeStreak.user_id == db_user.id,
+        ))
+        if previous_winner == db_user.id and streak is not None:
+            streak.streak_count = (streak.streak_count or 0) + 1
         else:
-            streak.streak_count = 1
+            await db_session.execute(
+                update(SpeedTypeStreak)
+                .where(SpeedTypeStreak.chat_id == message.chat.id)
+                .values(streak_count=0)
+            )
+            if streak is None:
+                streak = SpeedTypeStreak(chat_id=message.chat.id, user_id=db_user.id, streak_count=1)
+                db_session.add(streak)
+            else:
+                streak.streak_count = 1
+        if streak.streak_count == STREAK_TARGET:
+            bonus = STREAK_BONUS
 
     db_session.add(SpeedTypeSubmission(
         event_id=event.id,
@@ -255,19 +272,17 @@ async def submit_speed_type(message: Message, db_session, db_user, **kwargs):
         telegram_id=message.from_user.id,
         winner_name=message.from_user.full_name[:256],
         elapsed_ms=elapsed_ms,
-        placement=1,
-        reward=FIRST_PLACE_REWARD,
+        placement=placement,
+        reward=reward,
         submitted_at=now,
     ))
-    bonus = STREAK_BONUS if streak.streak_count == STREAK_TARGET else 0
-    total_reward = FIRST_PLACE_REWARD + bonus
     await add_coins(
         db_session,
         db_user.id,
-        FIRST_PLACE_REWARD,
+        reward,
         tx_type="world_event_reward",
-        description=f"Alexa Speed Type Challenge first-place prize in chat {message.chat.id}",
-        reference_id=f"speed_type_event:{event.id}",
+        description=f"Alexa Speed Type Challenge place {placement} in chat {message.chat.id}",
+        reference_id=f"speed_type_event:{event.id}:place:{placement}",
     )
     if bonus:
         await add_coins(
@@ -275,27 +290,25 @@ async def submit_speed_type(message: Message, db_session, db_user, **kwargs):
             db_user.id,
             bonus,
             tx_type="world_event_streak_bonus",
-            description=f"Three consecutive Alexa Speed Type Challenge wins in chat {message.chat.id}",
+            description=f"Three consecutive Alexa Speed Type Challenge first-place wins in chat {message.chat.id}",
             reference_id=f"speed_type_streak:{message.chat.id}:{db_user.id}:{streak.streak_count}",
         )
+    if placement == 3:
+        event.status = "completed"
     await db_session.commit()
 
-    streak_note = (
-        f"\n🔥 <b>3-win streak bonus: +{bonus} coins!</b>"
-        if bonus else
-        f"\n🔥 Current consecutive wins: <b>{streak.streak_count}</b>/3"
+    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+    response = (
+        f"{medals[placement]} <b>ALEXA SPEED TYPE RESULT!</b>\\n"
+        f"👤 {message.from_user.mention_html()} got place <b>#{placement}</b>\\n"
+        f"⏱️ Time from event post: <b>{elapsed_seconds:.2f} seconds</b>\\n"
+        f"🪙 Reward: <b>+{reward:,} coins</b>"
     )
-    await message.reply(
-        "🎉 <b>ALEXA SPEED TYPE CHAMPION!</b>\n\n"
-        f"🏆 {message.from_user.mention_html()} typed the exact text first!\n"
-        f"⏱️ Completion time: <b>{elapsed_seconds:.2f} seconds</b> from event launch.\n"
-        f"🪙 Reward: <b>+{FIRST_PLACE_REWARD} coins</b>"
-        + (f" + <b>{bonus} bonus coins</b>" if bonus else "")
-        + f"\n💰 Total earned: <b>+{total_reward} coins</b>"
-        + streak_note
-        + "\n🔒 This event is now closed. Only one winner per event.",
-        parse_mode="HTML",
-    )
+    if bonus:
+        response += f"\\n🔥 3-win streak bonus: <b>+{bonus:,} coins</b>!"
+    if placement == 3:
+        response += "\\n🔒 All 3 reward places are filled; this event is now closed."
+    await message.reply(response, parse_mode="HTML")
 
 
 @router.message(Command("eventnow"), F.chat.type.in_({"group", "supergroup"}))
