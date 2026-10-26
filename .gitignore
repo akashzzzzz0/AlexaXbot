@@ -19,6 +19,7 @@ env/
 .env
 .env.local
 bot/gemini_secret.py
+bot/ollama_secret.py
 *secret*.local.py
 
 # Logs

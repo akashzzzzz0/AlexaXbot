@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-3.5-flash-lite"
 
+    # Ollama-compatible AI provider settings; keys remain runtime-only.
+    OLLAMA_API_KEY: str = ""
+    OLLAMA_BASE_URL: str = "https://ollama.com"
+    OLLAMA_MODEL: str = "qwen3:235b-cloud"
+
     WEBHOOK_URL: str = ""
     WEBHOOK_SECRET: str = "guardian_x_secret"
     WEBHOOK_PORT: int = 8080

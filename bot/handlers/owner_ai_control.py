@@ -21,7 +21,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import func, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.config import get_gemini_api_key, settings
+from bot.config import settings
+from bot.services.ollama_ai import ollama_chat
 from bot.database.models import (GlobalSetting, Group, GroupMember, GroupSettings, SecuritySettings, User, Warning,
     Economy, Wallet, Referral, AffiliateRequest, ActionLog, GroupStats, InboxMessage, ScamReview, DailyGroupMessageStat)
 from bot.services.moderation_service import ban_user, unban_user, kick_user, mute_user, unmute_user, warn_user
@@ -158,32 +159,23 @@ def _strip_prefix(text: str) -> str:
 
 
 async def _classify_request(text: str) -> dict:
-    """Use Gemini only to classify into a fixed, validated action schema."""
-    key = get_gemini_api_key()
-    if not key:
-        raise RuntimeError("Gemini is not configured")
-    model = (settings.GEMINI_MODEL or "gemini-2.5-flash").strip()
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    """Use Ollama to classify a request into a fixed, validated action schema."""
     instructions = (
         "Classify the user's Roman Urdu/English request into JSON only. "
         "Allowed action values: report_today, list_groups, list_users, lookup_user, user_details, referral_report, group_activity, bot_health, global_controls_status, inbox_summary, group_settings_status, group_status, lock_content, unlock_content, ban, mute, kick, promote, demote, demote_self, promote_self, make_bot_admin, unban, unmute, warn, reset_warnings, help, unsupported. "
-        "Schema: {\"action\": string, \"type\": string, \"duration_seconds\": integer, \"reason\": string}. "
+        "Schema fields: action (string), type (string), duration_seconds (integer), reason (string). "
         "For lock/unlock, type must be one of text, links, photos, videos, stickers, all. "
         "For global daily user counts choose report_today. For listing active registered groups choose list_groups. For listing recent recorded users choose list_users. For a user's saved name, username or Telegram ID or full saved profile choose lookup_user or user_details. For referral/Stars requests choose referral_report. For group activity choose group_activity. For bot process/database status choose bot_health. For global anti-spam/flood/lockdown overview choose global_controls_status. For unread user inbox counts choose inbox_summary. For group security/lock configuration choose group_settings_status. "
         "For current chat bot permissions/status choose group_status. If owner says remove me/myself from admin, choose demote_self. If owner says make me/myself admin, choose promote_self. If owner asks to make Alexa/the bot an admin, choose make_bot_admin (never pretend the bot can promote itself). For ban/mute/kick/promote/demote/unban/unmute/warn/reset warnings choose the matching action only when clearly requested. Mute duration is seconds, default 3600. Keep reason short. Target is resolved separately from an explicit mention, reply, or user ID. If not clearly supported choose unsupported. "
         "Never output code, commands, explanations, or extra JSON fields."
     )
-    payload = {
-        "systemInstruction": {"parts": [{"text": instructions}]},
-        "contents": [{"role": "user", "parts": [{"text": text[:1500]}]}],
-        "generationConfig": {"temperature": 0, "maxOutputTokens": 100, "responseMimeType": "application/json"},
-    }
-    async with httpx.AsyncClient(timeout=httpx.Timeout(12.0, connect=5.0)) as client:
-        response = await client.post(url, params={"key": key}, json=payload)
-        response.raise_for_status()
-        data = response.json()
-    parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
-    raw = "".join(p.get("text", "") for p in parts if isinstance(p, dict)).strip()
+    raw = await ollama_chat(
+        [{"role": "user", "content": text[:1500]}],
+        system=instructions,
+        temperature=0,
+        max_tokens=180,
+        json_mode=True,
+    )
     result = json.loads(raw)
     action = result.get("action")
     kind = str(result.get("type", "")).lower()
@@ -197,11 +189,6 @@ async def _classify_request(text: str) -> dict:
 
 async def _answer_owner_question(prompt: str) -> str:
     """General owner Q&A; this never executes actions or invents private account access."""
-    key = get_gemini_api_key()
-    if not key:
-        return "General AI answer ke liye Gemini connection configured nahi hai. Koi action execute nahi hua."
-    model = (settings.GEMINI_MODEL or "gemini-2.5-flash").strip()
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     system = (
         "You are Alexa, the owner's helpful Roman Urdu/Hinglish assistant. Answer general knowledge, explanations, "
         "planning and everyday questions directly and clearly in the user's language. Be honest about uncertainty. "
@@ -209,25 +196,17 @@ async def _answer_owner_question(prompt: str) -> str:
         "or stored by this bot. Never claim a moderation/configuration action was performed. If the request asks for a bot action "
         "that the control layer has not implemented, say it is not connected yet. Do not expose API keys or internal setup."
     )
-    payload = {
-        "systemInstruction": {"parts": [{"text": system}]},
-        "contents": [{"role": "user", "parts": [{"text": prompt[:3000]}]}],
-        "generationConfig": {"temperature": 0.55, "maxOutputTokens": 500},
-    }
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=8.0)) as client:
-            response = await client.post(url, params={"key": key}, json=payload)
-            response.raise_for_status()
-            data = response.json()
-        candidates = data.get("candidates") or []
-        parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
-        answer = " ".join(p.get("text", "").strip() for p in parts if isinstance(p, dict) and p.get("text")).strip()
-        if not answer:
-            return "Is sawal ka clear jawab generate nahi ho saka—dobara thora detail se poochho."
+        answer = await ollama_chat(
+            [{"role": "user", "content": prompt[:3000]}],
+            system=system,
+            temperature=0.55,
+            max_tokens=500,
+        )
         return html.escape(answer[:3500])
     except Exception as exc:
         logger.warning("Owner general Q&A failed: %s", type(exc).__name__)
-        return "Abhi general AI answer nahi aa saka. Gemini connection/model check karo."
+        return "Abhi general AI answer nahi aa saka. Ollama connection/model check karo."
 
 
 async def _today_report(session: AsyncSession) -> str:
@@ -651,7 +630,7 @@ async def _moderation_action(message: Message, session: AsyncSession, action: st
 
 
 async def _run_request(message: Message, session: AsyncSession, prompt: str) -> str:
-    # Resolve common owner-panel data requests deterministically before Gemini.
+    # Resolve common owner-panel data requests deterministically before asking the AI provider.
     # This lets saved user records and reports work even if the model endpoint is unavailable.
     normalized = re.sub(r"[^a-z0-9@ -]+", " ", (prompt or "").casefold())
     normalized = re.sub(r"\s+", " ", normalized).strip()
