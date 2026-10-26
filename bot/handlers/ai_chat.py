@@ -1,6 +1,6 @@
-"""Mention/reply/greeting-based Gemini chat for ALEXA groups.
+"""Mention/reply/greeting-based Ollama-backed chat for ALEXA groups.
 
-ALEXA stays silent on missing keys, API errors, or network failures.
+ALEXA stays silent on missing configuration, API errors, or network failures.
 """
 import asyncio
 import html
@@ -19,7 +19,8 @@ from aiogram import F, Router
 from aiogram.enums import ChatType
 from aiogram.types import Message, ReactionTypeEmoji
 
-from bot.config import get_gemini_api_key, settings
+from bot.config import settings
+from bot.services.ollama_ai import ollama_chat
 
 router = Router(name="alexa_ai_chat")
 logger = logging.getLogger(__name__)
@@ -303,33 +304,11 @@ async def _ask_gemini_with_typing(message: Message, user_text: str, history: deq
             pass
 
     asyncio.create_task(_typing_hint())
-    return await _ask_gemini(user_text, history)
+    return await _ask_ollama(user_text, history)
 
 
-async def _ask_gemini(user_text: str, history: deque) -> str:
-    global _missing_key_logged
-    api_key = get_gemini_api_key()
-    if not api_key:
-        if not _missing_key_logged:
-            logger.error("Alexa AI chat is disabled because GEMINI_API_KEY/API_KEY is missing from runtime configuration")
-            _missing_key_logged = True
-        return ""
-
-    configured_model = (settings.GEMINI_MODEL or "").strip()
-    models = []
-    # Prefer the lightweight fast model first; only try alternates on model errors.
-    for candidate in ("gemini-3.5-flash-lite", configured_model, "gemini-3.8-flash"):
-        # Older model setting was previously returning 404 for this deployment.
-        if candidate == "gemini-2.5-flash":
-            candidate = "gemini-3.5-flash-lite"
-        if candidate and candidate not in models:
-            models.append(candidate)
-
-    contents = [
-        {"role": role, "parts": [{"text": old_text}]}
-        for role, old_text in history
-    ]
-    contents.append({"role": "user", "parts": [{"text": user_text}]})
+async def _ask_ollama(user_text: str, history: deque) -> str:
+    """Generate a casual reply through the shared Ollama provider."""
     system_instruction = (
         "You are Alexa, a lively feminine Telegram chat persona fluent in Pakistani Roman Urdu/Hinglish. "
         "Sound spontaneous, warm, playful, socially aware, and context-aware—not robotic or scripted. "
@@ -343,47 +322,28 @@ async def _ask_gemini(user_text: str, history: deque) -> str:
         "If corrected for sounding robotic, acknowledge it casually and adjust. "
         "Never use the word Allah or its Arabic/Urdu spellings (الله or اللّٰه); rephrase religious invocations neutrally. "
     )
-    payload = {
-        "systemInstruction": {"parts": [{"text": system_instruction}]},
-        "contents": contents,
-        "generationConfig": {"temperature": 0.92, "topP": 0.94, "maxOutputTokens": 100},
-    }
-
-    client = _get_gemini_client()
-    for index, model in enumerate(models):
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-        try:
-            response = await client.post(url, params={"key": api_key}, json=payload)
-            response.raise_for_status()
-            data = response.json()
-        except httpx.HTTPStatusError as exc:
-            code = exc.response.status_code
-            logger.warning("Alexa Gemini request failed: model=%s status=%s", model, code)
-            # Try a known current model if the configured model name is invalid or temporarily unavailable.
-            if code in (400, 404, 503) and index + 1 < len(models):
-                continue
-            raise
-        except httpx.HTTPError:
-            logger.warning("Alexa Gemini network/timeout error: model=%s", model)
-            raise
-
-        candidates = data.get("candidates") or []
-        if not candidates:
-            logger.warning("Alexa Gemini returned no candidates: model=%s", model)
+    messages = [
+        {"role": role, "content": old_text}
+        for role, old_text in history
+    ]
+    messages.append({"role": "user", "content": user_text})
+    try:
+        answer = await ollama_chat(
+            messages,
+            system=system_instruction,
+            temperature=0.92,
+            max_tokens=100,
+        )
+    except RuntimeError as exc:
+        if str(exc) == "ollama_not_configured":
+            logger.error("Alexa AI chat is disabled because OLLAMA_API_KEY is missing from runtime configuration")
             return ""
-        parts = candidates[0].get("content", {}).get("parts", [])
-        answer = " ".join(
-            part.get("text", "").strip()
-            for part in parts
-            if isinstance(part, dict) and part.get("text")
-        ).strip()
-        answer = answer[:700].rsplit(" ", 1)[0] if answer else ""
-        # Enforce the existing vocabulary restriction if the model ignores its prompt.
-        if re.search(r"(?i)\ballah\b|الله|اللّٰه", answer):
-            logger.warning("Alexa Gemini response was rejected by the existing vocabulary filter")
-            return ""
-        return answer
-    return ""
+        raise
+    answer = answer[:700].rsplit(" ", 1)[0] if answer else ""
+    if re.search(r"(?i)\\ballah\\b|الله|اللّٰه", answer):
+        logger.warning("Alexa Ollama response was rejected by the existing vocabulary filter")
+        return ""
+    return answer
 
 
 @router.message(
