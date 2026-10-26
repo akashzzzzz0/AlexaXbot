@@ -1,7 +1,7 @@
 """Ollama-backed AI commands for ALEXA.
 
 The API key is read from private runtime configuration, never committed here.
-Supports GEMINI_API_KEY/API_KEY environment settings or ignored bot/gemini_secret.py.
+Configure OLLAMA_API_KEY and OLLAMA_MODEL in runtime settings or the ignored bot/ollama_secret.py file.
 """
 import asyncio
 import html
@@ -16,7 +16,7 @@ from aiogram.types import Message
 
 from bot.services.ollama_ai import ollama_chat
 
-router = Router(name="gemini_ai")
+router = Router(name="ollama_ai")
 logger = logging.getLogger(__name__)
 
 def _message_text(message: Message) -> str:
@@ -68,7 +68,7 @@ async def _handle(message: Message, prompt: Optional[str]) -> None:
         if str(exc) == "missing_key":
             await status.edit_text(
                 "⚠️ Ollama AI is not configured yet. Add OLLAMA_API_KEY privately in "
-                "GEMINI_API_KEY or the local-only bot/gemini_secret.py file."
+                "OLLAMA_API_KEY or the local-only bot/ollama_secret.py file."
             )
         else:
             await status.edit_text(
@@ -90,16 +90,16 @@ async def _handle(message: Message, prompt: Optional[str]) -> None:
     except (httpx.TimeoutException, httpx.RequestError, asyncio.TimeoutError):
         logger.warning("Ollama connection failed (network/timeout)")
         await status.edit_text(
-            "⚠️ Gemini connection failed. Alexa has not generated an AI answer; "
+            "⚠️ Ollama connection failed. Alexa has not generated an AI answer; "
             "please try again when the connection is available."
         )
         return
     except Exception:
-        logger.exception("Unexpected Gemini response processing error")
+        logger.exception("Unexpected Ollama response processing error")
         await status.edit_text(
             "⚠️ Ollama could not complete this request. Alexa has not generated an AI answer."
         )
         return
 
-    # Only publish AI text after a successful, non-empty Gemini response.
+    # Only publish AI text after a successful, non-empty Ollama response.
     await status.edit_text(html.escape(answer[:3500]))
