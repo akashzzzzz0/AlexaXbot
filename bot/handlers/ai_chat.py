@@ -277,7 +277,7 @@ async def is_alexa_trigger(message: Message) -> bool:
 
     # Recognize Alexa's name anywhere in a group message, not only at the start.
     # This makes natural phrases like "yaar Alexa zara help" trigger reliably.
-    if re.search(r"(?i)(?<![\\w])alexa(?![\\w])", text):
+    if re.search(r"(?i)(?<!\w)alexa(?!\w)", text):
         return True
 
     if _ALEXA_PREFIX_RE.match(text):
