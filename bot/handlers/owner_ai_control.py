@@ -630,7 +630,7 @@ async def _moderation_action(message: Message, session: AsyncSession, action: st
 
 
 async def _run_request(message: Message, session: AsyncSession, prompt: str) -> str:
-    # Resolve common owner-panel data requests deterministically before Gemini.
+    # Resolve common owner-panel data requests deterministically before asking the AI provider.
     # This lets saved user records and reports work even if the model endpoint is unavailable.
     normalized = re.sub(r"[^a-z0-9@ -]+", " ", (prompt or "").casefold())
     normalized = re.sub(r"\s+", " ", normalized).strip()
