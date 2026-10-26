@@ -425,8 +425,8 @@ async def alexa_ai_chat(message: Message) -> None:
         and not directly_addressed
         and not session_was_active
     )
-    # Refresh the short group-chat session whenever this user talks to Alexa.
-    if message.chat.type != ChatType.PRIVATE:
+    # Only explicit Alexa conversations refresh the session; smart sampling must not.
+    if message.chat.type != ChatType.PRIVATE and not smart_mode:
         _active_until[key] = time.monotonic() + _SESSION_SECONDS
     history = _conversations[key]
     try:
