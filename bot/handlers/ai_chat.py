@@ -371,7 +371,7 @@ async def alexa_ai_chat(message: Message) -> None:
             )
             history.extend(persisted_history)
             _history_loaded.add(key)
-        answer = await _ask_gemini_with_typing(message, text, history)
+        answer = await _ask_ollama_with_typing(message, text, history)
     except (httpx.HTTPError, ValueError, TypeError) as exc:
         logger.warning("Alexa AI reply failed for chat_id=%s: %s", message.chat.id, type(exc).__name__)
         return

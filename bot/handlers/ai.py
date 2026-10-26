@@ -57,7 +57,7 @@ async def _handle(message: Message, prompt: Optional[str]) -> None:
     if not prompt:
         await message.reply(
             "Please provide a question or reply to a text message.\n"
-            "Examples: /ai explain photosynthesis | /summarize (reply to a message)"
+            "Tip: use /summarize with text or reply to a message to summarize it."
         )
         return
 
@@ -104,11 +104,6 @@ async def _handle(message: Message, prompt: Optional[str]) -> None:
     # Only publish AI text after a successful, non-empty Ollama response.
     await status.edit_text(html.escape(answer[:3500]))
 
-
-@router.message(Command("ai"))
-async def ai_command(message: Message) -> None:
-    """Answer a direct AI question or a replied-to text message."""
-    await _handle(message, _message_text(message))
 
 
 @router.message(Command("summarize", "summary"))

@@ -172,7 +172,7 @@ async def configure_command_visibility(bot) -> None:
     # the most-used economy and group-admin controls, then include game commands.
     # The complete command catalogue remains available through /help.
     admin_priority = [
-        ("ai", "Ask Alexa a question"), ("summarize", "Summarize a replied message"),
+        ("summarize", "Summarize a replied message"),
         ("wallet", "View wallet"), ("daily", "Claim daily coins"),
         ("weekly", "Claim weekly coins"), ("monthly", "Claim monthly coins"),
         ("transfer", "Transfer coins"), ("referral", "Get referral link"),
@@ -193,7 +193,7 @@ async def configure_command_visibility(bot) -> None:
         ("setrules", "Set group rules"), ("id", "Show IDs"),
         ("info", "Show user info"), ("admins", "List group admins"),
         ("report", "Report a member"),
-        ("ai", "Ask Alexa a question"), ("summarize", "Summarize a replied message"),
+        ("summarize", "Summarize a replied message"),
     ]
     admin = to_bot_commands(admin_priority + admin_commands)
     try:
