@@ -118,9 +118,21 @@ async def _create_event(bot, chat_id: int, chat_title: str, created_by: int | No
 
     try:
         if event_type == "number":
-            await bot.send_message(chat_id, _event_text(prize, low, high))
+            await bot.send_photo(
+                chat_id,
+                photo="https://images.unsplash.com/photo-1762279388952-85187155e48d?auto=format&fit=crop&fm=jpg&q=80&w=1200",
+                caption=_event_text(prize, low, high),
+                parse_mode="HTML",
+                has_spoiler=True,
+            )
         else:
-            await bot.send_message(chat_id, _phrase_event_text(prize, prefix))
+            await bot.send_photo(
+                chat_id,
+                photo="https://images.unsplash.com/photo-1762279388952-85187155e48d?auto=format&fit=crop&fm=jpg&q=80&w=1200",
+                caption=_phrase_event_text(prize, prefix),
+                parse_mode="HTML",
+                has_spoiler=True,
+            )
     except Exception:
         async with async_session_maker() as session:
             if event_type == "number":
