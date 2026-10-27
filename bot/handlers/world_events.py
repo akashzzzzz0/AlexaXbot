@@ -484,8 +484,8 @@ def _event_caption() -> str:
 
 
 def _normalize_text(value: str) -> str:
-    """Normalize one-word answers case-insensitively."""
-    return re.sub(r"\s+", " ", (value or "").strip()).casefold()
+    """Normalize one-word answers, ignoring case, whitespace, and punctuation."""
+    return re.sub(r"[^a-z0-9]+", "", (value or "").casefold())
 
 
 def _as_utc(value: datetime) -> datetime:
