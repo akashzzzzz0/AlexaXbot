@@ -214,7 +214,8 @@ _SMART_REPLY_GROUP_COOLDOWN_SECONDS = 15.0
 _SMART_REPLY_USER_COOLDOWN_SECONDS = 45.0
 
 _GREETING_RE = re.compile(
-    r"^\s*(?:hi+|hello+|helo+|hey+|salam|assalamualaikum|aoa)(?:\b.*)?$",
+    r"^\s*(?:hi+|hello+|helo+|hey+|salam|assalamualaikum|aoa|"
+    r"good\s+(?:morning|afternoon|evening|night)|gm|gn)(?:\b.*)?$",
     re.IGNORECASE,
 )
 _ALEXA_PREFIX_RE = re.compile(r"^\s*alexa\b[\s,!:.-]*(.*)$", re.IGNORECASE)
@@ -223,6 +224,9 @@ _ALEXA_PREFIX_RE = re.compile(r"^\s*alexa\b[\s,!:.-]*(.*)$", re.IGNORECASE)
 def _looks_like_smart_reply_candidate(text: str) -> bool:
     """Filter low-value group chatter before spending an Ollama request."""
     value = text.strip().casefold()
+    # Common standalone greetings should get a reply even when they are short.
+    if _GREETING_RE.match(value):
+        return True
     if len(value) < 8:
         return False
     if re.fullmatch(r"(?:ok(?:ay)?|acha|hmm+|huh|nice|same|true|right|👍+|👌+|❤️+|😂+|🤣+|🙏+)[.!?\s]*", value):
@@ -362,7 +366,7 @@ async def _ask_ollama(
         system_instruction += (
             "This is a SMART GROUP REPLY to an unaddressed message that has already passed relevance filters. "
             "Give a short, useful, natural reply to the message. Answer clear questions, join a joke naturally, or offer a brief empathetic reaction. "
-            "Do not output __IGNORE__ for a clear question or a message that invites a normal response. "
+            "Do not output __IGNORE__ for a clear question, a direct greeting (including good morning, good afternoon, good evening, good night, GM, or GN), or a message that invites a normal response. "
             "Do not mention or tag everyone, do not invent missing context, and do not write long explanations. "
             "Use Pakistani Roman Urdu/Hinglish when appropriate, usually in one short sentence."
         )
