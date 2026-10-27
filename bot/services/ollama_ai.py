@@ -40,8 +40,14 @@ async def ollama_chat(
     # "gemma4"), not the CLI's ":cloud" alias. Normalize that alias while
     # preserving explicit model versions and user-configured model choices.
     model = (getattr(settings, "OLLAMA_MODEL", "") or os.getenv("OLLAMA_MODEL", "") or "gemma4").strip()
-    if base_url == "https://ollama.com" and model.endswith(":cloud"):
-        model = model[:-6]
+    if base_url == "https://ollama.com":
+        # qwen3:235b-cloud is a CLI-style alias, not listed as a direct
+        # ollama.com Cloud API model. Use a documented Cloud API model instead
+        # of repeatedly sending a known-invalid model ID and getting HTTP 404.
+        if model == "qwen3:235b-cloud":
+            model = "gemma4:31b"
+        elif model.endswith(":cloud"):
+            model = model[:-6]
     chat_messages: list[dict[str, str]] = []
     if system.strip():
         chat_messages.append({"role": "system", "content": system.strip()})
