@@ -36,9 +36,12 @@ async def ollama_chat(
     if not api_key:
         raise RuntimeError("ollama_not_configured")
     base_url = (getattr(settings, "OLLAMA_BASE_URL", "") or os.getenv("OLLAMA_BASE_URL", "") or "https://ollama.com").strip().rstrip("/")
-    # Ollama Cloud's direct API expects the model's registry name without the
-    # local CLI ":cloud" suffix. Keep runtime overrides supported.
-    model = (getattr(settings, "OLLAMA_MODEL", "") or os.getenv("OLLAMA_MODEL", "") or "gemma4:31b").strip()
+    # The direct Ollama Cloud API examples use the registry model ID (e.g.
+    # "gemma4"), not the CLI's ":cloud" alias. Normalize that alias while
+    # preserving explicit model versions and user-configured model choices.
+    model = (getattr(settings, "OLLAMA_MODEL", "") or os.getenv("OLLAMA_MODEL", "") or "gemma4").strip()
+    if base_url == "https://ollama.com" and model.endswith(":cloud"):
+        model = model[:-6]
     chat_messages: list[dict[str, str]] = []
     if system.strip():
         chat_messages.append({"role": "system", "content": system.strip()})
