@@ -20,7 +20,7 @@ from bot.services.economy_service import add_coins
 router = Router()
 EVENT_INTERVAL_SECONDS = 3 * 60 * 60
 EVENT_DURATION_MINUTES = 180
-WINNER_REWARD = 50
+WINNER_REWARD = 10
 _event_scheduler_task = None
 
 CHALLENGES = [
@@ -472,13 +472,9 @@ def _make_spoiler_image(challenge: str) -> BufferedInputFile:
 
 def _event_caption() -> str:
     return (
-        "⚡ <b>ALEXA SPEED TYPE CHALLENGE</b> ⚡\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "🖼️ Tap the spoiler image to reveal the text written inside it.\n"
-        "⌨️ Type that exact text in this group. No command needed.\n"
-        f"🏆 First member with the correct text wins <b>{WINNER_REWARD} coins</b>!\n"
-        "⏱️ Alexa will announce the winner and their typing time.\n"
-        f"⏳ Challenge duration: {EVENT_DURATION_MINUTES // 60} hours"
+        "⌨️ Type the exact word here.\n"
+        f"🏆 First correct answer wins <b>{WINNER_REWARD} coins</b>!\n"
+        f"⏳ You have {EVENT_DURATION_MINUTES // 60} hours. Good luck!"
     )
 
 
