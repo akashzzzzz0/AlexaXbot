@@ -107,9 +107,8 @@ async def _referral_link_users(session: AsyncSession, offset: int = 0, limit: in
 
 
 def _earned_stars(valid_count: int) -> int:
-    # Keep the existing rate and make milestones cumulative: every 100 valid
-    # referrals earns another 50 Stars, with no artificial lifetime cap.
-    return max(0, valid_count // 100) * 50
+    # One eligible unique referral earns exactly one Star.
+    return max(0, valid_count)
 
 
 async def _stars_balance(session: AsyncSession, user_id: int, valid_count: int) -> int:
@@ -214,10 +213,12 @@ async def affiliate_open(callback: CallbackQuery, db_session: AsyncSession, db_u
         "🎁 <b>Referral Program — Get Stars Plus Premium</b>\n\n"
         f"👥 Tracked invites: <b>{tracked}</b>\n"
         f"✅ Valid unique DM starts: <b>{valid}</b>\n"
-        f"⭐ Eligible Stars reward balance: <b>{balance}</b>\n\n"
-        "<b>Reward milestones</b>\n"
-        "• 100 valid referrals = 50 Stars\n"
-        "• 200 valid referrals = 100 Stars total\n"
+        f"⭐ Total Stars earned from referrals: <b>{valid}</b>\n"
+        f"💳 Available Stars balance: <b>{balance}</b>\n"
+        f"📈 Withdrawal progress: <b>{min(balance, MIN_WITHDRAWAL)}/{MIN_WITHDRAWAL}</b> Stars\n\n"
+        "<b>Reward rate</b>\n"
+        "• 1 valid referral = 1 Star\n"
+        "• 100 valid referrals = 100 Stars\n"
         f"• Minimum Stars withdrawal request = {MIN_WITHDRAWAL} Stars\n\n"
         "👑 Telegram Premium requests go to the owner for review.\n"
         "Payout/gifting is not automatic; the owner must arrange supported delivery.\n\n"
@@ -261,7 +262,9 @@ async def affiliate_stats(callback: CallbackQuery, db_session: AsyncSession, db_
         "📊 <b>Your Referral Statistics</b>\n\n"
         f"Tracked unique invites: <b>{tracked}</b>\n"
         f"Valid unique DM starts: <b>{valid}</b>\n"
-        f"Eligible Stars reward balance: <b>{balance}</b>\n\n"
+        f"Total Stars earned from referrals: <b>{valid}</b>\n"
+        f"Available Stars balance: <b>{balance}</b>\n"
+        "Reward rate: <b>1 valid referral = 1 Star</b>\n\n"
         "Telegram does not provide a reliable way for the bot to prove an account belongs to a real human.",
         _user_kb(),
     )
@@ -346,7 +349,7 @@ async def affiliate_premium(callback: CallbackQuery, db_session: AsyncSession, d
         f"⭐ Required referral-earned balance: <b>{PREMIUM_3_MONTHS_STARS} Stars</b>\n"
         f"⭐ Your eligible balance: <b>{balance} Stars</b>\n"
         f"📈 Stars still needed: <b>{remaining}</b>\n\n"
-        "Earn <b>50 Stars for every 100 valid referrals</b>. Share your personal "
+        "Earn <b>1 Star for every valid referral</b>. Share your personal "
         "referral link below. A referral counts when a unique non-bot account starts "
         "ALEXA in a private chat.\n\n"
         f"🔗 <b>Your personal referral link</b>\n<code>{escape(link)}</code>\n\n"
@@ -549,7 +552,7 @@ async def affiliate_payment_terms(message: Message):
         f"• A 3-month Telegram Premium request requires <b>{PREMIUM_3_MONTHS_STARS} eligible referral-earned Stars</b>. "
         "Stars are earned through ALEXA's referral program; this is not a Telegram wallet payment.\n"
         "• Share your personal referral link with people. A referral is valid when a unique, non-bot account starts ALEXA in a private chat.\n"
-        "• You earn <b>50 Stars for every 100 valid referrals</b>. Rewards accumulate; reaching 1000 Stars requires 2000 valid referrals under this reward rate.\n"
+        "• You earn <b>1 Star for every valid referral</b>. Rewards accumulate; 100 valid referrals earn 100 Stars; 1000 valid referrals earn 1000 Stars.\n"
         "• Open <b>Get Telegram Premium</b> to see your current eligible balance, remaining Stars, and personal referral link. If you have fewer than 1000 Stars, use <b>Get More Stars</b> to share your link.\n"
         "• You can submit a Premium request only after your available balance reaches 1000 Stars. The request is reviewed by the bot owner.\n"
         "• A request does not activate Premium automatically; the owner must arrange the 3-month gift manually. Contact the owner if the request cannot be fulfilled.\n"
@@ -565,7 +568,7 @@ async def affiliate_terms_callback(callback: CallbackQuery, **kwargs):
         f"• A 3-month Telegram Premium request requires <b>{PREMIUM_3_MONTHS_STARS} eligible referral-earned Stars</b>. "
         "This is not a Telegram wallet payment.\n"
         "• Share your personal referral link. A referral is valid when a unique, non-bot account starts ALEXA in a private chat.\n"
-        "• Earn <b>50 Stars for every 100 valid referrals</b>; rewards accumulate. Under this rate, 2000 valid referrals earn 1000 Stars.\n"
+        "• Earn <b>1 Star for every valid referral</b>. 100 valid referrals earn 100 Stars; 1000 valid referrals earn 1000 Stars.\n"
         "• You may submit a request only when your available balance reaches 1000 Stars. If you have less, use Get More Stars to share your link.\n"
         "• The owner reviews requests and arranges the 3-month Premium gift manually. Requesting does not activate Premium automatically."
     )
