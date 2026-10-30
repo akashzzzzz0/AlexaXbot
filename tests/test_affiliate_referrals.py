@@ -30,14 +30,15 @@ from bot.handlers.affiliate import (
 class AffiliateRewardTierTests(unittest.IsolatedAsyncioTestCase):
     def test_reward_milestones_accumulate_without_a_lifetime_cap(self):
         self.assertEqual(_earned_stars(0), 0)
-        self.assertEqual(_earned_stars(99), 0)
-        self.assertEqual(_earned_stars(100), 50)
-        self.assertEqual(_earned_stars(199), 50)
-        self.assertEqual(_earned_stars(200), 100)
-        self.assertEqual(_earned_stars(500), 250)
-        self.assertEqual(_earned_stars(1999), 950)
-        self.assertEqual(_earned_stars(2000), 1000)
-        self.assertEqual(_earned_stars(2500), 1250)
+        self.assertEqual(_earned_stars(1), 1)
+        self.assertEqual(_earned_stars(99), 99)
+        self.assertEqual(_earned_stars(100), 100)
+        self.assertEqual(_earned_stars(199), 199)
+        self.assertEqual(_earned_stars(200), 200)
+        self.assertEqual(_earned_stars(500), 500)
+        self.assertEqual(_earned_stars(1999), 1999)
+        self.assertEqual(_earned_stars(2000), 2000)
+        self.assertEqual(_earned_stars(2500), 2500)
 
     async def test_valid_referrals_exclude_accounts_that_have_not_started_dm_and_bots(self):
         engine = create_async_engine("sqlite+aiosqlite:///:memory:")
@@ -83,8 +84,8 @@ class AffiliateRewardTierTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await engine.dispose()
 
-    def test_minimum_withdrawal_is_150_stars(self):
-        self.assertEqual(MIN_WITHDRAWAL, 150)
+    def test_minimum_withdrawal_is_100_stars(self):
+        self.assertEqual(MIN_WITHDRAWAL, 100)
 
     def test_affiliate_request_table_is_created_and_links_to_user(self):
         engine = create_engine("sqlite:///:memory:")
