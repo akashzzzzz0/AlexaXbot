@@ -648,6 +648,10 @@ async def submit_speed_type(message: Message, db_session, db_user, **kwargs):
             SpeedTypeEvent.ends_at > now,
         )
         .values(status="completed")
+        # SQLAlchemy's Python-side "evaluate" synchronizer compares loaded
+        # SQLite naive datetimes with this UTC-aware value. The UPDATE is
+        # already guarded by the SQL WHERE clause, so skip Python evaluation.
+        .execution_options(synchronize_session=False)
     )
     if claim.rowcount != 1:
         await db_session.rollback()
