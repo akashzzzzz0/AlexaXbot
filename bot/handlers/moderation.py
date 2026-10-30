@@ -1118,11 +1118,26 @@ async def cmd_demote(message: Message, bot: Bot, db_session: AsyncSession, **kwa
 async def cmd_delete_message(message: Message, bot: Bot, **kwargs):
     if message.chat.type == "private" or not message.reply_to_message:
         await message.reply("Reply to the message you want to delete with /del."); return
+    from aiogram.exceptions import TelegramBadRequest
+
     try:
         await bot.delete_message(message.chat.id, message.reply_to_message.message_id)
+    except TelegramBadRequest as exc:
+        # A previous auto-delete or moderator action may already have removed it.
+        if "message to delete not found" not in str(exc).lower():
+            await message.answer(
+                f"Delete failed. Check bot admin/delete permissions. ({escape(str(exc)[:150])})",
+                parse_mode="HTML",
+            )
+            return
+    try:
         await bot.delete_message(message.chat.id, message.message_id)
-    except Exception as exc:
-        await message.reply(f"Delete failed. Check bot admin/delete permissions. ({escape(str(exc)[:150])})", parse_mode="HTML")
+    except TelegramBadRequest as exc:
+        if "message to delete not found" not in str(exc).lower():
+            await message.answer(
+                f"Delete failed. Check bot admin/delete permissions. ({escape(str(exc)[:150])})",
+                parse_mode="HTML",
+            )
 
 
 @router.message(Command("purg"))
