@@ -1689,10 +1689,11 @@ async def owner_users(callback: CallbackQuery, _: callable, db_session: AsyncSes
     builder = InlineKeyboardBuilder()
     if page > 0:
         builder.button(text="⬅️ Previous", callback_data=f"owner:users:{page - 1}")
+    builder.button(text="🔄 Refresh", callback_data=f"owner:users:{page}")
     if page < max_page:
         builder.button(text="Next ➡️", callback_data=f"owner:users:{page + 1}")
     builder.button(text="◀️ Owner Panel", callback_data="owner:menu")
-    builder.adjust(2, 1)
+    builder.adjust(3, 1)
 
     page_label = f"Page {page + 1}/{max_page + 1}" if total else "Page 0/0"
     await callback.message.edit_text(
