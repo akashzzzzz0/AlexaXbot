@@ -1825,8 +1825,12 @@ async def start_group_promotion(callback: CallbackQuery, _: callable, state: FSM
         return
     await state.set_state(OwnerStates.waiting_group_promotion)
     await callback.message.answer(
-        "📣 Send the announcement/promotion message now. It will be copied to every active group registered by ALEXA.\n\n"
-        "Send /cancel to stop. Only the bot owner can use this action."
+        "📣 <b>GLOBAL GROUP MESSAGE</b>\n\n"
+        "Send one message and ALEXA will copy it to every active group connected to the bot. "
+        "This is a direct owner broadcast — not random group promotion.\n\n"
+        "Text, photos, videos and supported Telegram media can be copied.\n"
+        "Send /cancel to stop.",
+        parse_mode="HTML",
     )
     await callback.answer()
 
@@ -1836,38 +1840,86 @@ async def process_group_promotion(message: Message, _: callable, db_session: Asy
     if not is_owner(message.from_user.id) or message.chat.type != "private":
         await state.clear()
         return
+
     if (message.text or "").strip().lower() == "/cancel":
         await state.clear()
-        await message.reply("Group promotion cancelled.")
+        await message.answer("📣 Global group message cancelled.")
         return
+
     groups = await _active_groups(db_session)
     if not groups:
         await state.clear()
-        await message.reply("No active groups are registered yet.")
+        await message.answer("No active registered groups found.")
         return
+
     sent = 0
     failed = []
+    total = len(groups)
+
     for group in groups:
-        try:
-            await message.copy_to(chat_id=group.id)
-            sent += 1
-        except TelegramRetryAfter as exc:
-            await asyncio.sleep(max(1, exc.retry_after))
+        group_name = group.title or str(group.id)
+        delivered = False
+        last_error = None
+
+        # Retry Telegram flood-wait responses instead of marking a group failed
+        # after a single retry. Each group is attempted independently.
+        for attempt in range(5):
             try:
                 await message.copy_to(chat_id=group.id)
+                delivered = True
                 sent += 1
-            except Exception:
-                failed.append(group.title or str(group.id))
-        except Exception:
-            failed.append(group.title or str(group.id))
+                break
+            except TelegramRetryAfter as exc:
+                last_error = exc
+                wait_seconds = max(1, int(exc.retry_after)) + 1
+                logger.warning(
+                    "Owner group broadcast rate limited; retrying",
+                    group_id=group.id,
+                    group_title=group_name,
+                    retry_after=wait_seconds,
+                    attempt=attempt + 1,
+                )
+                if attempt < 4:
+                    await asyncio.sleep(wait_seconds)
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    "Owner group broadcast delivery failed",
+                    group_id=group.id,
+                    group_title=group_name,
+                    error=str(exc),
+                )
+                break
+
+        if not delivered:
+            reason = str(last_error) if last_error else "delivery failed"
+            failed.append((group_name, reason[:180]))
+
+        # Keep a safe global sending pace while still delivering to all groups.
         await asyncio.sleep(0.05)
+
     await state.clear()
-    details = "\n".join(f"• {escape(name)}" for name in failed[:20])
-    summary = f"📣 <b>Group Promotion Result</b>\n\nSent: <b>{sent}</b>\nFailed: <b>{len(failed)}</b>"
+
+    details = "\n".join(
+        f"• {escape(name)} — <code>{escape(reason)}</code>"
+        for name, reason in failed[:15]
+    )
+    summary = (
+        "📣 <b>GLOBAL GROUP MESSAGE REPORT</b>\n\n"
+        f"📨 Total groups: <b>{total}</b>\n"
+        f"🟢 Delivered: <b>{sent}</b>\n"
+        f"🔴 Failed: <b>{len(failed)}</b>"
+    )
     if details:
-        summary += "\n\n<b>Failed groups (first 20):</b>\n" + details
-    summary += f"\n\nCompleted at: <code>{datetime.now(ZoneInfo('Asia/Kolkata')).strftime('%Y-%m-%d %H:%M')}</code> (24-hour time)"
-    await message.reply(summary, parse_mode="HTML")
+        summary += "\n\n<b>Failed groups (first 15):</b>\n" + details
+    if len(failed) > 15:
+        summary += f"\n…and {len(failed) - 15} more."
+
+    summary += (
+        f"\n\nCompleted: "
+        f"<code>{datetime.now(ZoneInfo('Asia/Kolkata')).strftime('%Y-%m-%d %H:%M')}</code> IST"
+    )
+    await message.answer(summary, parse_mode="HTML")
 
 
 @router.message(OwnerStates.waiting_broadcast)
