@@ -213,10 +213,12 @@ async def affiliate_open(callback: CallbackQuery, db_session: AsyncSession, db_u
         "🎁 <b>Referral Program — Get Stars Plus Premium</b>\n\n"
         f"👥 Tracked invites: <b>{tracked}</b>\n"
         f"✅ Valid unique DM starts: <b>{valid}</b>\n"
-        f"⭐ Eligible Stars reward balance: <b>{balance}</b>\n\n"
-        "<b>Reward milestones</b>\n"
-        "• 100 valid referrals = 50 Stars\n"
-        "• 200 valid referrals = 100 Stars total\n"
+        f"⭐ Total Stars earned from referrals: <b>{valid}</b>\n"
+        f"💳 Available Stars balance: <b>{balance}</b>\n"
+        f"📈 Withdrawal progress: <b>{min(balance, MIN_WITHDRAWAL)}/{MIN_WITHDRAWAL}</b> Stars\n\n"
+        "<b>Reward rate</b>\n"
+        "• 1 valid referral = 1 Star\n"
+        "• 100 valid referrals = 100 Stars\n"
         f"• Minimum Stars withdrawal request = {MIN_WITHDRAWAL} Stars\n\n"
         "👑 Telegram Premium requests go to the owner for review.\n"
         "Payout/gifting is not automatic; the owner must arrange supported delivery.\n\n"
@@ -260,7 +262,9 @@ async def affiliate_stats(callback: CallbackQuery, db_session: AsyncSession, db_
         "📊 <b>Your Referral Statistics</b>\n\n"
         f"Tracked unique invites: <b>{tracked}</b>\n"
         f"Valid unique DM starts: <b>{valid}</b>\n"
-        f"Eligible Stars reward balance: <b>{balance}</b>\n\n"
+        f"Total Stars earned from referrals: <b>{valid}</b>\n"
+        f"Available Stars balance: <b>{balance}</b>\n"
+        "Reward rate: <b>1 valid referral = 1 Star</b>\n\n"
         "Telegram does not provide a reliable way for the bot to prove an account belongs to a real human.",
         _user_kb(),
     )
@@ -564,7 +568,7 @@ async def affiliate_terms_callback(callback: CallbackQuery, **kwargs):
         f"• A 3-month Telegram Premium request requires <b>{PREMIUM_3_MONTHS_STARS} eligible referral-earned Stars</b>. "
         "This is not a Telegram wallet payment.\n"
         "• Share your personal referral link. A referral is valid when a unique, non-bot account starts ALEXA in a private chat.\n"
-        "• Earn <b>50 Stars for every 100 valid referrals</b>; rewards accumulate. Under this rate, 2000 valid referrals earn 1000 Stars.\n"
+        "• Earn <b>1 Star for every valid referral</b>. 100 valid referrals earn 100 Stars; 1000 valid referrals earn 1000 Stars.\n"
         "• You may submit a request only when your available balance reaches 1000 Stars. If you have less, use Get More Stars to share your link.\n"
         "• The owner reviews requests and arranges the 3-month Premium gift manually. Requesting does not activate Premium automatically."
     )
