@@ -552,7 +552,7 @@ async def affiliate_payment_terms(message: Message):
         f"• A 3-month Telegram Premium request requires <b>{PREMIUM_3_MONTHS_STARS} eligible referral-earned Stars</b>. "
         "Stars are earned through ALEXA's referral program; this is not a Telegram wallet payment.\n"
         "• Share your personal referral link with people. A referral is valid when a unique, non-bot account starts ALEXA in a private chat.\n"
-        "• You earn <b>50 Stars for every 100 valid referrals</b>. Rewards accumulate; reaching 1000 Stars requires 2000 valid referrals under this reward rate.\n"
+        "• You earn <b>1 Star for every valid referral</b>. Rewards accumulate; 100 valid referrals earn 100 Stars; 1000 valid referrals earn 1000 Stars.\n"
         "• Open <b>Get Telegram Premium</b> to see your current eligible balance, remaining Stars, and personal referral link. If you have fewer than 1000 Stars, use <b>Get More Stars</b> to share your link.\n"
         "• You can submit a Premium request only after your available balance reaches 1000 Stars. The request is reviewed by the bot owner.\n"
         "• A request does not activate Premium automatically; the owner must arrange the 3-month gift manually. Contact the owner if the request cannot be fulfilled.\n"
