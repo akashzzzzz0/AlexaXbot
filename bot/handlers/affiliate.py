@@ -107,9 +107,8 @@ async def _referral_link_users(session: AsyncSession, offset: int = 0, limit: in
 
 
 def _earned_stars(valid_count: int) -> int:
-    # Keep the existing rate and make milestones cumulative: every 100 valid
-    # referrals earns another 50 Stars, with no artificial lifetime cap.
-    return max(0, valid_count // 100) * 50
+    # One eligible unique referral earns exactly one Star.
+    return max(0, valid_count)
 
 
 async def _stars_balance(session: AsyncSession, user_id: int, valid_count: int) -> int:
@@ -346,7 +345,7 @@ async def affiliate_premium(callback: CallbackQuery, db_session: AsyncSession, d
         f"⭐ Required referral-earned balance: <b>{PREMIUM_3_MONTHS_STARS} Stars</b>\n"
         f"⭐ Your eligible balance: <b>{balance} Stars</b>\n"
         f"📈 Stars still needed: <b>{remaining}</b>\n\n"
-        "Earn <b>50 Stars for every 100 valid referrals</b>. Share your personal "
+        "Earn <b>1 Star for every valid referral</b>. Share your personal "
         "referral link below. A referral counts when a unique non-bot account starts "
         "ALEXA in a private chat.\n\n"
         f"🔗 <b>Your personal referral link</b>\n<code>{escape(link)}</code>\n\n"
