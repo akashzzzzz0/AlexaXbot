@@ -47,7 +47,7 @@ def _detect_lang(tg_lang):
     return "en"
 
 
-async def _send_add_group_prompt(message: Message):
+async def _send_add_group_prompt(message: Message, db_user=None):
     me = await message.bot.get_me()
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Add Me to Your Group", url=f"https://t.me/{me.username}?startgroup=true")],
@@ -61,14 +61,19 @@ async def _send_add_group_prompt(message: Message):
     user = message.from_user
     first_name = escape(user.first_name or "there") if user else "there"
     username_line = f"👤 @{escape(user.username)}\n" if user and user.username else ""
+    referral_link = (
+        f"https://t.me/{me.username}?start=ref_{db_user.id}"
+        if me.username and db_user and getattr(db_user, "id", None)
+        else None
+    )
     caption = (
-        f"👋 Hey {first_name}! Welcome to ALEXA 💜\n\n"
-        "🤖 Your all-in-one Telegram group companion!\n\n"
-        "🛡️ Smart Moderation • 🎮 Fun Games\n"
-        "🤖 AI Chat • 🎁 Rewards & Referrals\n"
-        "📢 Free Group Promotion\n\n"
-        "✨ Make your groups safer, smarter, and more fun!\n\n"
-        "🚀 Add ALEXA to your group and grant admin permissions to unlock the full experience.\n\n"
+        f"👋 Hey {first_name}! Welcome to ALEXA 💜\\n\\n"
+        "🛡️ Smart Moderation • 🎮 Fun Games\\n"
+        "🤖 AI Chat • 🎁 Rewards & Referrals\\n"
+        "📢 Free Group Promotion\\n\\n"
+        + (f"🔗 Your personal referral link:\\n{referral_link}\\n\\n" if referral_link else "")
+        + "🎁 Invite friends with your link and earn Stars toward a 3-month Telegram Premium reward!\\n\\n"
+        "🚀 Add ALEXA to your group and grant admin permissions to unlock the full experience.\\n\\n"
         "👇 Choose an option below to get started."
     )
     # Use ordinary Unicode emoji and plain text. This avoids invalid custom-emoji
@@ -129,7 +134,7 @@ async def cmd_start(message: Message, _: callable, db_session: AsyncSession = No
             logger.warning("Could not process referral start payload", error=str(exc))
             raise
     # Always show the Alexa welcome screen on private /start.
-    await _send_add_group_prompt(message)
+    await _send_add_group_prompt(message, db_user)
     return
 
 
