@@ -65,12 +65,15 @@ def get_main_router() -> Router:
     # or callbacks intended for the other feature routers.
     # Force-join guard must run before feature handlers so unjoined members cannot use commands either.
     router.include_router(force_join.router)
+    # Check the active speed-type challenge before conversational FSM handlers
+    # (deposit/withdraw/transfer/dice) can consume a member's one-word answer.
+    # Non-matching messages raise SkipHandler and continue through normal routers.
+    router.include_router(world_events.router)
     router.include_router(start.router)
     router.include_router(security.router)
     router.include_router(moderation.router)
     router.include_router(economy.router)
     router.include_router(games.router)
-    router.include_router(world_events.router)
     router.include_router(missing_games.router)
     router.include_router(duels.router)
     router.include_router(statistics.router)
