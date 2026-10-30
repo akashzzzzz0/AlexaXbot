@@ -67,13 +67,13 @@ async def _send_add_group_prompt(message: Message, db_user=None):
         else None
     )
     caption = (
-        f"👋 Hey {first_name}! Welcome to ALEXA 💜\\n\\n"
-        "🛡️ Smart Moderation • 🎮 Fun Games\\n"
-        "🤖 AI Chat • 🎁 Rewards & Referrals\\n"
-        "📢 Free Group Promotion\\n\\n"
-        + (f"🔗 Your personal referral link:\\n{referral_link}\\n\\n" if referral_link else "")
-        + "🎁 Invite friends with your link and earn Stars toward a 3-month Telegram Premium reward!\\n\\n"
-        "🚀 Add ALEXA to your group and grant admin permissions to unlock the full experience.\\n\\n"
+        f"👋 Hey {first_name}! Welcome to ALEXA 💜\n\n"
+        "🛡️ Smart Moderation • 🎮 Fun Games\n"
+        "🤖 AI Chat • 🎁 Rewards & Referrals\n"
+        "📢 Free Group Promotion\n\n"
+        + (f"🔗 Your personal referral link:\n{referral_link}\n\n" if referral_link else "")
+        + "🎁 Invite friends with your link and earn Stars toward a 3-month Telegram Premium reward!\n\n"
+        "🚀 Add ALEXA to your group and grant admin permissions to unlock the full experience.\n\n"
         "👇 Choose an option below to get started."
     )
     # Use ordinary Unicode emoji and plain text. This avoids invalid custom-emoji
