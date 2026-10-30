@@ -3,6 +3,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Message, CallbackQuery, Update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from bot.database.models import User, Group, GroupMember, SecuritySettings, GroupDisabledCommand, InboxMessage
 import structlog
 
@@ -219,23 +220,32 @@ class DatabaseMiddleware(BaseMiddleware):
     async def _get_or_create_user(self, session: AsyncSession, tg_user) -> User:
         user = await session.get(User, tg_user.id)
         if not user:
-            user = User(
+            candidate = User(
                 id=tg_user.id,
                 username=tg_user.username,
                 first_name=tg_user.first_name or "User",
                 last_name=tg_user.last_name,
-is_bot=tg_user.is_bot,
+                is_bot=tg_user.is_bot,
                 is_premium=getattr(tg_user, "is_premium", False) or False,
                 telegram_id=tg_user.id,
             )
-            session.add(user)
-            await session.flush()
-        else:
-            user.username = tg_user.username
-            user.first_name = tg_user.first_name or "User"
-            user.last_name = tg_user.last_name
-            from datetime import datetime, timezone
-            user.last_seen = datetime.now(timezone.utc)
+            # Concurrent Telegram updates can both observe a missing user.
+            # Isolate the insert in a SAVEPOINT so a uniqueness race does not
+            # poison the request's outer transaction.
+            try:
+                async with session.begin_nested():
+                    session.add(candidate)
+                    await session.flush()
+                user = candidate
+            except IntegrityError:
+                user = await session.scalar(select(User).where(User.id == tg_user.id))
+                if user is None:
+                    raise
+        user.username = tg_user.username
+        user.first_name = tg_user.first_name or "User"
+        user.last_name = tg_user.last_name
+        from datetime import datetime, timezone
+        user.last_seen = datetime.now(timezone.utc)
         return user
 
     async def _get_or_create_group(self, session: AsyncSession, chat) -> Group:
