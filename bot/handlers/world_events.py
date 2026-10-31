@@ -648,6 +648,7 @@ async def submit_speed_type(message: Message, db_session, db_user, **kwargs):
             SpeedTypeEvent.ends_at > now,
         )
         .values(status="completed")
+        .execution_options(synchronize_session=False)
     )
     if claim.rowcount != 1:
         await db_session.rollback()
