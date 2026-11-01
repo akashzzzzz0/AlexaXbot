@@ -237,10 +237,13 @@ async def on_startup(bot) -> None:
             from bot.database.connection import async_session_maker
             from bot.services.achievement_service import seed_achievements
             from bot.services.mission_service import seed_missions
+            from bot.handlers.owner import load_maintenance_mode
             async with async_session_maker() as session:
                 await seed_achievements(session)
                 await seed_missions(session)
                 await session.commit()
+                maintenance_enabled = await load_maintenance_mode(session)
+                logger.info("Owner maintenance mode restored", enabled=maintenance_enabled)
             logger.info('Achievements and missions seeded')
         except Exception as e:
             logger.warning('Could not seed achievements', error=str(e))
