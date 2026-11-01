@@ -1773,10 +1773,25 @@ async def owner_group_service_settings_handler(request):
         import logging
         logging.getLogger(__name__).exception("Owner group service-message setting failed")
         return web.json_response({"error": "Could not load or save service-message settings."}, status=503)
+@require_admin
+async def owner_settings_overview_handler(request):
+    """Expose the native Owner Settings summary to the authenticated Mini App."""
+    try:
+        async with async_session_maker() as session:
+            active_groups = await session.scalar(select(func.count()).select_from(Group).where(Group.is_active.is_(True))) or 0
+            dm_users = await session.scalar(select(func.count()).select_from(User).where(User.dm_started.is_(True), User.is_banned.is_(False))) or 0
+            maintenance = await session.get(GlobalSetting, "owner_maintenance_mode")
+            ai = await session.get(GlobalSetting, "owner_ai_enabled")
+        return web.json_response({"activeGroups": int(active_groups), "dmStarters": int(dm_users), "maintenanceEnabled": bool(maintenance and maintenance.value == "1"), "aiEnabled": bool(ai and ai.value == "1")}, headers={"Cache-Control": "no-store"})
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Owner settings overview failed")
+        return web.json_response({"error": "Could not load Owner Settings overview."}, status=503)
 def setup_admin_routes(app):
     app.router.add_get('/owner', owner_app_handler)
     app.router.add_get('/owner-api/overview', owner_overview_handler)
     app.router.add_get('/owner-api/security', owner_security_status)
+    app.router.add_get('/owner-api/settings-overview', owner_settings_overview_handler)
     app.router.add_get('/owner-api/system-controls', owner_system_controls_handler)
     app.router.add_post('/owner-api/system-controls', owner_system_controls_update_handler)
     app.router.add_get('/owner-api/referrals', owner_referrals_handler)
