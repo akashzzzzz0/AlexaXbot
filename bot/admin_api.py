@@ -832,7 +832,6 @@ async def owner_group_activity_handler(request):
         member_count = await session.scalar(select(func.count()).select_from(GroupMember).where(GroupMember.group_id == group_id)) or 0
         logs = (await session.scalars(select(ActionLog).where(ActionLog.group_id == group_id).order_by(desc(ActionLog.created_at)).limit(20))).all()
         security = await session.scalar(select(SecuritySettings).where(SecuritySettings.group_id == group_id))
-        group_settings = await session.scalar(select(GlobalSetting).where(GlobalSetting.key == "__unused_never_read__"))
     return web.json_response({
         "group": _group_to_dict(group), "trackedMembers": int(member_count),
         "security": {
