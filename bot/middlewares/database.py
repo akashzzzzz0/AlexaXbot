@@ -139,11 +139,18 @@ class DatabaseMiddleware(BaseMiddleware):
                                 target_member.role = event.chat_member.new_chat_member.status
                                 data["db_member"] = target_member
 
-                        # Keep the owner panel's Active Groups list synchronized with
-                        # the bot's own membership/admin status.
+                        # A delivered group message proves the bot is still present.
+                        # This also repairs older rows whose membership status update
+                        # was missed while the bot was offline.
+                        if isinstance(event, Update) and event.message and event.message.chat.type in ("group", "supergroup"):
+                            db_group.is_active = True
+
+                        # Keep the owner panel synchronized with the bot's actual
+                        # Telegram membership. aiogram may expose status as an enum.
                         if isinstance(event, Update) and event.my_chat_member:
-                            bot_status = event.my_chat_member.new_chat_member.status
-                            db_group.is_active = bot_status in ("member", "administrator")
+                            raw_status = event.my_chat_member.new_chat_member.status
+                            bot_status = getattr(raw_status, "value", raw_status)
+                            db_group.is_active = bot_status in ("member", "administrator", "creator")
 
                         security = await session.scalar(
                             select(SecuritySettings).where(SecuritySettings.group_id == chat.id)
