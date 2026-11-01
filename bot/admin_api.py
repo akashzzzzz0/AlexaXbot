@@ -10,7 +10,7 @@ from aiohttp import web
 from sqlalchemy import select, func, and_, or_, desc, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.models import User, Group, GroupMember, Wallet, Economy, ActionLog, SecuritySettings, Referral, AffiliateRequest, InboxMessage, GroupInboxMessage, GroupPromotionRequest, GlobalSetting
+from bot.database.models import User, Group, GroupMember, Wallet, Economy, ActionLog, SecuritySettings, Referral, AffiliateRequest, InboxMessage, GroupInboxMessage, GroupPromotionRequest, GlobalSetting, GroupSettings
 
 ADMIN_KEY = os.environ.get("ADMIN_KEY", "")
 
@@ -1747,6 +1747,32 @@ async def owner_group_leave_handler(request):
         if bot is not None:
             await bot.session.close()
 
+@require_admin
+async def owner_group_service_settings_handler(request):
+    """Read or update the native per-group silent service-message setting."""
+    try:
+        group_id = int(request.match_info["group_id"])
+        from bot.database.connection import async_session_maker
+        async with async_session_maker() as session:
+            group = await session.get(Group, group_id)
+            if not group or not group.is_active: return web.json_response({"error": "Active group not found."}, status=404)
+            row = await session.scalar(select(GroupSettings).where(GroupSettings.group_id == group_id))
+            if row is None:
+                row = GroupSettings(group_id=group_id)
+                session.add(row)
+                await session.flush()
+            if request.method == "POST":
+                body = await request.json()
+                enabled = body.get("silentServiceMessages")
+                if not isinstance(enabled, bool): return web.json_response({"error": "silentServiceMessages must be true or false."}, status=400)
+                row.silent_service_messages = enabled
+                await session.commit()
+            return web.json_response({"groupId": str(group_id), "silentServiceMessages": bool(row.silent_service_messages)}, headers={"Cache-Control": "no-store"})
+    except (ValueError, TypeError): return web.json_response({"error": "Invalid group ID or setting."}, status=400)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Owner group service-message setting failed")
+        return web.json_response({"error": "Could not load or save service-message settings."}, status=503)
 def setup_admin_routes(app):
     app.router.add_get('/owner', owner_app_handler)
     app.router.add_get('/owner-api/overview', owner_overview_handler)
@@ -1772,6 +1798,8 @@ def setup_admin_routes(app):
     app.router.add_get('/owner-api/groups/{group_id}/security', owner_group_security_handler)
     app.router.add_post('/owner-api/groups/{group_id}/security', owner_group_security_handler)
     app.router.add_get('/owner-api/groups/{group_id}/permissions', owner_group_permissions_handler)
+    app.router.add_get('/owner-api/groups/{group_id}/service-settings', owner_group_service_settings_handler)
+    app.router.add_post('/owner-api/groups/{group_id}/service-settings', owner_group_service_settings_handler)
     app.router.add_post('/owner-api/groups/{group_id}/actions/{action}', owner_group_action_handler)
     app.router.add_post('/owner-api/groups/{group_id}/purge', owner_group_purge_handler)
     app.router.add_post('/owner-api/groups/{group_id}/leave', owner_group_leave_handler)
