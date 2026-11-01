@@ -42,6 +42,7 @@ jobs:
               "/owner-api/referrals", "/owner-api/promotion-requests",
               "/owner-api/inbox", "/owner-api/statistics", "/owner-api/health",
               "/owner-api/group-message", "/owner-api/users", "/owner-api/groups",
+              "/owner-api/group-avatar", "/owner-api/groups/{group_id}/members",
               "/owner-api/logs", "/owner-api/broadcast", "/owner-api/economy/leaderboard",
           ]
           missing = [route for route in required if route not in source]
