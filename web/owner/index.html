@@ -87,7 +87,7 @@ if(id==='referrals'){$('pageBody').innerHTML='<div id="referralSummary">Loading�
 if(id==='inbox'){$('pageBody').innerHTML='<div id="inboxRows">Loading…</div>';loadInbox();return}
 if(id==='promorequests'){$('pageBody').innerHTML='<div id="promotionRows">Loading…</div>';loadPromotionRequests();return}
 if(id==='statistics'){$('pageBody').innerHTML='<div id="statisticsRows">Loading…</div>';loadStatistics();return}
-if(id==='controls'){$('pageBody').innerHTML='<p class="muted">Applies to all active groups. Lockdown requires Alexa to have Delete Messages permission.</p><div id="securityControls">Loading…</div>';loadSecurity();returnif(id==='maintenance'){$('pageBody').innerHTML='<p class="muted">Uses Alexa existing global maintenance gate. Does not alter group security settings.</p><div id="maintenanceStatus">Loading…</div><div class="actions"><button class="primary" id="maintenanceToggle" disabled>Loading…</button></div>';$('maintenanceToggle').onclick=toggleMaintenance;loadMaintenance();return}}
+if(id==='controls'){$('pageBody').innerHTML='<p class="muted">Applies to all active groups. Lockdown requires Alexa to have Delete Messages permission.</p><div id="securityControls">Loading…</div>';loadSecurity();return}if(id==='maintenance'){$('pageBody').innerHTML='<p class="muted">Uses Alexa existing global maintenance gate. Does not alter group security settings.</p><div id="maintenanceStatus">Loading…</div><div class="actions"><button class="primary" id="maintenanceToggle" disabled>Loading…</button></div>';$('maintenanceToggle').onclick=toggleMaintenance;loadMaintenance();return}}
 
 
 
