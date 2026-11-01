@@ -209,8 +209,10 @@ async def groups_handler(request):
         offset = (page - 1) * limit
 
         async with async_session_maker() as session:
-            query = select(Group)
-            count_query = select(func.count()).select_from(Group)
+            # Match the native Owner Panel's connected-groups list and
+            # keep removed chats out of group actions/broadcast selection.
+            query = select(Group).where(Group.is_active.is_(True))
+            count_query = select(func.count()).select_from(Group).where(Group.is_active.is_(True))
             if search:
                 like = f"%{search}%"
                 cond = or_(Group.title.ilike(like), Group.username.ilike(like))
