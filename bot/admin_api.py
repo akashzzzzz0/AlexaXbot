@@ -343,6 +343,41 @@ async def broadcast_handler(request):
 
 
 @require_admin
+async def owner_dm_broadcast_handler(request):
+    """Send a plain-text DM only to users who explicitly started the bot."""
+    bot = None
+    try:
+        body = await request.json()
+        message_text = str(body.get("message", "")).strip()
+        if not message_text or len(message_text) > 4000:
+            return web.json_response({"error": "Message must be 1–4000 characters."}, status=400)
+        from bot.config import settings
+        from aiogram import Bot
+        bot = Bot(token=settings.BOT_TOKEN)
+        async with async_session_maker() as session:
+            result = await session.execute(
+                select(User.id).where(User.dm_started.is_(True), User.is_banned.is_(False)).order_by(User.id.asc())
+            )
+            user_ids = result.scalars().all()
+        sent = failed = 0
+        for user_id in user_ids:
+            try:
+                await bot.send_message(chat_id=user_id, text=message_text)
+                sent += 1
+            except Exception:
+                failed += 1
+            # Respect Telegram rate limits and avoid flooding the API.
+            import asyncio
+            await asyncio.sleep(0.05)
+        return web.json_response({"sent": sent, "failed": failed, "total": len(user_ids)})
+    except Exception:
+        return web.json_response({"error": "DM broadcast failed. Check bot connectivity and logs."}, status=500)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
+@require_admin
 async def twa_profile_handler(request):
     try:
         user_id = int(request.rel_url.query.get("userId", 0))
@@ -559,7 +594,7 @@ def setup_admin_routes(app):
     app.router.add_post('/owner-api/users/{user_id}/unban', unban_user_handler)
     app.router.add_get('/owner-api/groups', groups_handler)
     app.router.add_get('/owner-api/logs', logs_handler)
-    app.router.add_post('/owner-api/broadcast', broadcast_handler)
+    app.router.add_post('/owner-api/broadcast', owner_dm_broadcast_handler)
     app.router.add_get('/owner-api/economy/leaderboard', economy_leaderboard_handler)
     app.router.add_get("/admin/stats", stats_handler)
     app.router.add_get("/admin/users", users_handler)
