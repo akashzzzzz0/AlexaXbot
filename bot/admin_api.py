@@ -840,7 +840,8 @@ async def owner_group_activity_handler(request):
             "emergencyMode": bool(security.emergency_mode) if security else False
         },
         "logs": [{
-            "action": item.action, "reason": item.reason,
+            "action": item.action,
+            "details": json.dumps(item.details, ensure_ascii=False, default=str) if item.details is not None else "",
             "createdAt": item.created_at.isoformat() if item.created_at else None,
             "userId": str(item.user_id) if item.user_id else None
         } for item in logs]
