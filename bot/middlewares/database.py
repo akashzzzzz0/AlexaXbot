@@ -165,16 +165,21 @@ class DatabaseMiddleware(BaseMiddleware):
                     try:
                         incoming = event.message
                         sender = incoming.from_user
-                        preview = incoming.text or incoming.caption or f"[{incoming.content_type}]"
-                        session.add(GroupInboxMessage(
-                            chat_id=incoming.chat.id,
-                            telegram_message_id=incoming.message_id,
-                            sender_id=sender.id if sender else None,
-                            sender_name=((sender.full_name if sender else None) or "Unknown")[:256],
-                            sender_username=(sender.username[:64] if sender and sender.username else None),
-                            content_type=str(incoming.content_type),
-                            preview=preview[:1000],
+                        already_saved = await session.scalar(select(GroupInboxMessage.id).where(
+                            GroupInboxMessage.chat_id == incoming.chat.id,
+                            GroupInboxMessage.telegram_message_id == incoming.message_id,
                         ))
+                        if not already_saved:
+                            preview = incoming.text or incoming.caption or f"[{incoming.content_type}]"
+                            session.add(GroupInboxMessage(
+                                chat_id=incoming.chat.id,
+                                telegram_message_id=incoming.message_id,
+                                sender_id=sender.id if sender else None,
+                                sender_name=((sender.full_name if sender else None) or "Unknown")[:256],
+                                sender_username=(sender.username[:64] if sender and sender.username else None),
+                                content_type=str(incoming.content_type),
+                                preview=preview[:1000],
+                            ))
                     except Exception as group_inbox_error:
                         logger.warning("Could not save group message to owner inbox", chat_id=chat.id if chat else None, error=str(group_inbox_error))
 
