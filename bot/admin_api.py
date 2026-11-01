@@ -738,6 +738,59 @@ async def owner_statistics_handler(request):
     return web.json_response(values, headers={"Cache-Control": "no-store"})
 
 
+
+@require_admin
+async def owner_health_handler(request):
+    try:
+        async with async_session_maker() as session:
+            await session.execute(select(1))
+            active_groups = await session.scalar(select(func.count()).select_from(Group).where(Group.is_active.is_(True))) or 0
+            dm_users = await session.scalar(select(func.count()).select_from(User).where(User.dm_started.is_(True))) or 0
+            pending_reviews = await session.scalar(select(func.count()).select_from(GroupPromotionRequest).where(GroupPromotionRequest.status == "pending")) or 0
+        return web.json_response({"process": "running", "database": "connected", "activeGroups": int(active_groups), "dmStarters": int(dm_users), "pendingPromotionRequests": int(pending_reviews)}, headers={"Cache-Control": "no-store"})
+    except Exception:
+        return web.json_response({"process": "running", "database": "check_failed"}, status=503, headers={"Cache-Control": "no-store"})
+
+
+@require_admin
+async def owner_group_message_handler(request):
+    bot = None
+    try:
+        body = await request.json()
+        message_text = str(body.get("message", "")).strip()
+        raw_ids = body.get("groupIds", [])
+        if not message_text or len(message_text) > 4000:
+            return web.json_response({"error": "Message must be 1–4000 characters."}, status=400)
+        if not isinstance(raw_ids, list) or not raw_ids or len(raw_ids) > 100:
+            return web.json_response({"error": "Select between 1 and 100 groups."}, status=400)
+        try:
+            group_ids = list(dict.fromkeys(int(value) for value in raw_ids))
+        except (ValueError, TypeError):
+            return web.json_response({"error": "Invalid group selection."}, status=400)
+        async with async_session_maker() as session:
+            groups = (await session.scalars(select(Group).where(Group.id.in_(group_ids), Group.is_active.is_(True)))).all()
+        if len(groups) != len(group_ids):
+            return web.json_response({"error": "One or more selected groups are not active registered groups."}, status=400)
+        from bot.config import settings
+        from aiogram import Bot
+        import asyncio
+        bot = Bot(token=settings.BOT_TOKEN)
+        sent = failed = 0
+        for group in groups:
+            try:
+                await bot.send_message(chat_id=group.id, text=message_text)
+                sent += 1
+            except Exception:
+                failed += 1
+            await asyncio.sleep(0.05)
+        return web.json_response({"sent": sent, "failed": failed, "total": len(groups)})
+    except Exception:
+        return web.json_response({"error": "Group message failed. Check bot connectivity and logs."}, status=500)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
 def setup_admin_routes(app):
     app.router.add_get('/owner', owner_app_handler)
     app.router.add_get('/owner-api/overview', owner_overview_handler)
@@ -748,6 +801,8 @@ def setup_admin_routes(app):
     app.router.add_post('/owner-api/promotion-requests/{request_id}', owner_promotion_request_update)
     app.router.add_get('/owner-api/inbox', owner_inbox_handler)
     app.router.add_get('/owner-api/statistics', owner_statistics_handler)
+    app.router.add_get('/owner-api/health', owner_health_handler)
+    app.router.add_post('/owner-api/group-message', owner_group_message_handler)
     app.router.add_post('/owner-api/security', owner_security_update)
     # Reuse existing admin handlers behind Telegram owner-session verification.
     app.router.add_get('/owner-api/users', users_handler)
