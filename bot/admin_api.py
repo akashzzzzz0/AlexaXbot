@@ -626,6 +626,37 @@ async def owner_security_update(request):
 
 
 @require_admin
+async def owner_maintenance_handler(request):
+    """Read or update the persistent global owner maintenance switch."""
+    async with async_session_maker() as session:
+        row = await session.get(GlobalSetting, "owner_maintenance_mode")
+        if request.method == "GET":
+            enabled = bool(row and row.value == "1")
+            return web.json_response({"enabled": enabled}, headers={"Cache-Control": "no-store"})
+        try:
+            body = await request.json()
+        except (ValueError, TypeError):
+            return web.json_response({"error": "Invalid JSON body"}, status=400)
+        enabled = body.get("enabled")
+        if not isinstance(enabled, bool):
+            return web.json_response({"error": "enabled must be a boolean"}, status=400)
+        if row is None:
+            session.add(GlobalSetting(key="owner_maintenance_mode", value="1" if enabled else "0"))
+        else:
+            row.value = "1" if enabled else "0"
+        await session.commit()
+    # Keep the existing runtime maintenance gate in sync with the database.
+    try:
+        from bot.handlers import owner as owner_handlers
+        owner_handlers._maintenance_mode = enabled
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Could not sync runtime maintenance flag")
+        return web.json_response({"error": "Setting saved but runtime sync failed; restart the bot."}, status=503)
+    return web.json_response({"success": True, "enabled": enabled})
+
+
+@require_admin
 async def owner_referrals_handler(request):
     async with async_session_maker() as session:
         total = await session.scalar(select(func.count()).select_from(Referral)) or 0
@@ -1236,6 +1267,8 @@ def setup_admin_routes(app):
     app.router.add_get('/owner', owner_app_handler)
     app.router.add_get('/owner-api/overview', owner_overview_handler)
     app.router.add_get('/owner-api/security', owner_security_status)
+    app.router.add_get('/owner-api/maintenance', owner_maintenance_handler)
+    app.router.add_post('/owner-api/maintenance', owner_maintenance_handler)
     app.router.add_get('/owner-api/referrals', owner_referrals_handler)
     app.router.add_post('/owner-api/referrals/requests/{request_id}', owner_affiliate_request_update)
     app.router.add_get('/owner-api/promotion-requests', owner_promotion_requests_handler)
