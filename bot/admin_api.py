@@ -1272,6 +1272,60 @@ async def owner_group_activity_handler(request):
 
 
 
+
+@require_admin
+async def owner_group_security_handler(request):
+    """Read or update the exact per-group security and content-lock controls used by /owner."""
+    try:
+        group_id = int(request.match_info["group_id"])
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid group ID."}, status=400)
+
+    security_fields = {
+        "anti_spam", "anti_flood", "anti_raid", "anti_bot",
+        "anti_link", "anti_scam", "anti_invite", "anti_advertisement",
+        "emergency_mode",
+    }
+    lock_fields = {
+        "lock_text", "lock_links", "lock_photos", "lock_videos", "lock_gifs",
+        "lock_audio", "lock_voice", "lock_documents", "lock_polls", "lock_games",
+        "lock_bots", "lock_forwards", "lock_contacts", "lock_locations",
+        "lock_stickers", "lock_inline", "lock_mentions", "lock_hashtags",
+    }
+    try:
+        from bot.database.connection import async_session_maker
+        async with async_session_maker() as session:
+            group = await session.get(Group, group_id)
+            if not group or not group.is_active:
+                return web.json_response({"error": "Active group not found."}, status=404)
+            row = await session.scalar(
+                select(SecuritySettings).where(SecuritySettings.group_id == group_id)
+            )
+            if row is None:
+                row = SecuritySettings(group_id=group_id)
+                session.add(row)
+                await session.flush()
+
+            if request.method == "POST":
+                body = await request.json()
+                field = body.get("field")
+                enabled = body.get("enabled")
+                if field not in security_fields | lock_fields or not isinstance(enabled, bool):
+                    return web.json_response({"error": "Invalid group security setting."}, status=400)
+                setattr(row, field, enabled)
+                await session.commit()
+            values = {field: bool(getattr(row, field, False)) for field in security_fields | lock_fields}
+        return web.json_response({
+            "group": _group_to_dict(group),
+            "security": {field: values[field] for field in sorted(security_fields)},
+            "locks": {field: values[field] for field in sorted(lock_fields)},
+        }, headers={"Cache-Control": "no-store"})
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Owner per-group security request failed")
+        return web.json_response({"error": "Could not load or save this group's security settings."}, status=503)
+
+
 @require_admin
 async def owner_group_permissions_handler(request):
     """Return the bot's current Telegram administrator permissions for one registered group."""
@@ -1415,6 +1469,8 @@ def setup_admin_routes(app):
     app.router.add_post('/owner-api/groups/{group_id}/messages/{message_id}/delete', owner_group_delete_message_handler)
     app.router.add_post('/owner-api/inbox/{user_id}/reply', owner_inbox_reply_handler)
     app.router.add_get('/owner-api/groups/{group_id}/activity', owner_group_activity_handler)
+    app.router.add_get('/owner-api/groups/{group_id}/security', owner_group_security_handler)
+    app.router.add_post('/owner-api/groups/{group_id}/security', owner_group_security_handler)
     app.router.add_get('/owner-api/groups/{group_id}/permissions', owner_group_permissions_handler)
     app.router.add_post('/owner-api/groups/{group_id}/actions/{action}', owner_group_action_handler)
     app.router.add_get('/owner-api/statistics', owner_statistics_handler)
