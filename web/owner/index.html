@@ -21,6 +21,36 @@ body{margin:0;min-height:100vh;padding:10px 10px 96px;overflow-x:hidden;color:va
 .avatar{width:42px;height:42px;border-radius:50%;display:inline-grid;place-items:center;background:linear-gradient(135deg,#8b5cf6,#155e75);font-weight:800;color:white;flex:none}.chatrow{display:flex;align-items:center;gap:11px;padding:12px 4px;border-bottom:1px solid #263454}.chatrow .chatmain{min-width:0;flex:1}.chatrow .chatmain b{display:block}.chatrow .chatmain small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.perm{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid #263454}
 #page.panel{padding:14px;border-radius:16px}#pageTitle{font-size:17px;margin:2px 0 10px}
 @media(min-width:620px){body{padding:18px 14px 100px}.wrap{max-width:760px}.top{margin:-18px -14px 15px;padding:12px max(14px,calc((100% - 730px)/2))}.stats{grid-template-columns:repeat(4,minmax(0,1fr))}.modules{grid-template-columns:repeat(3,minmax(0,1fr))}.hero h1{font-size:29px}}
+/* Complete the neon skin for every existing workspace and form control */
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.row h2{font-size:16px;margin:0;font-weight:800}
+label{display:block;color:#c8d4f0;font-size:12px;margin:9px 1px 4px}
+input:not([type=checkbox]):not([type=radio]),textarea,select{width:100%;min-width:0;padding:12px 13px;border:1px solid #59418e;border-radius:12px;background:linear-gradient(145deg,#080e20,#10172c);color:#f4f3ff;font:inherit;outline:none;box-shadow:inset 0 1px #ffffff08}
+input:focus,textarea:focus,select:focus{border-color:#b16cff;box-shadow:0 0 0 2px #9333ea33,0 0 13px #7c3aed44}
+textarea{resize:vertical;line-height:1.5}input::placeholder,textarea::placeholder{color:#7888aa}
+input[type=checkbox],input[type=radio]{accent-color:#a855f7;width:17px;height:17px;vertical-align:middle}
+label:has(input[type=checkbox]){display:flex;align-items:center;gap:9px;padding:10px 11px;border:1px solid #39476c;border-radius:11px;background:#111a30}
+a{color:#8bd8ff;text-decoration:none}a:hover{text-decoration:underline;color:#d6b5ff}
+.item{box-shadow:0 0 0 1px #4c1d9520,0 7px 18px #0005,inset 0 1px #ffffff09}
+.item p{color:#d7def1;line-height:1.55;margin:9px 0}
+.item img,.item video{border:1px solid #61439a;box-shadow:0 0 12px #7c3aed33}
+.item audio{width:100%;margin-top:8px;accent-color:#a855f7}
+.actions{align-items:center}.actions button{min-height:36px}
+button:focus-visible,a:focus-visible{outline:2px solid #c084fc;outline-offset:3px}
+button:disabled{opacity:.4;cursor:not-allowed;transform:none!important;box-shadow:none!important}
+.success{color:#4fffb0;font-weight:800}
+#pageTitle{color:#fff;text-shadow:0 0 12px #9b4dff55}
+#pageCount{background:#27154b;border-color:#9b5cff88;color:#d8baff}
+#pageBody>p{color:#b9c6e2;line-height:1.6}
+#pageBody>.item:first-child{margin-top:4px}
+#results:empty,#pageBody:empty{display:none}
+.error,.notice{box-shadow:0 0 14px #0005}
+.error{background:#3c142b;border-color:#ef548c;color:#ffd5e2}
+.notice{background:#102c3c;border-color:#36bde5;color:#d1f6ff}
+.foot{letter-spacing:.7px}
+@media(max-width:360px){body{padding-left:8px;padding-right:8px}.top{padding-left:11px;padding-right:11px}.tile{gap:7px;padding:10px 8px}.tile .ico{width:30px;height:30px;font-size:18px}.tile b{font-size:11px}.tile small{font-size:9px}.stat{padding:10px}.stat strong{font-size:19px}.bottomnav{width:calc(100% - 14px);bottom:5px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+
 </style></head><body><main class="wrap">
 <header class="top"><div class="brand"><div class="logo">✦</div><div><b>ALEXA</b><small>VIP OWNER CONSOLE</small></div></div><div class="status" id="status">● VERIFYING</div></header>
 <section class="hero"><div class="eyebrow">CONTROL • COMMAND • PROTECT</div><h1 id="heading">Welcome back, Owner.</h1><p class="muted" id="subheading">Private command center for the Alexa network.</p></section>
