@@ -63,21 +63,24 @@ class DatabaseMiddleware(BaseMiddleware):
                         if isinstance(event, Update):
                             try:
                                 from bot.services.mission_service import track_progress
-                                if event.message and event.message.text:
-                                    raw = event.message.text.strip()
-                                    if raw.startswith("/"):
-                                        command = raw.split(None, 1)[0].split("@", 1)[0].lower().lstrip("/")
-                                        game_commands = {"dice", "rps", "quiz", "wheel", "roulette", "cards", "card", "mines", "bomb", "treasure", "numwar", "bluff", "hack", "kill", "rob"}
-                                        if command in game_commands:
+                                # Keep mission tracking in a savepoint so a failed
+                                # mission write cannot poison the update's main session.
+                                async with session.begin_nested():
+                                    if event.message and event.message.text:
+                                        raw = event.message.text.strip()
+                                        if raw.startswith("/"):
+                                            command = raw.split(None, 1)[0].split("@", 1)[0].lower().lstrip("/")
+                                            game_commands = {"dice", "rps", "quiz", "wheel", "roulette", "cards", "card", "mines", "bomb", "treasure", "numwar", "bluff", "hack", "kill", "rob"}
+                                            if command in game_commands:
+                                                await track_progress(session, db_user.id, "games")
+                                        elif raw:
+                                            await track_progress(session, db_user.id, "messages")
+                                    elif event.callback_query:
+                                        callback_data = event.callback_query.data or ""
+                                        game_callbacks = ("game:treasure", "game:wheel", "game:cards", "game:numwar", "game:mines", "dice:daily", "rps:play:", "roulette:", "quiz_ans:")
+                                        if any(callback_data.startswith(prefix) for prefix in game_callbacks):
                                             await track_progress(session, db_user.id, "games")
-                                    elif raw:
-                                        await track_progress(session, db_user.id, "messages")
-                                elif event.callback_query:
-                                    callback_data = event.callback_query.data or ""
-                                    game_callbacks = ("game:treasure", "game:wheel", "game:cards", "game:numwar", "game:mines", "dice:daily", "rps:play:", "roulette:", "quiz_ans:")
-                                    if any(callback_data.startswith(prefix) for prefix in game_callbacks):
-                                        await track_progress(session, db_user.id, "games")
-                            except Exception as mission_error:
+                                except Exception as mission_error:
                                 logger.warning("Mission progress tracking failed", error=str(mission_error))
                     except Exception as e:
                         logger.warning("Could not get/create user or track mission progress", error=str(e))
