@@ -51,37 +51,24 @@ def is_owner(user_id: int) -> bool:
 
 
 def owner_kb(_=None) -> object:
-    """Cyber Neon Pro layout; existing callback_data values are intentionally preserved."""
+    """Show only the direct-launch button for the Telegram Owner Mini App."""
     builder = InlineKeyboardBuilder()
-    # Broadcast & promotion
-    builder.button(text="📨 DM Broadcast", callback_data="owner:broadcast")
-    builder.button(text="📣 Group Promotion", callback_data="owner:promotion")
-    # Global overview & analytics
-    builder.button(text="🌐 Global Controls", callback_data="owner:global_controls")
-    builder.button(text="📊 Statistics", callback_data="owner:stats")
-    builder.button(text="🩺 Bot Health Monitor", callback_data="owner:health")
-    # Group network & rewards
-    builder.button(text="👥 Groups • Activity • Links • Permissions", callback_data="owner:groups")
-    builder.button(text="🔗 Force Join", callback_data="owner:forcejoin")
-    builder.button(text="🎁 Affiliate / Referral", callback_data="owner:referrals")
-    # Moderation & configuration
-    builder.button(text="🔨 Ban All", callback_data="owner:banall")
-    builder.button(text="⚙️ Settings", callback_data="owner:settings")
-    # Administration & protection
-    builder.button(text="➕ Add Groups", callback_data="owner:addgroups")
-    builder.button(text=f"{'🟢 Disable' if _maintenance_mode else '🔧 Enable'} Maintenance", callback_data="owner:maintenance")
-    builder.button(text="👤 User List", callback_data="owner:users")
-    builder.button(text="📩 User Messages", callback_data="owner:inbox")
-    builder.button(text="🗂 Promotion Requests", callback_data="owner:promo_requests")
-    builder.button(text="🧠 Global AI Control", callback_data="owner:ai")
-    builder.button(text="📨 Message Selected Groups", callback_data="owner:group_message")
-    builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
-    owner_mini_app_url = os.getenv("OWNER_MINI_APP_URL", "").strip()
+    owner_mini_app_url = os.getenv(
+        "OWNER_MINI_APP_URL",
+        "https://alexa-bot.fadehost.app/owner",
+    ).strip()
     if owner_mini_app_url.startswith("https://"):
-        builder.button(text="💎 VIP Owner Mini App", web_app=WebAppInfo(url=owner_mini_app_url))
-    builder.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
+        builder.button(
+            text="💎 Open VIP Owner Mini App",
+            web_app=WebAppInfo(url=owner_mini_app_url),
+        )
+    else:
+        builder.button(
+            text="⚠️ Configure Owner Mini App URL",
+            callback_data="owner:miniapp_url_missing",
+        )
+    builder.adjust(1)
     return builder.as_markup()
-
 
 # NOTE: this function is intentionally called only by the bot owner.
 async def _active_groups(session: AsyncSession):
@@ -222,15 +209,8 @@ async def owner_panel(message: Message, _: callable, **kwargs):
         # Never post the owner panel into a group, even if the owner invokes it there.
         return
     await message.answer(
-        "💠 <b>ALEXA X</b>  <code>CYBER NEON PRO</code>\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "👑 <b>OWNER ACCESS: VERIFIED</b>\n"
-        "⚡ <b>ULTRA CONTROL DECK</b>\n\n"
-        "📡 <b>CONTROL MODULES</b>\n"
-        "Broadcast • Promotion • Global Controls • Statistics\n"
-        "Groups • Referrals • Ban All • Settings\n"
-        "Maintenance • User List • User Messages • Emergency Controls\n\n"
-        "🔹 Select a module below. Existing actions and permissions are retained.",
+        "💠 <b>ALEXA VIP OWNER</b>\n\n"
+        "👑 Owner access verified. Open your Mini App below.",
         reply_markup=owner_kb(),
         parse_mode="HTML",
     )
