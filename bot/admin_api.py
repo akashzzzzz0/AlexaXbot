@@ -850,25 +850,38 @@ async def owner_avatar_handler(request):
 
 @require_admin
 async def owner_inbox_handler(request):
+    """List every user who has started a private chat, including new empty chats."""
     async with async_session_maker() as session:
-        rows = (await session.scalars(
-            select(InboxMessage).order_by(desc(InboxMessage.created_at), desc(InboxMessage.id)).limit(500)
+        users = (await session.scalars(
+            select(User)
+            .where(User.dm_started.is_(True), User.is_banned.is_(False))
+            .order_by(desc(User.last_seen), desc(User.id))
+            .limit(100)
         )).all()
-        latest = {}
-        for item in rows:
-            latest.setdefault(item.user_id, item)
         data = []
-        for user_id, item in list(latest.items())[:100]:
-            user = await session.get(User, user_id)
-            unread = await session.scalar(select(func.count()).select_from(InboxMessage).where(
-                InboxMessage.user_id == user_id, InboxMessage.is_read.is_(False)
-            )) or 0
+        for user in users:
+            item = await session.scalar(
+                select(InboxMessage)
+                .where(InboxMessage.user_id == user.id)
+                .order_by(desc(InboxMessage.created_at), desc(InboxMessage.id))
+                .limit(1)
+            )
+            unread = await session.scalar(
+                select(func.count()).select_from(InboxMessage).where(
+                    InboxMessage.user_id == user.id,
+                    InboxMessage.is_read.is_(False),
+                )
+            ) or 0
+            media = _decode_owner_media(item.preview) if item else None
+            preview = ((media or {}).get("caption") or "[" + item.content_type + "]") if media else (item.preview if item else "No messages yet — start a conversation")
             data.append({
-                "userId": str(user_id), "name": user.first_name if user else "User",
-                "username": user.username if user else None, "unread": int(unread),
-                "preview": ((_decode_owner_media(item.preview) or {}).get("caption") or "[" + item.content_type + "]") if _decode_owner_media(item.preview) else (item.preview or "[" + item.content_type + "]"),
-                "avatarUrl": f"/owner-api/avatar/{user_id}",
-                "createdAt": item.created_at.isoformat() if item.created_at else None
+                "userId": str(user.id),
+                "name": user.first_name or "User",
+                "username": user.username,
+                "unread": int(unread),
+                "preview": preview,
+                "avatarUrl": f"/owner-api/avatar/{user.id}",
+                "createdAt": item.created_at.isoformat() if item and item.created_at else (user.last_seen.isoformat() if user.last_seen else None),
             })
     return web.json_response({"conversations": data}, headers={"Cache-Control": "no-store"})
 
