@@ -1132,10 +1132,12 @@ async def owner_group_members_handler(request):
         if not group or not group.is_active:
             return web.json_response({"error": "Active group not found."}, status=404)
         query = select(GroupMember, User).join(User, User.id == GroupMember.user_id).where(
-            GroupMember.group_id == group_id, User.is_bot.is_(False))
+            GroupMember.group_id == group_id, User.is_bot.is_(False),
+            GroupMember.role.notin_(("left", "kicked")))
         count_query = select(func.count()).select_from(GroupMember).join(
             User, User.id == GroupMember.user_id).where(
-            GroupMember.group_id == group_id, User.is_bot.is_(False))
+            GroupMember.group_id == group_id, User.is_bot.is_(False),
+            GroupMember.role.notin_(("left", "kicked")))
         if search:
             like = f"%{search}%"
             condition = or_(User.first_name.ilike(like), User.last_name.ilike(like),
