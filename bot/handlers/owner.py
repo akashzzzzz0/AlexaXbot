@@ -3,7 +3,7 @@ import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from aiogram import Router, F, Bot
-from aiogram.types import CallbackQuery, Message, BotCommand, BotCommandScopeDefault, BotCommandScopeChat, ReplyParameters
+from aiogram.types import CallbackQuery, Message, BotCommand, BotCommandScopeDefault, BotCommandScopeChat, ReplyParameters, WebAppInfo
 from aiogram.exceptions import TelegramRetryAfter, TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -75,8 +75,7 @@ def owner_kb(_=None) -> object:
     builder.button(text="🧠 Global AI Control", callback_data="owner:ai")
     builder.button(text="📨 Message Selected Groups", callback_data="owner:group_message")
     builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
-    builder.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2)
-    return builder.as_markup()
+    if settings.OWNER_MINI_APP_URL.startswith("https://"):\n        builder.button(text="💎 VIP Owner Mini App", web_app=WebAppInfo(url=settings.OWNER_MINI_APP_URL))\n    builder.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 1)\n    return builder.as_markup()
 
 
 # NOTE: this function is intentionally called only by the bot owner.
