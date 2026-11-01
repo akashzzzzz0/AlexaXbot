@@ -190,7 +190,7 @@ class DatabaseMiddleware(BaseMiddleware):
                             GroupInboxMessage.telegram_message_id == incoming.message_id,
                         ))
                         if not already_saved:
-                            preview = incoming.text or incoming.caption or f"[{incoming.content_type}]"
+                            preview = _owner_inbox_preview(incoming)
                             session.add(GroupInboxMessage(
                                 chat_id=incoming.chat.id,
                                 telegram_message_id=incoming.message_id,
