@@ -10,7 +10,7 @@ from aiohttp import web
 from sqlalchemy import select, func, and_, or_, desc, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.models import User, Group, GroupMember, Wallet, Economy, ActionLog, SecuritySettings
+from bot.database.models import User, Group, GroupMember, Wallet, Economy, ActionLog, SecuritySettings, Referral, AffiliateRequest, InboxMessage, GroupPromotionRequest, GlobalSetting
 
 ADMIN_KEY = os.environ.get("ADMIN_KEY", "")
 
@@ -617,10 +617,137 @@ async def owner_security_update(request):
     return web.json_response({"success": True, "updatedGroups": len(groups), "field": key, "enabled": enabled})
 
 
+
+@require_admin
+async def owner_referrals_handler(request):
+    async with async_session_maker() as session:
+        total = await session.scalar(select(func.count()).select_from(Referral)) or 0
+        rewarded = await session.scalar(select(func.count()).select_from(Referral).where(Referral.reward_given.is_(True))) or 0
+        pending = await session.scalar(select(func.count()).select_from(AffiliateRequest).where(AffiliateRequest.status == "pending")) or 0
+        rows = (await session.execute(
+            select(Referral, User).join(User, User.id == Referral.referrer_id)
+            .order_by(desc(Referral.created_at)).limit(100)
+        )).all()
+        referrals = [{
+            "id": r.id, "referrerId": str(r.referrer_id), "referredId": str(r.referred_id),
+            "referrer": u.first_name or u.username or str(u.id),
+            "rewardGiven": bool(r.reward_given),
+            "createdAt": r.created_at.isoformat() if r.created_at else None
+        } for r, u in rows]
+        requests = (await session.execute(
+            select(AffiliateRequest, User).join(User, User.id == AffiliateRequest.user_id)
+            .where(AffiliateRequest.status == "pending").order_by(desc(AffiliateRequest.created_at)).limit(100)
+        )).all()
+        payouts = [{
+            "id": x.id, "userId": str(x.user_id), "name": u.first_name or str(u.id),
+            "type": x.request_type, "stars": x.requested_stars, "status": x.status,
+            "createdAt": x.created_at.isoformat() if x.created_at else None
+        } for x, u in requests]
+    return web.json_response({"total": int(total), "rewarded": int(rewarded), "pendingRequests": int(pending), "referrals": referrals, "requests": payouts}, headers={"Cache-Control": "no-store"})
+
+
+@require_admin
+async def owner_affiliate_request_update(request):
+    try:
+        request_id = int(request.match_info["request_id"])
+        body = await request.json()
+        status = body.get("status")
+        if status not in {"approved", "rejected"}:
+            return web.json_response({"error": "Status must be approved or rejected."}, status=400)
+        async with async_session_maker() as session:
+            item = await session.get(AffiliateRequest, request_id)
+            if not item or item.status != "pending":
+                return web.json_response({"error": "Pending request not found."}, status=404)
+            item.status = status
+            item.admin_reply = "Reviewed in VIP Owner Mini App"
+            await session.commit()
+        return web.json_response({"success": True, "id": request_id, "status": status})
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid request."}, status=400)
+
+
+@require_admin
+async def owner_promotion_requests_handler(request):
+    async with async_session_maker() as session:
+        rows = (await session.scalars(
+            select(GroupPromotionRequest).order_by(desc(GroupPromotionRequest.requested_at)).limit(100)
+        )).all()
+    return web.json_response({"requests": [{
+        "id": x.id, "userId": str(x.user_id), "groupId": str(x.group_id),
+        "title": x.group_title, "link": x.group_link, "status": x.status,
+        "requestedAt": x.requested_at.isoformat() if x.requested_at else None
+    } for x in rows]}, headers={"Cache-Control": "no-store"})
+
+
+@require_admin
+async def owner_promotion_request_update(request):
+    try:
+        request_id = int(request.match_info["request_id"])
+        body = await request.json()
+        status = body.get("status")
+        if status not in {"approved", "rejected"}:
+            return web.json_response({"error": "Status must be approved or rejected."}, status=400)
+        async with async_session_maker() as session:
+            item = await session.get(GroupPromotionRequest, request_id)
+            if not item or item.status != "pending":
+                return web.json_response({"error": "Pending request not found."}, status=404)
+            item.status = status
+            if status == "approved":
+                item.approved_at = datetime.utcnow()
+            await session.commit()
+        return web.json_response({"success": True, "id": request_id, "status": status})
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid request."}, status=400)
+
+
+@require_admin
+async def owner_inbox_handler(request):
+    async with async_session_maker() as session:
+        rows = (await session.scalars(
+            select(InboxMessage).order_by(desc(InboxMessage.created_at), desc(InboxMessage.id)).limit(500)
+        )).all()
+        latest = {}
+        for item in rows:
+            latest.setdefault(item.user_id, item)
+        data = []
+        for user_id, item in list(latest.items())[:100]:
+            user = await session.get(User, user_id)
+            unread = await session.scalar(select(func.count()).select_from(InboxMessage).where(
+                InboxMessage.user_id == user_id, InboxMessage.is_read.is_(False)
+            )) or 0
+            data.append({
+                "userId": str(user_id), "name": user.first_name if user else "User",
+                "username": user.username if user else None, "unread": int(unread),
+                "preview": item.preview or "[" + item.content_type + "]",
+                "createdAt": item.created_at.isoformat() if item.created_at else None
+            })
+    return web.json_response({"conversations": data}, headers={"Cache-Control": "no-store"})
+
+
+@require_admin
+async def owner_statistics_handler(request):
+    async with async_session_maker() as session:
+        values = {
+            "users": await session.scalar(select(func.count()).select_from(User)) or 0,
+            "dmStarters": await session.scalar(select(func.count()).select_from(User).where(User.dm_started.is_(True))) or 0,
+            "groups": await session.scalar(select(func.count()).select_from(Group).where(Group.is_active.is_(True))) or 0,
+            "memberships": await session.scalar(select(func.count()).select_from(GroupMember)) or 0,
+            "referrals": await session.scalar(select(func.count()).select_from(Referral)) or 0,
+            "pendingPromotions": await session.scalar(select(func.count()).select_from(GroupPromotionRequest).where(GroupPromotionRequest.status == "pending")) or 0
+        }
+    return web.json_response(values, headers={"Cache-Control": "no-store"})
+
+
 def setup_admin_routes(app):
     app.router.add_get('/owner', owner_app_handler)
     app.router.add_get('/owner-api/overview', owner_overview_handler)
     app.router.add_get('/owner-api/security', owner_security_status)
+    app.router.add_get('/owner-api/referrals', owner_referrals_handler)
+    app.router.add_post('/owner-api/referrals/requests/{request_id}', owner_affiliate_request_update)
+    app.router.add_get('/owner-api/promotion-requests', owner_promotion_requests_handler)
+    app.router.add_post('/owner-api/promotion-requests/{request_id}', owner_promotion_request_update)
+    app.router.add_get('/owner-api/inbox', owner_inbox_handler)
+    app.router.add_get('/owner-api/statistics', owner_statistics_handler)
     app.router.add_post('/owner-api/security', owner_security_update)
     # Reuse existing admin handlers behind Telegram owner-session verification.
     app.router.add_get('/owner-api/users', users_handler)
