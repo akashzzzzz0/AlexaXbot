@@ -10,6 +10,47 @@ class DailyGroupMessageCounterMiddleware:
         has_content = any(getattr(message, field, None) for field in (
             "text", "caption", "photo", "document", "sticker", "video", "audio", "voice", "animation"
         ))
+        # Telegram does not provide a Bot API method to enumerate every chat
+        # the bot belongs to. Therefore, reconcile the registry whenever any
+        # message arrives from a group; this also backfills groups whose
+        # my_chat_member update was missed before this deployment.
+        if chat_type in {"group", "supergroup"} and has_content:
+            try:
+                from bot.database.connection import async_session_maker
+                from bot.database.models import Group
+                async with async_session_maker() as session:
+                    group = await session.get(Group, message.chat.id)
+                    changed = False
+                    if group is None:
+                        session.add(Group(
+                            id=message.chat.id,
+                            title=message.chat.title or "Unknown",
+                            username=message.chat.username,
+                            type=chat_type,
+                            is_active=True,
+                        ))
+                        changed = True
+                    else:
+                        title = message.chat.title or group.title or "Unknown"
+                        if group.title != title:
+                            group.title = title
+                            changed = True
+                        if group.username != message.chat.username:
+                            group.username = message.chat.username
+                            changed = True
+                        if group.type != chat_type:
+                            group.type = chat_type
+                            changed = True
+                        if not group.is_active:
+                            group.is_active = True
+                            changed = True
+                    if changed:
+                        await session.commit()
+            except Exception:
+                # Registry reconciliation is best-effort and must never block
+                # normal moderation or group message processing.
+                pass
+
         if (
             chat_type in {"group", "supergroup"}
             and getattr(message, "from_user", None)
