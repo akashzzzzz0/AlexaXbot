@@ -26,8 +26,11 @@ def __getattr__(name):
 def require_admin(handler):
     async def wrapper(request):
         key = request.headers.get("X-Admin-Key", "")
-        if not ADMIN_KEY or key != ADMIN_KEY:
-            return web.json_response({"error": "Unauthorized"}, status=401)
+        init_data = request.headers.get("X-Telegram-Init-Data", "")
+        owner_session = bool(init_data and _verify_owner_telegram_init_data(init_data))
+        admin_session = bool(ADMIN_KEY and hmac.compare_digest(key, ADMIN_KEY))
+        if not (owner_session or admin_session):
+            return web.json_response({"error": "Unauthorized"}, status=401, headers={"Cache-Control": "no-store"})
         return await handler(request)
     wrapper.__name__ = handler.__name__
     return wrapper
@@ -550,6 +553,14 @@ async def owner_overview_handler(request):
 def setup_admin_routes(app):
     app.router.add_get('/owner', owner_app_handler)
     app.router.add_get('/owner-api/overview', owner_overview_handler)
+    # Reuse existing admin handlers behind Telegram owner-session verification.
+    app.router.add_get('/owner-api/users', users_handler)
+    app.router.add_post('/owner-api/users/{user_id}/ban', ban_user_handler)
+    app.router.add_post('/owner-api/users/{user_id}/unban', unban_user_handler)
+    app.router.add_get('/owner-api/groups', groups_handler)
+    app.router.add_get('/owner-api/logs', logs_handler)
+    app.router.add_post('/owner-api/broadcast', broadcast_handler)
+    app.router.add_get('/owner-api/economy/leaderboard', economy_leaderboard_handler)
     app.router.add_get("/admin/stats", stats_handler)
     app.router.add_get("/admin/users", users_handler)
     app.router.add_post("/admin/users/{user_id}/ban", ban_user_handler)
