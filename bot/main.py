@@ -399,9 +399,10 @@ async def main() -> None:
     )
     dp = Dispatcher(storage=storage)
     dp.include_router(get_main_router())
-    from bot.middlewares.group_inbox_capture import GroupInboxCaptureMiddleware
+    # Private and group inbox messages are already captured once by DatabaseMiddleware.
+    # A second message-level capture middleware used to write the same rows again,
+    # creating avoidable concurrent SQLite writers and duplicate inbox entries.
     from bot.middlewares.auto_delete import AutoDeleteCommandMiddleware
-    dp.message.outer_middleware(GroupInboxCaptureMiddleware())
     dp.message.outer_middleware(AutoDeleteCommandMiddleware())
 
     # IMPORTANT: Middleware registration order in aiogram 3.
