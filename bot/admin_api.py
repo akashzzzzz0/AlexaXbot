@@ -226,7 +226,9 @@ async def groups_handler(request):
                 "limit": limit,
             })
     except Exception as e:
-        return web.json_response({"groups": [], "total": 0, "page": 1, "limit": 20})
+        import structlog
+        structlog.get_logger().exception("Owner groups API failed", error=str(e))
+        return web.json_response({"error": "Could not load groups from the database."}, status=500)
 
 
 @require_admin
