@@ -51,23 +51,26 @@ def is_owner(user_id: int) -> bool:
 
 
 def owner_kb(_=None) -> object:
-    """Show only the direct-launch button for the Telegram Owner Mini App."""
+    """Restore the native Telegram Owner Panel; keep the Mini App as an optional shortcut."""
     builder = InlineKeyboardBuilder()
-    owner_mini_app_url = os.getenv(
-        "OWNER_MINI_APP_URL",
-        "https://alexa-bot.fadehost.app/owner",
-    ).strip()
+    builder.button(text="📊 Statistics", callback_data="owner:stats")
+    builder.button(text="🩺 Bot Health", callback_data="owner:health")
+    builder.button(text="👥 Groups", callback_data="owner:groups")
+    builder.button(text="📈 Group Activities", callback_data="owner:activities")
+    builder.button(text="🔗 Group Links", callback_data="owner:links")
+    builder.button(text="➕ Add Alexa to Groups", callback_data="owner:addgroups")
+    builder.button(text="👤 Users", callback_data="owner:users")
+    builder.button(text="📩 User Messages / Inbox", callback_data="owner:inbox")
+    builder.button(text="📨 DM Broadcast", callback_data="owner:broadcast")
+    builder.button(text="📣 Group Promotion", callback_data="owner:promotion")
+    builder.button(text="🌐 Global Controls", callback_data="owner:global_controls")
+    builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
+    builder.button(text="🔨 Ban All", callback_data="owner:banall")
+    builder.button(text="⚙️ Owner Settings", callback_data="owner:settings")
+    owner_mini_app_url = os.getenv("OWNER_MINI_APP_URL", "https://alexa-bot.fadehost.app/owner").strip()
     if owner_mini_app_url.startswith("https://"):
-        builder.button(
-            text="💎 Open VIP Owner Mini App",
-            web_app=WebAppInfo(url=owner_mini_app_url),
-        )
-    else:
-        builder.button(
-            text="⚠️ Configure Owner Mini App URL",
-            callback_data="owner:miniapp_url_missing",
-        )
-    builder.adjust(1)
+        builder.button(text="💎 Open VIP Owner Mini App", web_app=WebAppInfo(url=owner_mini_app_url))
+    builder.adjust(2, 2, 2, 2, 2, 2, 2, 1)
     return builder.as_markup()
 
 # NOTE: this function is intentionally called only by the bot owner.
@@ -210,7 +213,7 @@ async def owner_panel(message: Message, _: callable, **kwargs):
         return
     await message.answer(
         "💠 <b>ALEXA VIP OWNER</b>\n\n"
-        "👑 Owner access verified. Open your Mini App below.",
+        "👑 Owner access verified. Your normal Telegram Owner Panel is ready below.",
         reply_markup=owner_kb(),
         parse_mode="HTML",
     )
@@ -1803,7 +1806,7 @@ async def owner_menu_back(callback: CallbackQuery, _: callable, **kwargs):
         "Broadcast • Promotion • Global Controls • Statistics\n"
         "Groups • Referrals • Ban All • Settings\n"
         "Maintenance • User List • User Messages • Emergency Controls\n\n"
-        "🔹 Select a module below. Existing actions and permissions are retained.",
+        "🔹 Select a module below. The native Telegram controls are restored; the Mini App remains an optional shortcut.",
         reply_markup=owner_kb(),
         parse_mode="HTML",
     )
