@@ -15,7 +15,7 @@ body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.18;ba
 </head>
 <body><main class="wrap">
 <header class="top"><div class="brand"><div class="logo">✦</div><div><b>ALEXA</b><small>OWNER CONSOLE</small></div></div><div class="status">● PRIVATE MODE</div></header>
-<section class="hero"><div class="eyebrow">CONTROL • COMMAND • PROTECT</div><h1>Welcome back,<br>Owner.</h1><p>Your private command center for the Alexa network. Secure access, clear insights, one place.</p><div class="access">♛ &nbsp; OWNER ACCESS VERIFIED BY TELEGRAM</div></section>
+<section class="hero"><div class="eyebrow">CONTROL • COMMAND • PROTECT</div><h1>Welcome back,<br>Owner.</h1><p>Your private command center for the Alexa network. Secure access, clear insights, one place.</p><div class="access">♛ &nbsp; TELEGRAM OWNER SESSION</div></section>
 <div class="section"><h2>NETWORK OVERVIEW</h2><span>Live database snapshot</span></div>
 <section class="stats">
 <div class="stat"><div class="ico">👥</div><strong id="users">—</strong><small>Total users</small></div>
@@ -37,5 +37,5 @@ body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.18;ba
 </section><div class="error" id="error"></div><footer class="foot">ALEXA PRIVATE OWNER SPACE • SESSION VERIFIED SERVER-SIDE</footer>
 </main>
 <script>
-(async()=>{const tg=window.Telegram?.WebApp;if(!tg){document.getElementById('error').style.display='block';document.getElementById('error').textContent='Open this dashboard from the Alexa bot inside Telegram.';return;}tg.ready();tg.expand();try{const res=await fetch('/owner-api/overview',{headers:{'X-Telegram-Init-Data':tg.initData}});if(!res.ok)throw new Error(res.status===401?'Owner verification failed.':'Could not load dashboard data.');const d=await res.json();for(const [id,key] of [['users','totalUsers'],['groups','totalGroups'],['active','activeToday'],['banned','bannedUsers']])document.getElementById(id).textContent=Number(d[key]||0).toLocaleString();}catch(e){const el=document.getElementById('error');el.style.display='block';el.textContent=e.message;}})();
+(async()=>{const tg=window.Telegram?.WebApp;if(!tg){document.getElementById('error').style.display='block';document.getElementById('error').textContent='Open this dashboard from the Alexa bot inside Telegram.';return;}tg.ready();tg.expand();try{const res=await fetch('/owner-api/overview',{headers:{'X-Telegram-Init-Data':tg.initData}});if(!res.ok)throw new Error(res.status===401?'Owner verification failed.':'Could not load dashboard data.');const d=await res.json();for(const [id,key] of [['users','totalUsers'],['groups','totalGroups'],['active','activeToday'],['banned','bannedUsers']])document.getElementById(id).textContent=Number(d[key]||0).toLocaleString();document.querySelector('.access').textContent='♛  OWNER ACCESS VERIFIED';}catch(e){const el=document.getElementById('error');el.style.display='block';el.textContent=e.message;}})();
 </script></body></html>
