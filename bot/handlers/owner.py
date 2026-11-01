@@ -1,3 +1,4 @@
+import os
 import asyncio
 import time
 from datetime import datetime, timezone
@@ -75,8 +76,9 @@ def owner_kb(_=None) -> object:
     builder.button(text="🧠 Global AI Control", callback_data="owner:ai")
     builder.button(text="📨 Message Selected Groups", callback_data="owner:group_message")
     builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
-    if settings.OWNER_MINI_APP_URL.startswith("https://"):
-        builder.button(text="💎 VIP Owner Mini App", web_app=WebAppInfo(url=settings.OWNER_MINI_APP_URL))
+    owner_mini_app_url = os.getenv("OWNER_MINI_APP_URL", "").strip()
+    if owner_mini_app_url.startswith("https://"):
+        builder.button(text="💎 VIP Owner Mini App", web_app=WebAppInfo(url=owner_mini_app_url))
     builder.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
     return builder.as_markup()
 
