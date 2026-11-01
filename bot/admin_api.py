@@ -1388,6 +1388,9 @@ async def owner_group_members_handler(request):
         page = max(1, int(request.rel_url.query.get("page", "1")))
         limit = min(100, max(1, int(request.rel_url.query.get("limit", "50"))))
         search = (request.rel_url.query.get("search", "") or "").strip()
+        status_filter = (request.rel_url.query.get("status", "all") or "all").strip().lower()
+        if status_filter not in {"all", "muted", "banned"}:
+            raise ValueError("Invalid member status filter.")
     except (ValueError, TypeError):
         return web.json_response({"error": "Invalid group member request."}, status=400)
     async with async_session_maker() as session:
@@ -1401,6 +1404,12 @@ async def owner_group_members_handler(request):
             User, User.id == GroupMember.user_id).where(
             GroupMember.group_id == group_id, User.is_bot.is_(False),
             GroupMember.role.notin_(("left", "kicked")))
+        if status_filter == "muted":
+            query = query.where(GroupMember.is_muted.is_(True))
+            count_query = count_query.where(GroupMember.is_muted.is_(True))
+        elif status_filter == "banned":
+            query = query.where(GroupMember.is_banned.is_(True))
+            count_query = count_query.where(GroupMember.is_banned.is_(True))
         if search:
             like = f"%{search}%"
             condition = or_(User.first_name.ilike(like), User.last_name.ilike(like),
