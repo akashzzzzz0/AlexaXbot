@@ -3,7 +3,10 @@ from bot.handlers import start, security, moderation, economy, games, duels, sta
 from bot.handlers.auto_delete_middleware import StartMenuAutoDeleteMessageMiddleware, StartMenuAutoDeleteCallbackMiddleware
 
 class DailyGroupMessageCounterMiddleware:
-    """Count incoming human group messages for per-day activity reports."""
+    """Count group messages and keep the owner-panel group registry reconciled."""
+    def __init__(self):
+        self._known_group_ids = set()
+
     async def __call__(self, handler, event, data):
         message = event
         chat_type = getattr(getattr(message, "chat", None), "type", None)
@@ -14,7 +17,11 @@ class DailyGroupMessageCounterMiddleware:
         # the bot belongs to. Therefore, reconcile the registry whenever any
         # message arrives from a group; this also backfills groups whose
         # my_chat_member update was missed before this deployment.
-        if chat_type in {"group", "supergroup"} and has_content:
+        if (
+            chat_type in {"group", "supergroup"}
+            and has_content
+            and message.chat.id not in self._known_group_ids
+        ):
             try:
                 from bot.database.connection import async_session_maker
                 from bot.database.models import Group
@@ -46,6 +53,7 @@ class DailyGroupMessageCounterMiddleware:
                             changed = True
                     if changed:
                         await session.commit()
+                self._known_group_ids.add(message.chat.id)
             except Exception:
                 # Registry reconciliation is best-effort and must never block
                 # normal moderation or group message processing.
