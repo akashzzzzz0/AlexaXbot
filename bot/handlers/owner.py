@@ -53,10 +53,11 @@ def is_owner(user_id: int) -> bool:
 def owner_kb(_=None) -> object:
     """Show only the direct-launch button for the Telegram Owner Mini App."""
     builder = InlineKeyboardBuilder()
-    owner_mini_app_url = os.getenv(
-        "OWNER_MINI_APP_URL",
-        "https://alexa-bot.fadehost.app/owner",
-    ).strip()
+    # A blank host variable must not disable the Web App button.
+    owner_mini_app_url = (
+        os.getenv("OWNER_MINI_APP_URL", "").strip()
+        or "https://alexa-bot.fadehost.app/owner"
+    )
     if owner_mini_app_url.startswith("https://"):
         builder.button(
             text="💎 Open VIP Owner Mini App",
