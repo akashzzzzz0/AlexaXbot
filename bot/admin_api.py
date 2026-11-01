@@ -1633,6 +1633,57 @@ async def owner_group_action_handler(request):
             await bot.session.close()
 
 
+@require_admin
+async def owner_group_purge_handler(request):
+    """Run the bounded Owner Panel purge with a Mini App confirmation."""
+    bot = None
+    try:
+        group_id = int(request.match_info["group_id"])
+        body = await request.json()
+        mode = body.get("mode")
+        if mode not in {"recent", "range"}: return web.json_response({"error": "Choose recent or range purge."}, status=400)
+        start_id = end_id = None
+        if mode == "range":
+            start_id, end_id = int(body.get("startId", 0)), int(body.get("endId", 0))
+            if start_id <= 0 or end_id < start_id or end_id - start_id + 1 > 1000: return web.json_response({"error": "Message ID range must be valid and contain no more than 1000 IDs."}, status=400)
+        from bot.database.connection import async_session_maker
+        from bot.config import settings
+        from aiogram import Bot
+        async with async_session_maker() as session:
+            group = await session.get(Group, group_id)
+            if not group or not group.is_active: return web.json_response({"error": "Active group not found."}, status=404)
+            group_title = group.title or str(group_id)
+        bot = Bot(token=settings.BOT_TOKEN)
+        me = await bot.get_me()
+        member = await bot.get_chat_member(chat_id=group_id, user_id=me.id)
+        status = str(getattr(member.status, "value", member.status))
+        if status not in {"administrator", "creator"} or (status == "administrator" and not getattr(member, "can_delete_messages", False)): return web.json_response({"error": "ALEXA needs administrator + Delete Messages permission."}, status=403)
+        if mode == "recent":
+            marker = await bot.send_message(group_id, "🧹 ALEXA purge started…")
+            end_id = marker.message_id
+            start_id = max(1, end_id - 999)
+        deleted = failed = 0
+        ids = list(range(start_id, end_id + 1))
+        for offset in range(0, len(ids), 100):
+            batch = ids[offset:offset + 100]
+            try:
+                await bot.delete_messages(chat_id=group_id, message_ids=batch)
+                deleted += len(batch)
+            except Exception:
+                for message_id in batch:
+                    try:
+                        await bot.delete_message(chat_id=group_id, message_id=message_id)
+                        deleted += 1
+                    except Exception:
+                        failed += 1
+        return web.json_response({"success": True, "groupId": str(group_id), "groupTitle": group_title, "startId": start_id, "endId": end_id, "deleted": deleted, "failed": failed})
+    except (ValueError, TypeError): return web.json_response({"error": "Invalid group or message ID range."}, status=400)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Owner Mini App group purge failed")
+        return web.json_response({"error": "Telegram could not complete the purge. Check permissions and message age."}, status=502)
+    finally:
+        if bot is not None: await bot.session.close()
 def setup_admin_routes(app):
     app.router.add_get('/owner', owner_app_handler)
     app.router.add_get('/owner-api/overview', owner_overview_handler)
@@ -1659,6 +1710,7 @@ def setup_admin_routes(app):
     app.router.add_post('/owner-api/groups/{group_id}/security', owner_group_security_handler)
     app.router.add_get('/owner-api/groups/{group_id}/permissions', owner_group_permissions_handler)
     app.router.add_post('/owner-api/groups/{group_id}/actions/{action}', owner_group_action_handler)
+    app.router.add_post('/owner-api/groups/{group_id}/purge', owner_group_purge_handler)
     app.router.add_get('/owner-api/statistics', owner_statistics_handler)
     app.router.add_get('/owner-api/health', owner_health_handler)
     app.router.add_post('/owner-api/group-message', owner_group_message_handler)
