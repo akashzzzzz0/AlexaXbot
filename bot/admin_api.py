@@ -626,6 +626,90 @@ async def owner_security_update(request):
 
 
 @require_admin
+async def owner_ai_control_handler(request):
+    async with async_session_maker() as session:
+        row = await session.get(GlobalSetting, "owner_ai_enabled")
+        if request.method == "GET":
+            return web.json_response({"enabled": bool(row and row.value == "1")}, headers={"Cache-Control": "no-store"})
+        try:
+            body = await request.json()
+            enabled = body.get("enabled")
+        except (ValueError, TypeError):
+            return web.json_response({"error": "Invalid request body."}, status=400)
+        if not isinstance(enabled, bool):
+            return web.json_response({"error": "enabled must be a boolean."}, status=400)
+        if row is None:
+            session.add(GlobalSetting(key="owner_ai_enabled", value="1" if enabled else "0"))
+        else:
+            row.value = "1" if enabled else "0"
+        await session.commit()
+        return web.json_response({"success": True, "enabled": enabled})
+
+
+@require_admin
+async def owner_banall_handler(request):
+    try:
+        body = await request.json()
+        group_id = int(body.get("groupId", 0)) if request.method == "POST" else int(request.query.get("groupId", 0))
+        execute = bool(body.get("confirm") is True) if request.method == "POST" else False
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid group ID or request."}, status=400)
+    if not group_id:
+        return web.json_response({"error": "A valid group ID is required."}, status=400)
+    async with async_session_maker() as session:
+        group = await session.get(Group, group_id)
+        if not group or not group.is_active:
+            return web.json_response({"error": "Active registered group not found."}, status=404)
+        count = await session.scalar(select(func.count()).select_from(GroupMember).where(
+            GroupMember.group_id == group_id, GroupMember.is_banned.is_(False)
+        ))
+        title = group.title or str(group_id)
+    if request.method == "GET" or not execute:
+        return web.json_response({"groupId": str(group_id), "title": title, "trackedMembers": int(count or 0), "requiresConfirmation": True})
+    bot = None
+    try:
+        from bot.config import settings
+        from aiogram import Bot
+        bot = Bot(token=settings.BOT_TOKEN)
+        me = await bot.get_chat_member(group_id, bot.id)
+        me_status = str(getattr(me.status, "value", me.status))
+        if me_status not in {"administrator", "creator"} or (me_status == "administrator" and not getattr(me, "can_restrict_members", False)):
+            return web.json_response({"error": "Alexa needs administrator + Restrict Members permission."}, status=403)
+        async with async_session_maker() as session:
+            group = await session.get(Group, group_id)
+            if not group or not group.is_active:
+                return web.json_response({"error": "Active registered group not found."}, status=404)
+            members = (await session.scalars(select(GroupMember).where(
+                GroupMember.group_id == group_id, GroupMember.is_banned.is_(False)
+            ))).all()
+            banned = skipped = failed = 0
+            for member in members:
+                try:
+                    if member.user_id == settings.effective_owner_id:
+                        skipped += 1
+                        continue
+                    target = await bot.get_chat_member(group_id, member.user_id)
+                    target_status = str(getattr(target.status, "value", target.status))
+                    if target_status in {"creator", "administrator", "left", "kicked"} or target.user.is_bot:
+                        skipped += 1
+                        continue
+                    await bot.ban_chat_member(chat_id=group_id, user_id=member.user_id, revoke_messages=True)
+                    member.is_banned = True
+                    banned += 1
+                except Exception:
+                    failed += 1
+            await session.commit()
+        return web.json_response({"success": True, "title": title, "banned": banned, "skipped": skipped, "failed": failed})
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Owner Mini App Ban All failed")
+        return web.json_response({"error": "Ban All failed. Check Telegram permissions and try again."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
+@require_admin
 async def owner_force_join_handler(request):
     """Owner Mini App access to the existing per-group Force Join configuration."""
     from bot.database.force_join import ForceJoinSetting
@@ -1426,6 +1510,10 @@ def setup_admin_routes(app):
     app.router.add_get('/owner', owner_app_handler)
     app.router.add_get('/owner-api/overview', owner_overview_handler)
     app.router.add_get('/owner-api/security', owner_security_status)
+    app.router.add_get('/owner-api/ai-control', owner_ai_control_handler)
+    app.router.add_post('/owner-api/ai-control', owner_ai_control_handler)
+    app.router.add_get('/owner-api/ban-all', owner_banall_handler)
+    app.router.add_post('/owner-api/ban-all', owner_banall_handler)
     app.router.add_get('/owner-api/force-join', owner_force_join_handler)
     app.router.add_post('/owner-api/force-join', owner_force_join_handler)
     app.router.add_get('/owner-api/emergency', owner_emergency_handler)
