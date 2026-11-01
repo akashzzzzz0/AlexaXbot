@@ -1623,6 +1623,32 @@ async def owner_group_action_handler(request):
                 return web.json_response({"error": "ALEXA lacks Invite Users permission."}, status=403)
             invite = await bot.create_chat_invite_link(chat_id=group_id, creates_join_request=False)
             return web.json_response({"success": True, "inviteLink": invite.invite_link})
+
+        # Keep the same per-group moderation state used by the native Owner Panel
+        # in sync with successful Telegram actions.
+        if action in ("mute", "unmute", "ban", "unban"):
+            async with async_session_maker() as session:
+                record = await session.scalar(
+                    select(GroupMember)
+                    .join(User, GroupMember.user_id == User.id)
+                    .where(
+                        GroupMember.group_id == group_id,
+                        (User.telegram_id == target_id) | (User.id == target_id),
+                    )
+                )
+                if record:
+                    if action == "mute":
+                        record.is_muted = True
+                        record.mute_until = datetime.utcnow() + timedelta(seconds=seconds)
+                    elif action == "unmute":
+                        record.is_muted = False
+                        record.mute_until = None
+                    elif action == "ban":
+                        record.is_banned = True
+                    elif action == "unban":
+                        record.is_banned = False
+                        record.ban_reason = None
+                    await session.commit()
         return web.json_response({"success": True, "action": action})
     except (ValueError, TypeError):
         return web.json_response({"error": "Invalid action parameters."}, status=400)
