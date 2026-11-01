@@ -24,7 +24,7 @@ def _owner_inbox_preview(message: Message) -> str:
             return "__ALEXA_MEDIA__" + json.dumps({
                 "kind": kind, "file_id": item.file_id,
                 "mime_type": getattr(item, "mime_type", None),
-                "caption": (message.caption or "")[:900],
+                "caption": (message.caption or "")[:500],
             }, separators=(",", ":"))
     return (message.text or message.caption or f"[{message.content_type}]")[:1000]
 
