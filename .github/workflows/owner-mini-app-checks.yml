@@ -44,6 +44,7 @@ jobs:
               "/owner-api/group-message", "/owner-api/users", "/owner-api/groups",
               "/owner-api/force-join", "/owner-api/groups/{group_id}/force-join",
               "/owner-api/groups/{group_id}/purge",
+              "/owner-api/groups/{group_id}/leave",
               "/owner-api/group-links", "/owner-api/groups/{group_id}/invite-link",
               "/owner-api/group-avatar", "/owner-api/groups/{group_id}/members",
               "/owner-api/logs", "/owner-api/broadcast", "/owner-api/economy/leaderboard",
