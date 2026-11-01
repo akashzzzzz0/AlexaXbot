@@ -200,6 +200,9 @@ async def unban_user_handler(request):
 @require_admin
 async def groups_handler(request):
     try:
+        # Resolve the lazy database accessor explicitly; a bare global name
+        # cannot be supplied by this module's __getattr__.
+        from bot.database.connection import async_session_maker
         page = int(request.rel_url.query.get("page", 1))
         limit = min(int(request.rel_url.query.get("limit", 20)), 100)
         search = request.rel_url.query.get("search", "")
@@ -629,6 +632,9 @@ async def owner_security_update(request):
 
 @require_admin
 async def owner_referrals_handler(request):
+    # Resolve the lazy database accessor explicitly; module __getattr__ does not
+    # populate this module's global namespace for bare-name lookups.
+    from bot.database.connection import async_session_maker
     async with async_session_maker() as session:
         total = await session.scalar(select(func.count()).select_from(Referral)) or 0
         rewarded = await session.scalar(select(func.count()).select_from(Referral).where(Referral.reward_given.is_(True))) or 0
