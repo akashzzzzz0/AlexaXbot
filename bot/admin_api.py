@@ -1,5 +1,10 @@
 import json
 import os
+import hmac
+import hashlib
+import time
+from pathlib import Path
+from urllib.parse import parse_qsl
 from datetime import datetime, timedelta
 from aiohttp import web
 from sqlalchemy import select, func, and_, or_, desc, cast, String
@@ -479,7 +484,72 @@ async def twa_game_stats_handler(request):
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
 
+
+def _verify_owner_telegram_init_data(init_data: str) -> bool:
+    """Verify Telegram Mini App initData and require the configured bot owner."""
+    from bot.config import settings
+
+    token = (settings.BOT_TOKEN or "").strip()
+    owner_id = int(settings.effective_owner_id or 0)
+    if not token or not owner_id or not init_data or len(init_data) > 8192:
+        return False
+    try:
+        pairs = dict(parse_qsl(init_data, keep_blank_values=True, strict_parsing=True))
+        supplied_hash = pairs.pop("hash", "")
+        auth_date = int(pairs.get("auth_date", "0"))
+        if not supplied_hash or auth_date <= 0 or time.time() - auth_date > 86400 or auth_date > time.time() + 60:
+            return False
+        data_check_string = "\\n".join(f"{key}={value}" for key, value in sorted(pairs.items()))
+        secret_key = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
+        expected_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected_hash, supplied_hash):
+            return False
+        telegram_user = json.loads(pairs.get("user", "{}"))
+        return int(telegram_user.get("id", 0)) == owner_id
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return False
+
+
+async def owner_app_handler(request):
+    """Serve the owner UI shell; all private data remains behind server verification."""
+    from bot.config import settings
+    if not settings.effective_owner_id or not settings.BOT_TOKEN:
+        return web.Response(text="Owner Mini App is not configured.", status=503)
+    app_file = Path(__file__).resolve().parent.parent / "web" / "owner" / "index.html"
+    if not app_file.is_file():
+        return web.Response(text="Owner Mini App files are missing.", status=404)
+    return web.FileResponse(app_file, headers={"Cache-Control": "no-store"})
+
+
+async def owner_overview_handler(request):
+    init_data = request.headers.get("X-Telegram-Init-Data", "")
+    if not _verify_owner_telegram_init_data(init_data):
+        return web.json_response({"error": "Unauthorized"}, status=401, headers={"Cache-Control": "no-store"})
+    try:
+        today = datetime.utcnow() - timedelta(hours=24)
+        async with async_session_maker() as session:
+            total_users = await session.scalar(select(func.count()).select_from(User))
+            active_today = await session.scalar(
+                select(func.count()).select_from(User).where(User.last_seen >= today)
+            )
+            total_groups = await session.scalar(select(func.count()).select_from(Group))
+            banned_users = await session.scalar(
+                select(func.count()).select_from(User).where(User.is_banned == True)
+            )
+        return web.json_response({
+            "totalUsers": int(total_users or 0),
+            "activeToday": int(active_today or 0),
+            "totalGroups": int(total_groups or 0),
+            "bannedUsers": int(banned_users or 0),
+        }, headers={"Cache-Control": "no-store"})
+    except Exception:
+        return web.json_response({"error": "Dashboard data is temporarily unavailable."}, status=503)
+
+
+
 def setup_admin_routes(app):
+    app.router.add_get('/owner', owner_app_handler)
+    app.router.add_get('/owner-api/overview', owner_overview_handler)
     app.router.add_get("/admin/stats", stats_handler)
     app.router.add_get("/admin/users", users_handler)
     app.router.add_post("/admin/users/{user_id}/ban", ban_user_handler)
