@@ -39,6 +39,7 @@ jobs:
           source = Path("bot/admin_api.py").read_text(encoding="utf-8")
           required = [
               "/owner", "/owner-api/overview", "/owner-api/security",
+              "/owner-api/settings-overview",
               "/owner-api/referrals", "/owner-api/promotion-requests",
               "/owner-api/inbox", "/owner-api/statistics", "/owner-api/health",
               "/owner-api/group-message", "/owner-api/users", "/owner-api/groups",
