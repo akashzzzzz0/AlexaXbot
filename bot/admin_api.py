@@ -626,6 +626,97 @@ async def owner_security_update(request):
 
 
 @require_admin
+async def owner_force_join_handler(request):
+    """Owner Mini App access to the existing per-group Force Join configuration."""
+    from bot.database.force_join import ForceJoinSetting
+    if request.method == "GET":
+        async with async_session_maker() as session:
+            groups = (await session.scalars(
+                select(Group).where(Group.is_active.is_(True)).order_by(Group.title.asc())
+            )).all()
+            rows = []
+            for group in groups:
+                setting = await session.scalar(
+                    select(ForceJoinSetting).where(ForceJoinSetting.group_id == group.id)
+                )
+                rows.append({
+                    "id": str(group.id), "title": group.title or str(group.id),
+                    "configured": bool(setting and setting.required_chat_id and setting.required_link),
+                    "requiredChatId": setting.required_chat_id if setting else "",
+                    "requiredLink": setting.required_link if setting else "",
+                    "enabled": bool(setting and setting.enabled),
+                })
+        return web.json_response({"groups": rows}, headers={"Cache-Control": "no-store"})
+
+    try:
+        body = await request.json()
+        group_id = int(body.get("groupId", 0))
+        action = body.get("action")
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid request body."}, status=400)
+    if group_id == 0 or action not in {"configure", "toggle"}:
+        return web.json_response({"error": "Invalid group or action."}, status=400)
+
+    async with async_session_maker() as session:
+        group = await session.get(Group, group_id)
+        if not group or not group.is_active:
+            return web.json_response({"error": "Active group not found."}, status=404)
+        setting = await session.scalar(
+            select(ForceJoinSetting).where(ForceJoinSetting.group_id == group_id)
+        )
+        if action == "configure":
+            target = str(body.get("requiredChatId", "")).strip()
+            link = str(body.get("requiredLink", "")).strip()
+            if not (target.startswith("@") or (target.startswith("-") and target[1:].isdigit())):
+                return web.json_response({"error": "Use a channel @username or numeric chat ID."}, status=400)
+            if not (link.startswith("https://t.me/") or link.startswith("http://t.me/")):
+                return web.json_response({"error": "Join link must start with https://t.me/."}, status=400)
+            if setting is None:
+                setting = ForceJoinSetting(group_id=group_id, required_chat_id=target, required_link=link, enabled=False)
+                session.add(setting)
+            else:
+                setting.required_chat_id = target
+                setting.required_link = link
+                setting.enabled = False
+            await session.commit()
+            return web.json_response({"success": True, "enabled": False, "configured": True})
+
+    bot = None
+    try:
+        from bot.config import settings
+        from aiogram import Bot
+        bot = Bot(token=settings.BOT_TOKEN)
+        async with async_session_maker() as session:
+            setting = await session.scalar(
+                select(ForceJoinSetting).where(ForceJoinSetting.group_id == group_id)
+            )
+            if not setting:
+                return web.json_response({"error": "Configure a required channel/group first."}, status=409)
+            enabling = not bool(setting.enabled)
+            if enabling:
+                required_bot = await bot.get_chat_member(setting.required_chat_id, bot.id)
+                required_status = str(getattr(required_bot.status, "value", required_bot.status))
+                if required_status not in {"administrator", "creator"}:
+                    return web.json_response({"error": "Alexa must be admin in the required channel/group."}, status=403)
+                protected_bot = await bot.get_chat_member(group_id, bot.id)
+                protected_status = str(getattr(protected_bot.status, "value", protected_bot.status))
+                if protected_status not in {"administrator", "creator"}:
+                    return web.json_response({"error": "Alexa must be admin in the protected group."}, status=403)
+                if protected_status == "administrator" and not getattr(protected_bot, "can_delete_messages", False):
+                    return web.json_response({"error": "Alexa needs Delete Messages permission in the protected group."}, status=403)
+            setting.enabled = enabling
+            await session.commit()
+            return web.json_response({"success": True, "enabled": enabling})
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Owner Force Join update failed")
+        return web.json_response({"error": "Could not verify Telegram permissions or update Force Join."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
+@require_admin
 async def owner_emergency_handler(request):
     """List active group lockdown states or toggle one after checking live Telegram rights."""
     if request.method == "GET":
@@ -1335,6 +1426,8 @@ def setup_admin_routes(app):
     app.router.add_get('/owner', owner_app_handler)
     app.router.add_get('/owner-api/overview', owner_overview_handler)
     app.router.add_get('/owner-api/security', owner_security_status)
+    app.router.add_get('/owner-api/force-join', owner_force_join_handler)
+    app.router.add_post('/owner-api/force-join', owner_force_join_handler)
     app.router.add_get('/owner-api/emergency', owner_emergency_handler)
     app.router.add_post('/owner-api/emergency', owner_emergency_handler)
     app.router.add_get('/owner-api/maintenance', owner_maintenance_handler)
