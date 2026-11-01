@@ -10,7 +10,7 @@ from aiohttp import web
 from sqlalchemy import select, func, and_, or_, desc, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.models import User, Group, GroupMember, Wallet, Economy, ActionLog, SecuritySettings, Referral, AffiliateRequest, InboxMessage, GroupPromotionRequest, GlobalSetting
+from bot.database.models import User, Group, GroupMember, Wallet, Economy, ActionLog, SecuritySettings, Referral, AffiliateRequest, InboxMessage, GroupInboxMessage, GroupPromotionRequest, GlobalSetting
 
 ADMIN_KEY = os.environ.get("ADMIN_KEY", "")
 
@@ -725,6 +725,142 @@ async def owner_inbox_handler(request):
 
 
 @require_admin
+async def owner_inbox_messages_handler(request):
+    try:
+        user_id = int(request.match_info["user_id"])
+        before_id = int(request.query.get("before", "0") or 0)
+        limit = min(100, max(1, int(request.query.get("limit", "50"))))
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid conversation request."}, status=400)
+    async with async_session_maker() as session:
+        user = await session.get(User, user_id)
+        if not user or not user.dm_started:
+            return web.json_response({"error": "Conversation not found."}, status=404)
+        query = select(InboxMessage).where(InboxMessage.user_id == user_id)
+        if before_id:
+            query = query.where(InboxMessage.id < before_id)
+        rows = (await session.scalars(query.order_by(desc(InboxMessage.id)).limit(limit))).all()
+        for row in rows:
+            row.is_read = True
+        await session.commit()
+        messages = [{
+            "id": item.id, "messageId": str(item.telegram_message_id),
+            "text": item.preview or "[" + item.content_type + "]",
+            "contentType": item.content_type,
+            "createdAt": item.created_at.isoformat() if item.created_at else None,
+            "direction": "incoming"
+        } for item in reversed(rows)]
+    return web.json_response({"messages": messages, "hasMore": len(rows) == limit},
+                             headers={"Cache-Control": "no-store"})
+
+
+@require_admin
+async def owner_inbox_delete_message_handler(request):
+    bot = None
+    try:
+        user_id = int(request.match_info["user_id"])
+        record_id = int(request.match_info["message_id"])
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid message reference."}, status=400)
+    async with async_session_maker() as session:
+        item = await session.scalar(select(InboxMessage).where(
+            InboxMessage.id == record_id, InboxMessage.user_id == user_id
+        ))
+        if not item:
+            return web.json_response({"error": "Message not found in inbox history."}, status=404)
+        telegram_message_id = item.telegram_message_id
+    try:
+        from bot.config import settings
+        from aiogram import Bot
+        bot = Bot(token=settings.BOT_TOKEN)
+        await bot.delete_message(chat_id=user_id, message_id=telegram_message_id)
+        async with async_session_maker() as session:
+            item = await session.scalar(select(InboxMessage).where(
+                InboxMessage.id == record_id, InboxMessage.user_id == user_id
+            ))
+            if item:
+                await session.delete(item)
+                await session.commit()
+        return web.json_response({"success": True})
+    except Exception:
+        return web.json_response({"error": "Telegram could not delete this message. It may be too old or unavailable."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
+@require_admin
+async def owner_group_messages_handler(request):
+    try:
+        group_id = int(request.match_info["group_id"])
+        before_id = int(request.query.get("before", "0") or 0)
+        limit = min(100, max(1, int(request.query.get("limit", "50"))))
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid group history request."}, status=400)
+    async with async_session_maker() as session:
+        group = await session.get(Group, group_id)
+        if not group or not group.is_active:
+            return web.json_response({"error": "Active group not found."}, status=404)
+        query = select(GroupInboxMessage).where(GroupInboxMessage.chat_id == group_id)
+        if before_id:
+            query = query.where(GroupInboxMessage.id < before_id)
+        rows = (await session.scalars(query.order_by(desc(GroupInboxMessage.id)).limit(limit))).all()
+        messages = [{
+            "id": item.id, "messageId": str(item.telegram_message_id),
+            "senderId": str(item.sender_id) if item.sender_id else None,
+            "senderName": item.sender_name or "Unknown",
+            "username": item.sender_username,
+            "text": item.preview or "[" + item.content_type + "]",
+            "contentType": item.content_type,
+            "createdAt": item.created_at.isoformat() if item.created_at else None
+        } for item in reversed(rows)]
+    return web.json_response({"group": _group_to_dict(group), "messages": messages,
+                              "hasMore": len(rows) == limit},
+                             headers={"Cache-Control": "no-store"})
+
+
+@require_admin
+async def owner_group_delete_message_handler(request):
+    bot = None
+    try:
+        group_id = int(request.match_info["group_id"])
+        record_id = int(request.match_info["message_id"])
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid message reference."}, status=400)
+    async with async_session_maker() as session:
+        group = await session.get(Group, group_id)
+        item = await session.scalar(select(GroupInboxMessage).where(
+            GroupInboxMessage.id == record_id, GroupInboxMessage.chat_id == group_id
+        ))
+        if not group or not group.is_active or not item:
+            return web.json_response({"error": "Active group message not found."}, status=404)
+        telegram_message_id = item.telegram_message_id
+    try:
+        from bot.config import settings
+        from aiogram import Bot
+        bot = Bot(token=settings.BOT_TOKEN)
+        me = await bot.get_me()
+        member = await bot.get_chat_member(group_id, me.id)
+        status = str(getattr(member.status, "value", member.status))
+        if status not in ("administrator", "creator") or (status != "creator" and not getattr(member, "can_delete_messages", False)):
+            return web.json_response({"error": "ALEXA does not currently have Delete Messages permission."}, status=403)
+        await bot.delete_message(chat_id=group_id, message_id=telegram_message_id)
+        async with async_session_maker() as session:
+            item = await session.scalar(select(GroupInboxMessage).where(
+                GroupInboxMessage.id == record_id, GroupInboxMessage.chat_id == group_id
+            ))
+            if item:
+                await session.delete(item)
+                await session.commit()
+        return web.json_response({"success": True})
+    except Exception:
+        return web.json_response({"error": "Telegram could not delete this group message."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
+@require_admin
 async def owner_statistics_handler(request):
     async with async_session_maker() as session:
         values = {
@@ -898,6 +1034,10 @@ def setup_admin_routes(app):
     app.router.add_get('/owner-api/promotion-requests', owner_promotion_requests_handler)
     app.router.add_post('/owner-api/promotion-requests/{request_id}', owner_promotion_request_update)
     app.router.add_get('/owner-api/inbox', owner_inbox_handler)
+    app.router.add_get('/owner-api/inbox/{user_id}/messages', owner_inbox_messages_handler)
+    app.router.add_post('/owner-api/inbox/{user_id}/messages/{message_id}/delete', owner_inbox_delete_message_handler)
+    app.router.add_get('/owner-api/groups/{group_id}/messages', owner_group_messages_handler)
+    app.router.add_post('/owner-api/groups/{group_id}/messages/{message_id}/delete', owner_group_delete_message_handler)
     app.router.add_post('/owner-api/inbox/{user_id}/reply', owner_inbox_reply_handler)
     app.router.add_get('/owner-api/groups/{group_id}/activity', owner_group_activity_handler)
     app.router.add_get('/owner-api/groups/{group_id}/permissions', owner_group_permissions_handler)
