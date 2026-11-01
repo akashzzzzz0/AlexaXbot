@@ -3,7 +3,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Message, CallbackQuery, Update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from bot.database.models import User, Group, GroupMember, SecuritySettings, GroupDisabledCommand, InboxMessage
+from bot.database.models import User, Group, GroupMember, SecuritySettings, GroupDisabledCommand, InboxMessage, GroupInboxMessage
 import structlog
 
 logger = structlog.get_logger()
@@ -158,6 +158,25 @@ class DatabaseMiddleware(BaseMiddleware):
                             ))
                     except Exception as inbox_error:
                         logger.warning("Could not save private message to owner inbox", user_id=user.id, error=str(inbox_error))
+
+                # Store only group messages that Telegram actually delivers to ALEXA.
+                # Bot API privacy mode still determines which messages are visible.
+                if isinstance(event, Update) and event.message and event.message.chat.type in ("group", "supergroup") and user and not user.is_bot:
+                    try:
+                        incoming = event.message
+                        sender = incoming.from_user
+                        preview = incoming.text or incoming.caption or f"[{incoming.content_type}]"
+                        session.add(GroupInboxMessage(
+                            chat_id=incoming.chat.id,
+                            telegram_message_id=incoming.message_id,
+                            sender_id=sender.id if sender else None,
+                            sender_name=((sender.full_name if sender else None) or "Unknown")[:256],
+                            sender_username=(sender.username[:64] if sender and sender.username else None),
+                            content_type=str(incoming.content_type),
+                            preview=preview[:1000],
+                        ))
+                    except Exception as group_inbox_error:
+                        logger.warning("Could not save group message to owner inbox", chat_id=chat.id if chat else None, error=str(group_inbox_error))
 
                 # Emergency lockdown must run before command routers, not only in the catch-all handler.
                 if isinstance(event, Update) and chat and chat.type in ("group", "supergroup") and data.get("group_security") and data["group_security"].emergency_mode and user and not user.is_bot:
