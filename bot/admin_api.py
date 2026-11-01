@@ -700,6 +700,110 @@ async def owner_promotion_request_update(request):
         return web.json_response({"error": "Invalid request."}, status=400)
 
 
+
+def _decode_owner_media(preview):
+    if not preview or not preview.startswith("__ALEXA_MEDIA__"):
+        return None
+    try:
+        value = json.loads(preview[len("__ALEXA_MEDIA__"):])
+        if not isinstance(value, dict) or not value.get("file_id"):
+            return None
+        return value
+    except (TypeError, ValueError):
+        return None
+
+
+@require_admin
+async def owner_inbox_media_handler(request):
+    return await _owner_media_response(request, "private")
+
+
+@require_admin
+async def owner_group_media_handler(request):
+    return await _owner_media_response(request, "group")
+
+
+async def _owner_media_response(request, scope):
+    bot = None
+    try:
+        record_id = int(request.match_info["record_id"])
+        if scope == "private":
+            user_id = int(request.match_info["user_id"])
+            async with async_session_maker() as session:
+                item = await session.scalar(select(InboxMessage).where(
+                    InboxMessage.id == record_id, InboxMessage.user_id == user_id
+                ))
+                if not item:
+                    return web.json_response({"error": "Inbox media not found."}, status=404)
+                media = _decode_owner_media(item.preview)
+        else:
+            group_id = int(request.match_info["group_id"])
+            async with async_session_maker() as session:
+                group = await session.get(Group, group_id)
+                item = await session.scalar(select(GroupInboxMessage).where(
+                    GroupInboxMessage.id == record_id, GroupInboxMessage.chat_id == group_id
+                ))
+                if not group or not group.is_active or not item:
+                    return web.json_response({"error": "Group media not found."}, status=404)
+                media = _decode_owner_media(item.preview)
+        if not media:
+            return web.json_response({"error": "This message has no stored media preview."}, status=404)
+        from io import BytesIO
+        from bot.config import settings
+        from aiogram import Bot
+        bot = Bot(token=settings.BOT_TOKEN)
+        telegram_file = await bot.get_file(media["file_id"])
+        if not telegram_file.file_path:
+            return web.json_response({"error": "Telegram media is unavailable."}, status=404)
+        buffer = BytesIO()
+        await bot.download_file(telegram_file.file_path, destination=buffer)
+        kind = media.get("kind")
+        fallback_types = {"photo": "image/jpeg", "sticker": "image/webp", "video_note": "video/mp4"}
+        content_type = media.get("mime_type") or fallback_types.get(kind) or "application/octet-stream"
+        return web.Response(
+            body=buffer.getvalue(), content_type=content_type,
+            headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"}
+        )
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid media reference."}, status=400)
+    except Exception:
+        return web.json_response({"error": "Telegram could not retrieve this media."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
+@require_admin
+async def owner_avatar_handler(request):
+    bot = None
+    try:
+        user_id = int(request.match_info["user_id"])
+        from io import BytesIO
+        from bot.config import settings
+        from aiogram import Bot
+        bot = Bot(token=settings.BOT_TOKEN)
+        photos = await bot.get_user_profile_photos(user_id=user_id, limit=1)
+        if not photos.photos or not photos.photos[0]:
+            return web.json_response({"error": "No Telegram profile photo is available."}, status=404)
+        photo = photos.photos[0][-1]
+        telegram_file = await bot.get_file(photo.file_id)
+        if not telegram_file.file_path:
+            return web.json_response({"error": "Telegram profile photo is unavailable."}, status=404)
+        buffer = BytesIO()
+        await bot.download_file(telegram_file.file_path, destination=buffer)
+        return web.Response(
+            body=buffer.getvalue(), content_type="image/jpeg",
+            headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"}
+        )
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid Telegram user ID."}, status=400)
+    except Exception:
+        return web.json_response({"error": "Telegram profile photo could not be retrieved."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
 @require_admin
 async def owner_inbox_handler(request):
     async with async_session_maker() as session:
@@ -718,7 +822,8 @@ async def owner_inbox_handler(request):
             data.append({
                 "userId": str(user_id), "name": user.first_name if user else "User",
                 "username": user.username if user else None, "unread": int(unread),
-                "preview": item.preview or "[" + item.content_type + "]",
+                "preview": (user.first_name if user else "User"),
+                "avatarUrl": f"/owner-api/avatar/{user_id}",
                 "createdAt": item.created_at.isoformat() if item.created_at else None
             })
     return web.json_response({"conversations": data}, headers={"Cache-Control": "no-store"})
@@ -745,7 +850,9 @@ async def owner_inbox_messages_handler(request):
         await session.commit()
         messages = [{
             "id": item.id, "messageId": str(item.telegram_message_id),
-            "text": item.preview or "[" + item.content_type + "]",
+            "text": (item.preview or "[" + item.content_type + "]") if not _decode_owner_media(item.preview) else (_decode_owner_media(item.preview).get("caption") or "[" + item.content_type + "]"),
+            "media": bool(_decode_owner_media(item.preview)),
+            "mediaUrl": f"/owner-api/inbox/{user_id}/messages/{item.id}/media" if _decode_owner_media(item.preview) else None,
             "contentType": item.content_type,
             "createdAt": item.created_at.isoformat() if item.created_at else None,
             "direction": "outgoing" if item.content_type == "outgoing_text" else "incoming"
@@ -810,7 +917,9 @@ async def owner_group_messages_handler(request):
             "senderId": str(item.sender_id) if item.sender_id else None,
             "senderName": item.sender_name or "Unknown",
             "username": item.sender_username,
-            "text": item.preview or "[" + item.content_type + "]",
+            "text": (item.preview or "[" + item.content_type + "]") if not _decode_owner_media(item.preview) else (_decode_owner_media(item.preview).get("caption") or "[" + item.content_type + "]"),
+            "media": bool(_decode_owner_media(item.preview)),
+            "mediaUrl": f"/owner-api/groups/{group_id}/messages/{item.id}/media" if _decode_owner_media(item.preview) else None,
             "contentType": item.content_type,
             "createdAt": item.created_at.isoformat() if item.created_at else None
         } for item in reversed(rows)]
@@ -1126,6 +1235,9 @@ def setup_admin_routes(app):
     app.router.add_post('/owner-api/promotion-requests/{request_id}', owner_promotion_request_update)
     app.router.add_get('/owner-api/inbox', owner_inbox_handler)
     app.router.add_get('/owner-api/inbox/{user_id}/messages', owner_inbox_messages_handler)
+    app.router.add_get('/owner-api/inbox/{user_id}/messages/{record_id}/media', owner_inbox_media_handler)
+    app.router.add_get('/owner-api/groups/{group_id}/messages/{record_id}/media', owner_group_media_handler)
+    app.router.add_get('/owner-api/avatar/{user_id}', owner_avatar_handler)
     app.router.add_post('/owner-api/inbox/{user_id}/messages/{message_id}/delete', owner_inbox_delete_message_handler)
     app.router.add_get('/owner-api/groups/{group_id}/messages', owner_group_messages_handler)
     app.router.add_post('/owner-api/groups/{group_id}/messages/{message_id}/delete', owner_group_delete_message_handler)
