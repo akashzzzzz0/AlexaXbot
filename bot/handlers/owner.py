@@ -203,14 +203,13 @@ async def _render_group(callback: CallbackQuery, session: AsyncSession, group_id
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=_group_detail_kb(group_id), disable_web_page_preview=True)
 
 
-@router.message(Command("owner", "panel"))
+@router.message(Command("owner"))
 async def owner_panel(message: Message, _: callable, **kwargs):
     if not is_owner(message.from_user.id) or message.chat.type != "private":
-        # Never post the owner panel into a group, even if the owner invokes it there.
+        # The owner launcher is private-chat only.
         return
     await message.answer(
-        "💠 <b>ALEXA VIP OWNER</b>\n\n"
-        "👑 Owner access verified. Open your Mini App below.",
+        "👑 <b>Owner access verified.</b>\nOpen the Owner Mini App:",
         reply_markup=owner_kb(),
         parse_mode="HTML",
     )
