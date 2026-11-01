@@ -63,8 +63,8 @@ class DatabaseMiddleware(BaseMiddleware):
                         if isinstance(event, Update):
                             try:
                                 from bot.services.mission_service import track_progress
-                                # Keep mission tracking in a savepoint so a failed
-                                # mission write cannot poison the update's main session.
+                                # A savepoint prevents mission failures from leaving the
+                                # update's main database session in a failed state.
                                 async with session.begin_nested():
                                     if event.message and event.message.text:
                                         raw = event.message.text.strip()
@@ -80,7 +80,7 @@ class DatabaseMiddleware(BaseMiddleware):
                                         game_callbacks = ("game:treasure", "game:wheel", "game:cards", "game:numwar", "game:mines", "dice:daily", "rps:play:", "roulette:", "quiz_ans:")
                                         if any(callback_data.startswith(prefix) for prefix in game_callbacks):
                                             await track_progress(session, db_user.id, "games")
-                                except Exception as mission_error:
+                            except Exception as mission_error:
                                 logger.warning("Mission progress tracking failed", error=str(mission_error))
                     except Exception as e:
                         logger.warning("Could not get/create user or track mission progress", error=str(e))
