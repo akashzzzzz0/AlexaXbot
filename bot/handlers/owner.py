@@ -1,9 +1,10 @@
+import os
 import asyncio
 import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from aiogram import Router, F, Bot
-from aiogram.types import CallbackQuery, Message, BotCommand, BotCommandScopeDefault, BotCommandScopeChat, ReplyParameters
+from aiogram.types import CallbackQuery, Message, BotCommand, BotCommandScopeDefault, BotCommandScopeChat, ReplyParameters, WebAppInfo
 from aiogram.exceptions import TelegramRetryAfter, TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -11,7 +12,7 @@ from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from bot.database.models import User, Group, GroupMember, GroupSettings, ActionLog, SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig, ScamReview, InboxMessage
+from bot.database.models import User, Group, GroupMember, GroupSettings, ActionLog, SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig, ScamReview, InboxMessage, GlobalSetting
 from bot.keyboards.main_menu import back_button_kb
 from bot.config import settings
 from bot.utils.helpers import format_number
@@ -75,7 +76,10 @@ def owner_kb(_=None) -> object:
     builder.button(text="🧠 Global AI Control", callback_data="owner:ai")
     builder.button(text="📨 Message Selected Groups", callback_data="owner:group_message")
     builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
-    builder.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2)
+    owner_mini_app_url = os.getenv("OWNER_MINI_APP_URL", "").strip()
+    if owner_mini_app_url.startswith("https://"):
+        builder.button(text="💎 VIP Owner Mini App", web_app=WebAppInfo(url=owner_mini_app_url))
+    builder.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
     return builder.as_markup()
 
 
@@ -1706,12 +1710,19 @@ async def owner_users(callback: CallbackQuery, _: callable, db_session: AsyncSes
 
 
 @router.callback_query(F.data == "owner:maintenance")
-async def toggle_maintenance(callback: CallbackQuery, _: callable, **kwargs):
+async def toggle_maintenance(callback: CallbackQuery, _: callable, db_session: AsyncSession, **kwargs):
     global _maintenance_mode
     if not is_owner(callback.from_user.id):
         await callback.answer("Not available.", show_alert=True)
         return
-    _maintenance_mode = not _maintenance_mode
+    row = await db_session.get(GlobalSetting, "owner_maintenance_mode")
+    current = bool(row and row.value == "1")
+    _maintenance_mode = not current
+    if row is None:
+        db_session.add(GlobalSetting(key="owner_maintenance_mode", value="1" if _maintenance_mode else "0"))
+    else:
+        row.value = "1" if _maintenance_mode else "0"
+    await db_session.commit()
     await callback.answer(
         "Maintenance ON." if _maintenance_mode else "Maintenance OFF.",
         show_alert=True,
@@ -1957,6 +1968,14 @@ async def start_broadcast(callback: CallbackQuery, _: callable, state: FSMContex
     await callback.message.answer("📨 <b>DM Broadcast</b>\nSend the message to every recorded user who has started ALEXA in private.\n\nSend /cancel to stop.", parse_mode="HTML")
     await state.set_state(OwnerStates.waiting_broadcast)
     await callback.answer()
+
+
+async def load_maintenance_mode(session: AsyncSession) -> bool:
+    """Restore the persistent owner maintenance switch during startup."""
+    global _maintenance_mode
+    row = await session.get(GlobalSetting, "owner_maintenance_mode")
+    _maintenance_mode = bool(row and row.value == "1")
+    return _maintenance_mode
 
 
 def get_maintenance_mode() -> bool:

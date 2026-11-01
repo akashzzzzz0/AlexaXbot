@@ -1,0 +1,51 @@
+name: Owner Mini App checks
+
+on:
+  push:
+    branches: [main, feature/vip-owner-mini-app]
+  pull_request:
+    branches: [main]
+
+jobs:
+  owner-mini-app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Compile all bot Python modules
+        run: python -m compileall -q bot
+      - name: Check Owner Mini App JavaScript syntax
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          html = Path("web/owner/index.html").read_text(encoding="utf-8")
+          scripts = re.findall(r"<script(?:\\s[^>]*)?>(.*?)</script>", html, flags=re.I | re.S)
+          inline = [part for part in scripts if part.strip()]
+          if not inline:
+              raise SystemExit("No inline Owner Mini App script found")
+          Path("/tmp/owner-mini-app.js").write_text("\\n".join(inline), encoding="utf-8")
+          PY
+          node --check /tmp/owner-mini-app.js
+      - name: Verify Owner Mini App route registrations
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          source = Path("bot/admin_api.py").read_text(encoding="utf-8")
+          required = [
+              "/owner", "/owner-api/overview", "/owner-api/security",
+              "/owner-api/referrals", "/owner-api/promotion-requests",
+              "/owner-api/inbox", "/owner-api/statistics", "/owner-api/health",
+              "/owner-api/group-message", "/owner-api/users", "/owner-api/groups",
+              "/owner-api/logs", "/owner-api/broadcast", "/owner-api/economy/leaderboard",
+          ]
+          missing = [route for route in required if route not in source]
+          if missing:
+              raise SystemExit("Missing Owner Mini App routes: " + ", ".join(missing))
+          print(f"Verified {len(required)} required Owner Mini App routes")
+          PY

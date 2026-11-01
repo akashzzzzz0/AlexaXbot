@@ -109,6 +109,16 @@ async def cmd_start(message: Message, _: callable, db_session: AsyncSession = No
     args = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else ""
     if db_user:
         db_user.dm_started = True
+    # The Mini App's "Open Alexa Bot" deep link must land on the real owner
+    # panel, while the same payload remains harmless for every other user.
+    if args == "owner" and message.from_user and message.from_user.id == settings.effective_owner_id:
+        from bot.handlers.owner import owner_kb
+        await message.answer(
+            "👑 <b>ALEXA OWNER PANEL</b>\\n\\nOwner authentication verified. Choose a control below.",
+            parse_mode="HTML",
+            reply_markup=owner_kb(),
+        )
+        return
     if args.startswith("ref_") and db_session and db_user:
         try:
             raw_referrer_id = args[4:]
