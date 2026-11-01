@@ -237,6 +237,111 @@ async def groups_handler(request):
 
 
 @require_admin
+async def owner_force_join_handler(request):
+    """Expose the existing per-group Force Join setting in the owner Mini App."""
+    from bot.database.force_join import ForceJoinSetting
+
+    if request.method == "GET":
+        try:
+            async with async_session_maker() as session:
+                groups = (await session.scalars(
+                    select(Group).where(Group.is_active.is_(True)).order_by(Group.title.asc())
+                )).all()
+                group_ids = [group.id for group in groups]
+                settings_by_group = {}
+                if group_ids:
+                    rows = (await session.scalars(
+                        select(ForceJoinSetting).where(ForceJoinSetting.group_id.in_(group_ids))
+                    )).all()
+                    settings_by_group = {row.group_id: row for row in rows}
+                return web.json_response({
+                    "groups": [{
+                        **_group_to_dict(group),
+                        "forceJoin": ({
+                            "requiredChatId": setting.required_chat_id,
+                            "requiredLink": setting.required_link,
+                            "enabled": bool(setting.enabled),
+                        } if (setting := settings_by_group.get(group.id)) else {
+                            "requiredChatId": "",
+                            "requiredLink": "",
+                            "enabled": False,
+                        }),
+                    } for group in groups]
+                }, headers={"Cache-Control": "no-store"})
+        except Exception:
+            import structlog
+            structlog.get_logger().exception("Owner Force Join list failed")
+            return web.json_response({"error": "Could not load Force Join settings."}, status=500)
+
+    bot = None
+    try:
+        group_id = int(request.match_info["group_id"])
+        body = await request.json()
+        from bot.database.connection import async_session_maker
+        from bot.config import settings
+        from aiogram import Bot
+
+        async with async_session_maker() as session:
+            group = await session.get(Group, group_id)
+            if not group or not group.is_active:
+                return web.json_response({"error": "Active protected group not found."}, status=404)
+            setting = await session.scalar(
+                select(ForceJoinSetting).where(ForceJoinSetting.group_id == group_id)
+            )
+            target = str(body.get("requiredChatId") or (setting.required_chat_id if setting else "")).strip()
+            link = str(body.get("requiredLink") or (setting.required_link if setting else "")).strip()
+            enabled = bool(body.get("enabled", setting.enabled if setting else False))
+            if not target or not (target.startswith("@") or (target.startswith("-") and target[1:].isdigit())):
+                return web.json_response({"error": "Use an @channel username or numeric Telegram chat ID."}, status=400)
+            if not (link.startswith("https://t.me/") or link.startswith("http://t.me/")):
+                return web.json_response({"error": "Join link must start with https://t.me/ or http://t.me/."}, status=400)
+
+            if enabled:
+                bot = Bot(token=settings.BOT_TOKEN)
+                me = await bot.get_me()
+                required_bot = await bot.get_chat_member(target, me.id)
+                required_status = str(getattr(required_bot.status, "value", required_bot.status))
+                if required_status not in {"administrator", "creator"}:
+                    return web.json_response({"error": "Alexa must be an administrator in the required channel/group."}, status=403)
+                protected_bot = await bot.get_chat_member(group_id, me.id)
+                protected_status = str(getattr(protected_bot.status, "value", protected_bot.status))
+                if protected_status not in {"administrator", "creator"}:
+                    return web.json_response({"error": "Alexa must be an administrator in the protected group."}, status=403)
+                if protected_status == "administrator" and not getattr(protected_bot, "can_delete_messages", False):
+                    return web.json_response({"error": "Give Alexa Delete Messages permission in the protected group."}, status=403)
+
+            if setting is None:
+                setting = ForceJoinSetting(
+                    group_id=group_id,
+                    required_chat_id=target,
+                    required_link=link,
+                    enabled=enabled,
+                )
+                session.add(setting)
+            else:
+                setting.required_chat_id = target
+                setting.required_link = link
+                setting.enabled = enabled
+            await session.commit()
+            return web.json_response({
+                "success": True,
+                "groupId": str(group_id),
+                "requiredChatId": target,
+                "requiredLink": link,
+                "enabled": enabled,
+            }, headers={"Cache-Control": "no-store"})
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid protected group ID or request body."}, status=400)
+    except Exception:
+        import structlog
+        structlog.get_logger().exception("Owner Force Join update failed")
+        return web.json_response({"error": "Could not update Force Join. Check Alexa's Telegram permissions and the required destination."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
+@require_admin
 async def economy_leaderboard_handler(request):
     try:
         limit = min(int(request.rel_url.query.get("limit", 20)), 100)
@@ -1484,6 +1589,8 @@ def setup_admin_routes(app):
     app.router.add_post('/owner-api/users/{user_id}/ban', ban_user_handler)
     app.router.add_post('/owner-api/users/{user_id}/unban', unban_user_handler)
     app.router.add_get('/owner-api/groups', groups_handler)
+    app.router.add_get('/owner-api/force-join', owner_force_join_handler)
+    app.router.add_post('/owner-api/groups/{group_id}/force-join', owner_force_join_handler)
     app.router.add_get('/owner-api/logs', logs_handler)
     app.router.add_post('/owner-api/broadcast', owner_dm_broadcast_handler)
     app.router.add_get('/owner-api/economy/leaderboard', economy_leaderboard_handler)
