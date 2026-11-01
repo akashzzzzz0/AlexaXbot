@@ -52,7 +52,9 @@ def _init_engine():
 
     clean_url, connect_args = _prepare_db_url_and_ssl(db_url)
     if clean_url.startswith("sqlite+"):
-        connect_args = {}
+        # SQLite's busy timeout is in seconds for the driver. Give other
+        # transactions time to finish instead of failing immediately under load.
+        connect_args = {"timeout": 30}
 
     engine_options = {
         "echo": False,
@@ -69,12 +71,12 @@ def _init_engine():
     _engine = create_async_engine(clean_url, **engine_options)
     if clean_url.startswith("sqlite+"):
         # Keep SQLite responsive under concurrent Telegram updates. WAL improves
-        # reader/writer coexistence; the remaining pragmas reduce avoidable I/O.
+        # reader/writer coexistence; remaining pragmas reduce avoidable I/O.
         @event.listens_for(_engine.sync_engine, "connect")
         def _configure_sqlite(dbapi_connection, connection_record):
             cursor = dbapi_connection.cursor()
             try:
-                cursor.execute("PRAGMA busy_timeout=5000")
+                cursor.execute("PRAGMA busy_timeout=30000")
                 cursor.execute("PRAGMA synchronous=NORMAL")
                 cursor.execute("PRAGMA temp_store=MEMORY")
                 cursor.execute("PRAGMA cache_size=-20000")
