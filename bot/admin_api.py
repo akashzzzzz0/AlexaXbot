@@ -916,6 +916,12 @@ async def owner_group_messages_handler(request):
         if not group or not group.is_active:
             return web.json_response({"error": "Active group not found."}, status=404)
         query = select(GroupInboxMessage).where(GroupInboxMessage.chat_id == group_id)
+        sender_id_raw = request.query.get("sender_id")
+        if sender_id_raw:
+            try:
+                query = query.where(GroupInboxMessage.sender_id == int(sender_id_raw))
+            except (ValueError, TypeError):
+                return web.json_response({"error": "Invalid sender ID."}, status=400)
         if before_id:
             query = query.where(GroupInboxMessage.id < before_id)
         rows = (await session.scalars(query.order_by(desc(GroupInboxMessage.id)).limit(limit))).all()
@@ -1079,6 +1085,82 @@ async def owner_inbox_reply_handler(request):
     finally:
         if bot is not None:
             await bot.session.close()
+
+
+
+@require_admin
+async def owner_group_avatar_handler(request):
+    bot = None
+    try:
+        group_id = int(request.match_info["group_id"])
+        from io import BytesIO
+        from bot.config import settings
+        from aiogram import Bot
+        bot = Bot(token=settings.BOT_TOKEN)
+        chat = await bot.get_chat(chat_id=group_id)
+        photo = getattr(chat, "photo", None)
+        file_id = (photo.big_file_id or photo.small_file_id) if photo else None
+        if not file_id:
+            return web.json_response({"error": "No Telegram group photo is available."}, status=404)
+        telegram_file = await bot.get_file(file_id)
+        if not telegram_file.file_path:
+            return web.json_response({"error": "Telegram group photo is unavailable."}, status=404)
+        buffer = BytesIO()
+        await bot.download_file(telegram_file.file_path, destination=buffer)
+        return web.Response(body=buffer.getvalue(), content_type="image/jpeg",
+            headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid Telegram group ID."}, status=400)
+    except Exception:
+        return web.json_response({"error": "Telegram group photo could not be retrieved."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
+@require_admin
+async def owner_group_members_handler(request):
+    try:
+        group_id = int(request.match_info["group_id"])
+        page = max(1, int(request.rel_url.query.get("page", "1")))
+        limit = min(100, max(1, int(request.rel_url.query.get("limit", "50"))))
+        search = (request.rel_url.query.get("search", "") or "").strip()
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid group member request."}, status=400)
+    async with async_session_maker() as session:
+        group = await session.get(Group, group_id)
+        if not group or not group.is_active:
+            return web.json_response({"error": "Active group not found."}, status=404)
+        query = select(GroupMember, User).join(User, User.id == GroupMember.user_id).where(
+            GroupMember.group_id == group_id, User.is_bot.is_(False))
+        count_query = select(func.count()).select_from(GroupMember).join(
+            User, User.id == GroupMember.user_id).where(
+            GroupMember.group_id == group_id, User.is_bot.is_(False))
+        if search:
+            like = f"%{search}%"
+            condition = or_(User.first_name.ilike(like), User.last_name.ilike(like),
+                User.username.ilike(like), cast(User.id, String).contains(search))
+            query = query.where(condition)
+            count_query = count_query.where(condition)
+        total = await session.scalar(count_query) or 0
+        rows = (await session.execute(query.order_by(
+            desc(GroupMember.last_activity), desc(GroupMember.message_count)
+        ).offset((page - 1) * limit).limit(limit))).all()
+        members = [{
+            "id": str(member.user_id),
+            "name": " ".join(part for part in (user.first_name, user.last_name) if part).strip() or "Telegram user",
+            "username": user.username, "role": member.role or "member",
+            "messageCount": int(member.message_count or 0),
+            "lastActivity": member.last_activity.isoformat() if member.last_activity else None,
+            "isMuted": bool(member.is_muted), "isBanned": bool(member.is_banned),
+            "avatarUrl": f"/owner-api/avatar/{member.user_id}",
+        } for member, user in rows]
+    return web.json_response({
+        "group": _group_to_dict(group), "members": members, "total": int(total),
+        "page": page, "limit": limit, "source": "tracked",
+        "note": "Telegram Bot API does not provide a complete group-member directory. Alexa lists members it has observed through messages, join updates, or moderation activity.",
+    }, headers={"Cache-Control": "no-store"})
+
 
 
 @require_admin
@@ -1245,6 +1327,8 @@ def setup_admin_routes(app):
     app.router.add_get('/owner-api/inbox/{user_id}/messages/{record_id}/media', owner_inbox_media_handler)
     app.router.add_get('/owner-api/groups/{group_id}/messages/{record_id}/media', owner_group_media_handler)
     app.router.add_get('/owner-api/avatar/{user_id}', owner_avatar_handler)
+    app.router.add_get('/owner-api/group-avatar/{group_id}', owner_group_avatar_handler)
+    app.router.add_get('/owner-api/groups/{group_id}/members', owner_group_members_handler)
     app.router.add_post('/owner-api/inbox/{user_id}/messages/{message_id}/delete', owner_inbox_delete_message_handler)
     app.router.add_get('/owner-api/groups/{group_id}/messages', owner_group_messages_handler)
     app.router.add_post('/owner-api/groups/{group_id}/messages/{message_id}/delete', owner_group_delete_message_handler)
