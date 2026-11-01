@@ -9,6 +9,26 @@ import structlog
 logger = structlog.get_logger()
 
 
+def _owner_inbox_preview(message: Message) -> str:
+    """Store a compact media reference without changing the database schema."""
+    import json
+    media_fields = (
+        ("photo", message.photo[-1] if message.photo else None),
+        ("video", message.video), ("animation", message.animation),
+        ("document", message.document), ("audio", message.audio),
+        ("voice", message.voice), ("video_note", message.video_note),
+        ("sticker", message.sticker),
+    )
+    for kind, item in media_fields:
+        if item:
+            return "__ALEXA_MEDIA__" + json.dumps({
+                "kind": kind, "file_id": item.file_id,
+                "mime_type": getattr(item, "mime_type", None),
+                "caption": (message.caption or "")[:900],
+            }, separators=(",", ":"))
+    return (message.text or message.caption or f"[{message.content_type}]")[:1000]
+
+
 class DatabaseMiddleware(BaseMiddleware):
     async def __call__(
         self,
@@ -148,7 +168,7 @@ class DatabaseMiddleware(BaseMiddleware):
                         from bot.handlers.owner import is_owner
                         if not is_owner(user.id):
                             incoming = event.message
-                            preview = incoming.text or incoming.caption or f"[{incoming.content_type}]"
+                            preview = _owner_inbox_preview(incoming)
                             session.add(InboxMessage(
                                 user_id=user.id,
                                 telegram_message_id=incoming.message_id,
