@@ -829,7 +829,7 @@ async def owner_inbox_handler(request):
             data.append({
                 "userId": str(user_id), "name": user.first_name if user else "User",
                 "username": user.username if user else None, "unread": int(unread),
-                "preview": (user.first_name if user else "User"),
+                "preview": ((_decode_owner_media(item.preview) or {}).get("caption") or "[" + item.content_type + "]") if _decode_owner_media(item.preview) else (item.preview or "[" + item.content_type + "]"),
                 "avatarUrl": f"/owner-api/avatar/{user_id}",
                 "createdAt": item.created_at.isoformat() if item.created_at else None
             })
