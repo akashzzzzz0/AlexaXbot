@@ -10,7 +10,7 @@ from aiohttp import web
 from sqlalchemy import select, func, and_, or_, desc, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.models import User, Group, GroupMember, Wallet, Economy, ActionLog, SecuritySettings, Referral, AffiliateRequest, InboxMessage, GroupInboxMessage, GroupPromotionRequest, GlobalSetting, GroupSettings
+from bot.database.models import User, Group, GroupMember, Wallet, Economy, ActionLog, SecuritySettings, Referral, AffiliateRequest, InboxMessage, GroupInboxMessage, GroupPromotionRequest, GlobalSetting, GroupSettings, WelcomeSettings, GoodbyeSettings
 
 ADMIN_KEY = os.environ.get("ADMIN_KEY", "")
 
@@ -1787,6 +1787,120 @@ async def owner_settings_overview_handler(request):
         import logging
         logging.getLogger(__name__).exception("Owner settings overview failed")
         return web.json_response({"error": "Could not load Owner Settings overview."}, status=503)
+
+@require_admin
+async def owner_group_communication_settings_handler(request):
+    """Expose the existing welcome, goodbye, log-channel and auto-delete settings."""
+    bot = None
+    try:
+        group_id = int(request.match_info["group_id"])
+        from bot.database.connection import async_session_maker
+        from bot.config import settings
+        from aiogram import Bot
+        async with async_session_maker() as session:
+            group = await session.get(Group, group_id)
+            if not group or not group.is_active:
+                return web.json_response({"error": "Active group not found."}, status=404)
+            welcome = await session.scalar(select(WelcomeSettings).where(WelcomeSettings.group_id == group_id))
+            goodbye = await session.scalar(select(GoodbyeSettings).where(GoodbyeSettings.group_id == group_id))
+            group_settings = await session.scalar(select(GroupSettings).where(GroupSettings.group_id == group_id))
+            if request.method == "POST":
+                body = await request.json()
+                field = body.get("field")
+                if field == "welcomeEnabled":
+                    enabled = body.get("enabled")
+                    if not isinstance(enabled, bool): return web.json_response({"error": "enabled must be true or false."}, status=400)
+                    if welcome is None:
+                        welcome = WelcomeSettings(group_id=group_id, enabled=enabled)
+                        session.add(welcome)
+                    else: welcome.enabled = enabled
+                elif field == "welcomeMessage":
+                    message = body.get("message")
+                    if not isinstance(message, str) or len(message) > 4000: return web.json_response({"error": "Welcome text must be a string of at most 4000 characters."}, status=400)
+                    import html
+                    if welcome is None:
+                        welcome = WelcomeSettings(group_id=group_id, enabled=True, message=html.escape(message, quote=False))
+                        session.add(welcome)
+                    else:
+                        welcome.message = html.escape(message, quote=False)
+                        welcome.enabled = True
+                elif field == "goodbyeEnabled":
+                    enabled = body.get("enabled")
+                    if not isinstance(enabled, bool): return web.json_response({"error": "enabled must be true or false."}, status=400)
+                    if goodbye is None:
+                        goodbye = GoodbyeSettings(group_id=group_id, enabled=enabled)
+                        session.add(goodbye)
+                    else: goodbye.enabled = enabled
+                elif field == "goodbyeMessage":
+                    message = body.get("message")
+                    if not isinstance(message, str) or len(message) > 4000: return web.json_response({"error": "Goodbye text must be a string of at most 4000 characters."}, status=400)
+                    import html
+                    if goodbye is None:
+                        goodbye = GoodbyeSettings(group_id=group_id, enabled=True, message=html.escape(message, quote=False))
+                        session.add(goodbye)
+                    else:
+                        goodbye.message = html.escape(message, quote=False)
+                        goodbye.enabled = True
+                elif field == "autoDeleteSeconds":
+                    seconds = body.get("seconds")
+                    if not isinstance(seconds, int) or isinstance(seconds, bool) or seconds not in {0, 30, 60, 300, 600, 1800}:
+                        return web.json_response({"error": "Auto-delete must be 0, 30, 60, 300, 600 or 1800 seconds."}, status=400)
+                    if welcome is None:
+                        welcome = WelcomeSettings(group_id=group_id, enabled=True, delete_after=seconds)
+                        session.add(welcome)
+                    else: welcome.delete_after = seconds
+                elif field == "logEvent":
+                    event = body.get("event")
+                    enabled = body.get("enabled")
+                    event_fields = {"join":"log_join","leave":"log_leave","delete":"log_delete","edit":"log_edit","ban":"log_ban","mute":"log_mute","warn":"log_warn"}
+                    if event not in event_fields or not isinstance(enabled, bool):
+                        return web.json_response({"error": "Invalid log event setting."}, status=400)
+                    if group_settings is None:
+                        group_settings = GroupSettings(group_id=group_id)
+                        session.add(group_settings)
+                    setattr(group_settings, event_fields[event], enabled)
+                elif field == "logChannelId":
+                    channel = str(body.get("channelId") or "").strip()
+                    if not channel:
+                        if group_settings: group_settings.log_channel_id = None
+                    else:
+                        bot = Bot(token=settings.BOT_TOKEN)
+                        target = int(channel) if channel.lstrip("-").isdigit() else channel
+                        chat = await bot.get_chat(target)
+                        me = await bot.get_me()
+                        member = await bot.get_chat_member(chat.id, me.id)
+                        status = str(getattr(member.status, "value", member.status))
+                        if status not in {"administrator", "creator"}:
+                            return web.json_response({"error": "Add Alexa as an administrator in the log channel first."}, status=400)
+                        if group_settings is None:
+                            group_settings = GroupSettings(group_id=group_id)
+                            session.add(group_settings)
+                        group_settings.log_channel_id = chat.id
+                else:
+                    return web.json_response({"error": "Unknown communication setting."}, status=400)
+                await session.commit()
+                welcome = await session.scalar(select(WelcomeSettings).where(WelcomeSettings.group_id == group_id))
+                goodbye = await session.scalar(select(GoodbyeSettings).where(GoodbyeSettings.group_id == group_id))
+                group_settings = await session.scalar(select(GroupSettings).where(GroupSettings.group_id == group_id))
+            event_fields = {"join":"log_join","leave":"log_leave","delete":"log_delete","edit":"log_edit","ban":"log_ban","mute":"log_mute","warn":"log_warn"}
+            return web.json_response({
+                "groupId": str(group_id),
+                "welcome": {"enabled": bool(welcome.enabled) if welcome else False, "message": welcome.message if welcome else ""},
+                "goodbye": {"enabled": bool(goodbye.enabled) if goodbye else False, "message": goodbye.message if goodbye else ""},
+                "autoDeleteSeconds": int(welcome.delete_after or 0) if welcome else 0,
+                "logChannelId": str(group_settings.log_channel_id) if group_settings and group_settings.log_channel_id else "",
+                "logEvents": {event: bool(getattr(group_settings, attr, True)) if group_settings else True for event, attr in event_fields.items()},
+            }, headers={"Cache-Control": "no-store"})
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid group ID or setting."}, status=400)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Owner group communication settings failed")
+        return web.json_response({"error": "Could not load or save group communication settings."}, status=503)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
 def setup_admin_routes(app):
     app.router.add_get('/owner', owner_app_handler)
     app.router.add_get('/owner-api/overview', owner_overview_handler)
@@ -1813,6 +1927,8 @@ def setup_admin_routes(app):
     app.router.add_get('/owner-api/groups/{group_id}/security', owner_group_security_handler)
     app.router.add_post('/owner-api/groups/{group_id}/security', owner_group_security_handler)
     app.router.add_get('/owner-api/groups/{group_id}/permissions', owner_group_permissions_handler)
+    app.router.add_get('/owner-api/groups/{group_id}/communication-settings', owner_group_communication_settings_handler)
+    app.router.add_post('/owner-api/groups/{group_id}/communication-settings', owner_group_communication_settings_handler)
     app.router.add_get('/owner-api/groups/{group_id}/service-settings', owner_group_service_settings_handler)
     app.router.add_post('/owner-api/groups/{group_id}/service-settings', owner_group_service_settings_handler)
     app.router.add_post('/owner-api/groups/{group_id}/actions/{action}', owner_group_action_handler)
