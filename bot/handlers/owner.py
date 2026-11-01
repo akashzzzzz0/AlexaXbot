@@ -77,7 +77,8 @@ def owner_kb(_=None) -> object:
     builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
     if settings.OWNER_MINI_APP_URL.startswith("https://"):
         builder.button(text="💎 VIP Owner Mini App", web_app=WebAppInfo(url=settings.OWNER_MINI_APP_URL))
-    builder.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 1)\n    return builder.as_markup()
+    builder.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
+    return builder.as_markup()
 
 
 # NOTE: this function is intentionally called only by the bot owner.
