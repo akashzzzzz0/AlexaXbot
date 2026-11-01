@@ -852,14 +852,31 @@ async def owner_avatar_handler(request):
 
 @require_admin
 async def owner_inbox_handler(request):
-    """List every user who has started a private chat, including new empty chats."""
+    """List every user known to have opened a private chat with ALEXA."""
+    try:
+        page = max(1, int(request.rel_url.query.get("page", "1")))
+        limit = min(500, max(1, int(request.rel_url.query.get("limit", "200"))))
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid inbox pagination."}, status=400)
+
     async with async_session_maker() as session:
+        # Older installations may have inbox history from before dm_started
+        # was tracked. Treat any stored private message as proof of a started DM.
+        started_filter = or_(
+            User.dm_started.is_(True),
+            User.id.in_(select(InboxMessage.user_id).distinct()),
+        )
+        total = await session.scalar(
+            select(func.count()).select_from(User).where(started_filter)
+        ) or 0
         users = (await session.scalars(
             select(User)
-            .where(User.dm_started.is_(True), User.is_banned.is_(False))
+            .where(started_filter)
             .order_by(desc(User.last_seen), desc(User.id))
-            .limit(100)
+            .offset((page - 1) * limit)
+            .limit(limit)
         )).all()
+
         data = []
         for user in users:
             item = await session.scalar(
@@ -885,7 +902,9 @@ async def owner_inbox_handler(request):
                 "avatarUrl": f"/owner-api/avatar/{user.id}",
                 "createdAt": item.created_at.isoformat() if item and item.created_at else (user.last_seen.isoformat() if user.last_seen else None),
             })
-    return web.json_response({"conversations": data}, headers={"Cache-Control": "no-store"})
+    return web.json_response({
+        "conversations": data, "total": int(total), "page": page, "limit": limit
+    }, headers={"Cache-Control": "no-store"})
 
 
 @require_admin
