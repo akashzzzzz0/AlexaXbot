@@ -29,9 +29,17 @@ const modules=[
 {id:'ai',icon:'🧠',name:'Global AI Control',desc:'Existing global AI switch',kind:'telegram'},
 {id:'emergency',icon:'🚨',name:'Emergency Controls',desc:'Existing group lockdown tools',kind:'telegram'},
 {id:'inbox',icon:'📩',name:'User Messages & Inbox',desc:'Read and reply using the bot panel',kind:'telegram'},
-{id:'maintenance',icon:'⚙️',name:'Maintenance & Settings',desc:'Existing maintenance and configuration',kind:'telegram'},
-{id:'forcejoin',icon:'🔗',name:'Force Join',desc:'Existing force-join configuration',kind:'telegram'},
-{id:'promorequests',icon:'📬',name:'Promotion Requests',desc:'Review requests in Telegram owner panel',kind:'telegram'}
+{id:'maintenance',icon:'⚙️',name:'Maintenance Mode',desc:'Enable or disable maintenance mode',kind:'telegram'},
+{id:'settings',icon:'🛠️',name:'Owner Settings',desc:'Existing bot configuration tools',kind:'telegram'},
+{id:'forcejoin',icon:'🔗',name:'Force Join',desc:'Configure required channels',kind:'telegram'},
+{id:'promorequests',icon:'📬',name:'Promotion Requests',desc:'Review and process requests',kind:'telegram'},
+{id:'banall',icon:'⛔',name:'Ban All Controls',desc:'Existing guarded group-wide controls',kind:'telegram'},
+{id:'groupmessage',icon:'✉️',name:'Message Selected Groups',desc:'Send to selected connected groups',kind:'telegram'},
+{id:'addgroups',icon:'➕',name:'Add Groups',desc:'Group registration and onboarding',kind:'telegram'},
+{id:'health',icon:'💚',name:'Bot Health Monitor',desc:'Runtime health and service status',kind:'telegram'},
+{id:'statistics',icon:'📈',name:'Detailed Statistics',desc:'Existing owner analytics',kind:'telegram'},
+{id:'userlist',icon:'🧑‍🤝‍🧑',name:'Owner User List',desc:'Existing Telegram user-list workflow',kind:'telegram'},
+{id:'groupactivity',icon:'🛰️',name:'Group Activity Center',desc:'Group activity, links and permissions',kind:'telegram'}
 ];
 let stack=['home'], pageNo=1, searchText='', lastPage='home', overview=null;
 function showError(msg){$('error').textContent=msg;$('error').style.display='block'}
