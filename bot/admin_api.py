@@ -791,6 +791,63 @@ async def owner_group_message_handler(request):
             await bot.session.close()
 
 
+
+@require_admin
+async def owner_inbox_reply_handler(request):
+    bot = None
+    try:
+        user_id = int(request.match_info["user_id"])
+        body = await request.json()
+        message_text = str(body.get("message", "")).strip()
+        if not message_text or len(message_text) > 4000:
+            return web.json_response({"error": "Reply must be 1–4000 characters."}, status=400)
+        async with async_session_maker() as session:
+            user = await session.get(User, user_id)
+            if not user or not user.dm_started or user.is_banned:
+                return web.json_response({"error": "User is not an eligible DM starter."}, status=404)
+        from bot.config import settings
+        from aiogram import Bot
+        bot = Bot(token=settings.BOT_TOKEN)
+        await bot.send_message(chat_id=user_id, text=message_text)
+        return web.json_response({"success": True, "userId": str(user_id)})
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid user ID."}, status=400)
+    except Exception:
+        return web.json_response({"error": "Telegram could not deliver the reply."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
+@require_admin
+async def owner_group_activity_handler(request):
+    try:
+        group_id = int(request.match_info["group_id"])
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid group ID."}, status=400)
+    async with async_session_maker() as session:
+        group = await session.get(Group, group_id)
+        if not group or not group.is_active:
+            return web.json_response({"error": "Active group not found."}, status=404)
+        member_count = await session.scalar(select(func.count()).select_from(GroupMember).where(GroupMember.group_id == group_id)) or 0
+        logs = (await session.scalars(select(ActionLog).where(ActionLog.group_id == group_id).order_by(desc(ActionLog.created_at)).limit(20))).all()
+        security = await session.scalar(select(SecuritySettings).where(SecuritySettings.group_id == group_id))
+        group_settings = await session.scalar(select(GlobalSetting).where(GlobalSetting.key == "__unused_never_read__"))
+    return web.json_response({
+        "group": _group_to_dict(group), "trackedMembers": int(member_count),
+        "security": {
+            "antiSpam": bool(security.anti_spam) if security else False,
+            "antiFlood": bool(security.anti_flood) if security else False,
+            "emergencyMode": bool(security.emergency_mode) if security else False
+        },
+        "logs": [{
+            "action": item.action, "reason": item.reason,
+            "createdAt": item.created_at.isoformat() if item.created_at else None,
+            "userId": str(item.user_id) if item.user_id else None
+        } for item in logs]
+    }, headers={"Cache-Control": "no-store"})
+
+
 def setup_admin_routes(app):
     app.router.add_get('/owner', owner_app_handler)
     app.router.add_get('/owner-api/overview', owner_overview_handler)
@@ -800,6 +857,8 @@ def setup_admin_routes(app):
     app.router.add_get('/owner-api/promotion-requests', owner_promotion_requests_handler)
     app.router.add_post('/owner-api/promotion-requests/{request_id}', owner_promotion_request_update)
     app.router.add_get('/owner-api/inbox', owner_inbox_handler)
+    app.router.add_post('/owner-api/inbox/{user_id}/reply', owner_inbox_reply_handler)
+    app.router.add_get('/owner-api/groups/{group_id}/activity', owner_group_activity_handler)
     app.router.add_get('/owner-api/statistics', owner_statistics_handler)
     app.router.add_get('/owner-api/health', owner_health_handler)
     app.router.add_post('/owner-api/group-message', owner_group_message_handler)
