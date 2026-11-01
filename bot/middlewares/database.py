@@ -3,10 +3,30 @@ from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Message, CallbackQuery, Update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from bot.database.models import User, Group, GroupMember, SecuritySettings, GroupDisabledCommand, InboxMessage
+from bot.database.models import User, Group, GroupMember, SecuritySettings, GroupDisabledCommand, InboxMessage, GroupInboxMessage
 import structlog
 
 logger = structlog.get_logger()
+
+
+def _owner_inbox_preview(message: Message) -> str:
+    """Store a compact media reference without changing the database schema."""
+    import json
+    media_fields = (
+        ("photo", message.photo[-1] if message.photo else None),
+        ("video", message.video), ("animation", message.animation),
+        ("document", message.document), ("audio", message.audio),
+        ("voice", message.voice), ("video_note", message.video_note),
+        ("sticker", message.sticker),
+    )
+    for kind, item in media_fields:
+        if item:
+            return "__ALEXA_MEDIA__" + json.dumps({
+                "kind": kind, "file_id": item.file_id,
+                "mime_type": getattr(item, "mime_type", None),
+                "caption": (message.caption or "")[:500],
+            }, separators=(",", ":"))
+    return (message.text or message.caption or f"[{message.content_type}]")[:1000]
 
 
 class DatabaseMiddleware(BaseMiddleware):
@@ -148,7 +168,7 @@ class DatabaseMiddleware(BaseMiddleware):
                         from bot.handlers.owner import is_owner
                         if not is_owner(user.id):
                             incoming = event.message
-                            preview = incoming.text or incoming.caption or f"[{incoming.content_type}]"
+                            preview = _owner_inbox_preview(incoming)
                             session.add(InboxMessage(
                                 user_id=user.id,
                                 telegram_message_id=incoming.message_id,
@@ -158,6 +178,30 @@ class DatabaseMiddleware(BaseMiddleware):
                             ))
                     except Exception as inbox_error:
                         logger.warning("Could not save private message to owner inbox", user_id=user.id, error=str(inbox_error))
+
+                # Store only group messages that Telegram actually delivers to ALEXA.
+                # Bot API privacy mode still determines which messages are visible.
+                if isinstance(event, Update) and event.message and event.message.chat.type in ("group", "supergroup") and user and not user.is_bot:
+                    try:
+                        incoming = event.message
+                        sender = incoming.from_user
+                        already_saved = await session.scalar(select(GroupInboxMessage.id).where(
+                            GroupInboxMessage.chat_id == incoming.chat.id,
+                            GroupInboxMessage.telegram_message_id == incoming.message_id,
+                        ))
+                        if not already_saved:
+                            preview = _owner_inbox_preview(incoming)
+                            session.add(GroupInboxMessage(
+                                chat_id=incoming.chat.id,
+                                telegram_message_id=incoming.message_id,
+                                sender_id=sender.id if sender else None,
+                                sender_name=((sender.full_name if sender else None) or "Unknown")[:256],
+                                sender_username=(sender.username[:64] if sender and sender.username else None),
+                                content_type=str(incoming.content_type),
+                                preview=preview[:1000],
+                            ))
+                    except Exception as group_inbox_error:
+                        logger.warning("Could not save group message to owner inbox", chat_id=chat.id if chat else None, error=str(group_inbox_error))
 
                 # Emergency lockdown must run before command routers, not only in the catch-all handler.
                 if isinstance(event, Update) and chat and chat.type in ("group", "supergroup") and data.get("group_security") and data["group_security"].emergency_mode and user and not user.is_bot:

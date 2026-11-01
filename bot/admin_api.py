@@ -10,7 +10,7 @@ from aiohttp import web
 from sqlalchemy import select, func, and_, or_, desc, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.models import User, Group, GroupMember, Wallet, Economy, ActionLog, SecuritySettings, Referral, AffiliateRequest, InboxMessage, GroupPromotionRequest, GlobalSetting
+from bot.database.models import User, Group, GroupMember, Wallet, Economy, ActionLog, SecuritySettings, Referral, AffiliateRequest, InboxMessage, GroupInboxMessage, GroupPromotionRequest, GlobalSetting
 
 ADMIN_KEY = os.environ.get("ADMIN_KEY", "")
 
@@ -700,6 +700,110 @@ async def owner_promotion_request_update(request):
         return web.json_response({"error": "Invalid request."}, status=400)
 
 
+
+def _decode_owner_media(preview):
+    if not preview or not preview.startswith("__ALEXA_MEDIA__"):
+        return None
+    try:
+        value = json.loads(preview[len("__ALEXA_MEDIA__"):])
+        if not isinstance(value, dict) or not value.get("file_id"):
+            return None
+        return value
+    except (TypeError, ValueError):
+        return None
+
+
+@require_admin
+async def owner_inbox_media_handler(request):
+    return await _owner_media_response(request, "private")
+
+
+@require_admin
+async def owner_group_media_handler(request):
+    return await _owner_media_response(request, "group")
+
+
+async def _owner_media_response(request, scope):
+    bot = None
+    try:
+        record_id = int(request.match_info["record_id"])
+        if scope == "private":
+            user_id = int(request.match_info["user_id"])
+            async with async_session_maker() as session:
+                item = await session.scalar(select(InboxMessage).where(
+                    InboxMessage.id == record_id, InboxMessage.user_id == user_id
+                ))
+                if not item:
+                    return web.json_response({"error": "Inbox media not found."}, status=404)
+                media = _decode_owner_media(item.preview)
+        else:
+            group_id = int(request.match_info["group_id"])
+            async with async_session_maker() as session:
+                group = await session.get(Group, group_id)
+                item = await session.scalar(select(GroupInboxMessage).where(
+                    GroupInboxMessage.id == record_id, GroupInboxMessage.chat_id == group_id
+                ))
+                if not group or not group.is_active or not item:
+                    return web.json_response({"error": "Group media not found."}, status=404)
+                media = _decode_owner_media(item.preview)
+        if not media:
+            return web.json_response({"error": "This message has no stored media preview."}, status=404)
+        from io import BytesIO
+        from bot.config import settings
+        from aiogram import Bot
+        bot = Bot(token=settings.BOT_TOKEN)
+        telegram_file = await bot.get_file(media["file_id"])
+        if not telegram_file.file_path:
+            return web.json_response({"error": "Telegram media is unavailable."}, status=404)
+        buffer = BytesIO()
+        await bot.download_file(telegram_file.file_path, destination=buffer)
+        kind = media.get("kind")
+        fallback_types = {"photo": "image/jpeg", "sticker": "image/webp", "video_note": "video/mp4"}
+        content_type = media.get("mime_type") or fallback_types.get(kind) or "application/octet-stream"
+        return web.Response(
+            body=buffer.getvalue(), content_type=content_type,
+            headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"}
+        )
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid media reference."}, status=400)
+    except Exception:
+        return web.json_response({"error": "Telegram could not retrieve this media."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
+@require_admin
+async def owner_avatar_handler(request):
+    bot = None
+    try:
+        user_id = int(request.match_info["user_id"])
+        from io import BytesIO
+        from bot.config import settings
+        from aiogram import Bot
+        bot = Bot(token=settings.BOT_TOKEN)
+        photos = await bot.get_user_profile_photos(user_id=user_id, limit=1)
+        if not photos.photos or not photos.photos[0]:
+            return web.json_response({"error": "No Telegram profile photo is available."}, status=404)
+        photo = photos.photos[0][-1]
+        telegram_file = await bot.get_file(photo.file_id)
+        if not telegram_file.file_path:
+            return web.json_response({"error": "Telegram profile photo is unavailable."}, status=404)
+        buffer = BytesIO()
+        await bot.download_file(telegram_file.file_path, destination=buffer)
+        return web.Response(
+            body=buffer.getvalue(), content_type="image/jpeg",
+            headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"}
+        )
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid Telegram user ID."}, status=400)
+    except Exception:
+        return web.json_response({"error": "Telegram profile photo could not be retrieved."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
 @require_admin
 async def owner_inbox_handler(request):
     async with async_session_maker() as session:
@@ -718,10 +822,151 @@ async def owner_inbox_handler(request):
             data.append({
                 "userId": str(user_id), "name": user.first_name if user else "User",
                 "username": user.username if user else None, "unread": int(unread),
-                "preview": item.preview or "[" + item.content_type + "]",
+                "preview": (user.first_name if user else "User"),
+                "avatarUrl": f"/owner-api/avatar/{user_id}",
                 "createdAt": item.created_at.isoformat() if item.created_at else None
             })
     return web.json_response({"conversations": data}, headers={"Cache-Control": "no-store"})
+
+
+@require_admin
+async def owner_inbox_messages_handler(request):
+    try:
+        user_id = int(request.match_info["user_id"])
+        before_id = int(request.query.get("before", "0") or 0)
+        limit = min(100, max(1, int(request.query.get("limit", "50"))))
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid conversation request."}, status=400)
+    async with async_session_maker() as session:
+        user = await session.get(User, user_id)
+        if not user or not user.dm_started:
+            return web.json_response({"error": "Conversation not found."}, status=404)
+        query = select(InboxMessage).where(InboxMessage.user_id == user_id)
+        if before_id:
+            query = query.where(InboxMessage.id < before_id)
+        rows = (await session.scalars(query.order_by(desc(InboxMessage.id)).limit(limit))).all()
+        for row in rows:
+            row.is_read = True
+        await session.commit()
+        messages = [{
+            "id": item.id, "messageId": str(item.telegram_message_id),
+            "text": (item.preview or "[" + item.content_type + "]") if not _decode_owner_media(item.preview) else (_decode_owner_media(item.preview).get("caption") or "[" + item.content_type + "]"),
+            "media": bool(_decode_owner_media(item.preview)),
+            "mediaUrl": f"/owner-api/inbox/{user_id}/messages/{item.id}/media" if _decode_owner_media(item.preview) else None,
+            "contentType": item.content_type,
+            "createdAt": item.created_at.isoformat() if item.created_at else None,
+            "direction": "outgoing" if item.content_type == "outgoing_text" else "incoming"
+        } for item in reversed(rows)]
+    return web.json_response({"messages": messages, "hasMore": len(rows) == limit},
+                             headers={"Cache-Control": "no-store"})
+
+
+@require_admin
+async def owner_inbox_delete_message_handler(request):
+    bot = None
+    try:
+        user_id = int(request.match_info["user_id"])
+        record_id = int(request.match_info["message_id"])
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid message reference."}, status=400)
+    async with async_session_maker() as session:
+        item = await session.scalar(select(InboxMessage).where(
+            InboxMessage.id == record_id, InboxMessage.user_id == user_id
+        ))
+        if not item:
+            return web.json_response({"error": "Message not found in inbox history."}, status=404)
+        telegram_message_id = item.telegram_message_id
+    try:
+        from bot.config import settings
+        from aiogram import Bot
+        bot = Bot(token=settings.BOT_TOKEN)
+        await bot.delete_message(chat_id=user_id, message_id=telegram_message_id)
+        async with async_session_maker() as session:
+            item = await session.scalar(select(InboxMessage).where(
+                InboxMessage.id == record_id, InboxMessage.user_id == user_id
+            ))
+            if item:
+                await session.delete(item)
+                await session.commit()
+        return web.json_response({"success": True})
+    except Exception:
+        return web.json_response({"error": "Telegram could not delete this message. It may be too old or unavailable."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
+@require_admin
+async def owner_group_messages_handler(request):
+    try:
+        group_id = int(request.match_info["group_id"])
+        before_id = int(request.query.get("before", "0") or 0)
+        limit = min(100, max(1, int(request.query.get("limit", "50"))))
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid group history request."}, status=400)
+    async with async_session_maker() as session:
+        group = await session.get(Group, group_id)
+        if not group or not group.is_active:
+            return web.json_response({"error": "Active group not found."}, status=404)
+        query = select(GroupInboxMessage).where(GroupInboxMessage.chat_id == group_id)
+        if before_id:
+            query = query.where(GroupInboxMessage.id < before_id)
+        rows = (await session.scalars(query.order_by(desc(GroupInboxMessage.id)).limit(limit))).all()
+        messages = [{
+            "id": item.id, "messageId": str(item.telegram_message_id),
+            "senderId": str(item.sender_id) if item.sender_id else None,
+            "senderName": item.sender_name or "Unknown",
+            "username": item.sender_username,
+            "text": (item.preview or "[" + item.content_type + "]") if not _decode_owner_media(item.preview) else (_decode_owner_media(item.preview).get("caption") or "[" + item.content_type + "]"),
+            "media": bool(_decode_owner_media(item.preview)),
+            "mediaUrl": f"/owner-api/groups/{group_id}/messages/{item.id}/media" if _decode_owner_media(item.preview) else None,
+            "contentType": item.content_type,
+            "createdAt": item.created_at.isoformat() if item.created_at else None
+        } for item in reversed(rows)]
+    return web.json_response({"group": _group_to_dict(group), "messages": messages,
+                              "hasMore": len(rows) == limit},
+                             headers={"Cache-Control": "no-store"})
+
+
+@require_admin
+async def owner_group_delete_message_handler(request):
+    bot = None
+    try:
+        group_id = int(request.match_info["group_id"])
+        record_id = int(request.match_info["message_id"])
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid message reference."}, status=400)
+    async with async_session_maker() as session:
+        group = await session.get(Group, group_id)
+        item = await session.scalar(select(GroupInboxMessage).where(
+            GroupInboxMessage.id == record_id, GroupInboxMessage.chat_id == group_id
+        ))
+        if not group or not group.is_active or not item:
+            return web.json_response({"error": "Active group message not found."}, status=404)
+        telegram_message_id = item.telegram_message_id
+    try:
+        from bot.config import settings
+        from aiogram import Bot
+        bot = Bot(token=settings.BOT_TOKEN)
+        me = await bot.get_me()
+        member = await bot.get_chat_member(group_id, me.id)
+        status = str(getattr(member.status, "value", member.status))
+        if status not in ("administrator", "creator") or (status != "creator" and not getattr(member, "can_delete_messages", False)):
+            return web.json_response({"error": "ALEXA does not currently have Delete Messages permission."}, status=403)
+        await bot.delete_message(chat_id=group_id, message_id=telegram_message_id)
+        async with async_session_maker() as session:
+            item = await session.scalar(select(GroupInboxMessage).where(
+                GroupInboxMessage.id == record_id, GroupInboxMessage.chat_id == group_id
+            ))
+            if item:
+                await session.delete(item)
+                await session.commit()
+        return web.json_response({"success": True})
+    except Exception:
+        return web.json_response({"error": "Telegram could not delete this group message."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
 
 
 @require_admin
@@ -808,8 +1053,18 @@ async def owner_inbox_reply_handler(request):
         from bot.config import settings
         from aiogram import Bot
         bot = Bot(token=settings.BOT_TOKEN)
-        await bot.send_message(chat_id=user_id, text=message_text)
-        return web.json_response({"success": True, "userId": str(user_id)})
+        sent_message = await bot.send_message(chat_id=user_id, text=message_text)
+        # Keep the owner's sent reply in the same conversation timeline.
+        async with async_session_maker() as session:
+            session.add(InboxMessage(
+                user_id=user_id,
+                telegram_message_id=sent_message.message_id,
+                content_type="outgoing_text",
+                preview=message_text[:1000],
+                is_read=True,
+            ))
+            await session.commit()
+        return web.json_response({"success": True, "userId": str(user_id), "messageId": sent_message.message_id})
     except (ValueError, TypeError):
         return web.json_response({"error": "Invalid user ID."}, status=400)
     except Exception:
@@ -848,6 +1103,128 @@ async def owner_group_activity_handler(request):
     }, headers={"Cache-Control": "no-store"})
 
 
+
+@require_admin
+async def owner_group_permissions_handler(request):
+    """Return the bot's current Telegram administrator permissions for one registered group."""
+    bot = None
+    try:
+        group_id = int(request.match_info["group_id"])
+        async with async_session_maker() as session:
+            group = await session.get(Group, group_id)
+            if not group or not group.is_active:
+                return web.json_response({"error": "Active group not found."}, status=404)
+        from bot.config import settings
+        from aiogram import Bot
+        bot = Bot(token=settings.BOT_TOKEN)
+        me = await bot.get_me()
+        member = await bot.get_chat_member(chat_id=group_id, user_id=me.id)
+        status = str(getattr(member.status, "value", member.status))
+        creator = status == "creator"
+        admin = status == "administrator"
+        perms = {
+            "isAdministrator": admin or creator,
+            "canDeleteMessages": creator or bool(getattr(member, "can_delete_messages", False)),
+            "canRestrictMembers": creator or bool(getattr(member, "can_restrict_members", False)),
+            "canInviteUsers": creator or bool(getattr(member, "can_invite_users", False)),
+            "canPinMessages": creator or bool(getattr(member, "can_pin_messages", False)),
+            "canPromoteMembers": creator or bool(getattr(member, "can_promote_members", False)),
+            "canChangeInfo": creator or bool(getattr(member, "can_change_info", False)),
+            "canManageChat": creator or admin,
+            "status": status,
+        }
+        return web.json_response({"groupId": str(group_id), "permissions": perms},
+                                 headers={"Cache-Control": "no-store"})
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid group ID."}, status=400)
+    except Exception:
+        return web.json_response({"error": "Could not read Telegram permissions. Check bot membership and connectivity."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
+@require_admin
+async def owner_group_action_handler(request):
+    """Perform a small set of Telegram actions only after checking live bot rights."""
+    bot = None
+    try:
+        group_id = int(request.match_info["group_id"])
+        action = request.match_info["action"]
+        body = await request.json()
+        target_id = int(body.get("userId", 0) or 0)
+        message_id = int(body.get("messageId", 0) or 0)
+        seconds = min(30 * 24 * 60 * 60, max(60, int(body.get("seconds", 3600) or 3600)))
+        if action not in ("mute", "unmute", "ban", "unban", "pin", "invite"):
+            return web.json_response({"error": "Unsupported group action."}, status=400)
+        if action in ("mute", "unmute", "ban", "unban") and target_id <= 0:
+            return web.json_response({"error": "A valid target user ID is required."}, status=400)
+        if action == "pin" and message_id <= 0:
+            return web.json_response({"error": "A valid Telegram message ID is required."}, status=400)
+        async with async_session_maker() as session:
+            group = await session.get(Group, group_id)
+            if not group or not group.is_active:
+                return web.json_response({"error": "Active group not found."}, status=404)
+        from bot.config import settings
+        from aiogram import Bot
+        from aiogram.types import ChatPermissions
+        from datetime import timedelta
+        bot = Bot(token=settings.BOT_TOKEN)
+        me = await bot.get_me()
+        member = await bot.get_chat_member(chat_id=group_id, user_id=me.id)
+        status = str(getattr(member.status, "value", member.status))
+        creator = status == "creator"
+        if status not in ("administrator", "creator"):
+            return web.json_response({"error": "ALEXA must be a group administrator."}, status=403)
+        if action in ("mute", "unmute", "ban", "unban"):
+            if not creator and not getattr(member, "can_restrict_members", False):
+                return web.json_response({"error": "ALEXA lacks Restrict Members permission."}, status=403)
+            target = await bot.get_chat_member(chat_id=group_id, user_id=target_id)
+            target_status = str(getattr(target.status, "value", target.status))
+            if target_status in ("administrator", "creator"):
+                return web.json_response({"error": "Telegram does not allow this action on group administrators."}, status=409)
+            if action == "mute":
+                await bot.restrict_chat_member(
+                    chat_id=group_id, user_id=target_id,
+                    permissions=ChatPermissions(can_send_messages=False, can_send_audios=False,
+                        can_send_documents=False, can_send_photos=False, can_send_videos=False,
+                        can_send_video_notes=False, can_send_voice_notes=False,
+                        can_send_polls=False, can_send_other_messages=False,
+                        can_add_web_page_previews=False),
+                    until_date=timedelta(seconds=seconds),
+                )
+            elif action == "unmute":
+                await bot.restrict_chat_member(
+                    chat_id=group_id, user_id=target_id,
+                    permissions=ChatPermissions(can_send_messages=True, can_send_audios=True,
+                        can_send_documents=True, can_send_photos=True, can_send_videos=True,
+                        can_send_video_notes=True, can_send_voice_notes=True,
+                        can_send_polls=True, can_send_other_messages=True,
+                        can_add_web_page_previews=True),
+                )
+            elif action == "ban":
+                await bot.ban_chat_member(chat_id=group_id, user_id=target_id)
+            else:
+                await bot.unban_chat_member(chat_id=group_id, user_id=target_id, only_if_banned=True)
+        elif action == "pin":
+            if not creator and not getattr(member, "can_pin_messages", False):
+                return web.json_response({"error": "ALEXA lacks Pin Messages permission."}, status=403)
+            await bot.pin_chat_message(chat_id=group_id, message_id=message_id, disable_notification=True)
+        elif action == "invite":
+            if not creator and not getattr(member, "can_invite_users", False):
+                return web.json_response({"error": "ALEXA lacks Invite Users permission."}, status=403)
+            invite = await bot.create_chat_invite_link(chat_id=group_id, creates_join_request=False)
+            return web.json_response({"success": True, "inviteLink": invite.invite_link})
+        return web.json_response({"success": True, "action": action})
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid action parameters."}, status=400)
+    except Exception:
+        return web.json_response({"error": "Telegram rejected this action or the target is unavailable."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
 def setup_admin_routes(app):
     app.router.add_get('/owner', owner_app_handler)
     app.router.add_get('/owner-api/overview', owner_overview_handler)
@@ -857,8 +1234,17 @@ def setup_admin_routes(app):
     app.router.add_get('/owner-api/promotion-requests', owner_promotion_requests_handler)
     app.router.add_post('/owner-api/promotion-requests/{request_id}', owner_promotion_request_update)
     app.router.add_get('/owner-api/inbox', owner_inbox_handler)
+    app.router.add_get('/owner-api/inbox/{user_id}/messages', owner_inbox_messages_handler)
+    app.router.add_get('/owner-api/inbox/{user_id}/messages/{record_id}/media', owner_inbox_media_handler)
+    app.router.add_get('/owner-api/groups/{group_id}/messages/{record_id}/media', owner_group_media_handler)
+    app.router.add_get('/owner-api/avatar/{user_id}', owner_avatar_handler)
+    app.router.add_post('/owner-api/inbox/{user_id}/messages/{message_id}/delete', owner_inbox_delete_message_handler)
+    app.router.add_get('/owner-api/groups/{group_id}/messages', owner_group_messages_handler)
+    app.router.add_post('/owner-api/groups/{group_id}/messages/{message_id}/delete', owner_group_delete_message_handler)
     app.router.add_post('/owner-api/inbox/{user_id}/reply', owner_inbox_reply_handler)
     app.router.add_get('/owner-api/groups/{group_id}/activity', owner_group_activity_handler)
+    app.router.add_get('/owner-api/groups/{group_id}/permissions', owner_group_permissions_handler)
+    app.router.add_post('/owner-api/groups/{group_id}/actions/{action}', owner_group_action_handler)
     app.router.add_get('/owner-api/statistics', owner_statistics_handler)
     app.router.add_get('/owner-api/health', owner_health_handler)
     app.router.add_post('/owner-api/group-message', owner_group_message_handler)

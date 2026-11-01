@@ -992,6 +992,25 @@ class InboxMessage(Base):
 
 
 
+class GroupInboxMessage(Base):
+    """Recent group messages received by ALEXA for the owner-only Group Inbox."""
+    __tablename__ = "group_inbox_messages"
+    __table_args__ = (
+        Index("ix_group_inbox_chat_created", "chat_id", "created_at"),
+        UniqueConstraint("chat_id", "telegram_message_id"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    chat_id = Column(BigInteger, nullable=False, index=True)
+    telegram_message_id = Column(BigInteger, nullable=False)
+    sender_id = Column(BigInteger, nullable=True)
+    sender_name = Column(String(256), nullable=True)
+    sender_username = Column(String(64), nullable=True)
+    content_type = Column(String(32), nullable=False, default="text")
+    preview = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class GroupPromotionRequest(Base):
     """A verified group waiting for owner approval and promotion."""
     __tablename__ = "group_promotion_requests"
