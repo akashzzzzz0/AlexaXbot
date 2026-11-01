@@ -49,7 +49,7 @@ class DailyGroupMessageCounterMiddleware:
                         if row:
                             row.message_count = (row.message_count or 0) + 1
                     except Exception:
-                        logger.warning("Daily group message count update skipped")
+                        pass
                 except Exception:
                     # Optional analytics must never interrupt group handlers.
                     logger.warning("Daily group message count update skipped")
