@@ -649,7 +649,7 @@ async def owner_ai_control_handler(request):
 @require_admin
 async def owner_banall_handler(request):
     try:
-        body = await request.json()
+        body = await request.json() if request.method == "POST" else {}
         group_id = int(body.get("groupId", 0)) if request.method == "POST" else int(request.query.get("groupId", 0))
         execute = bool(body.get("confirm") is True) if request.method == "POST" else False
     except (ValueError, TypeError):
