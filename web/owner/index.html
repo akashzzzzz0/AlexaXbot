@@ -127,7 +127,7 @@ const modules=[
 {id:'logs',icon:'📜',name:'Action Logs',desc:'Recent moderation and admin activity',kind:'api'},
 {id:'economy',icon:'🏆',name:'Economy Leaderboard',desc:'Coins, levels and XP rankings',kind:'api'},
 {id:'broadcast',icon:'📨',name:'DM Broadcast',desc:'Send a message to opted-in users',kind:'api'},
-{id:'telegram',icon:'🎛️',name:'Full Telegram Owner Panel',desc:'All existing owner callbacks and settings',kind:'telegram'},
+{id:'telegram',icon:'🎛️',name:'Telegram-style Owner Workspace',desc:'Open private chats, group chats and owner controls',kind:'telegram'},
 {id:'promotion',icon:'📣',name:'Group Promotion',desc:'Existing group-message workflow',kind:'telegram'},
 {id:'controls',icon:'🛡️',name:'Global Controls & Security',desc:'Live anti-spam, anti-flood and lockdown controls',kind:'api'},
 {id:'referrals',icon:'🎁',name:'Referrals & Rewards',desc:'Referral tracking and reward controls',kind:'api'},
@@ -184,7 +184,7 @@ function renderPage(){const id=stack.at(-1),m=modules.find(x=>x.id===id);if(!m){
 if(m.kind==='telegram'){
 if(id==='telegram'){
 const workspaceLinks=[['inbox','📩','Private chats','Open user conversations and reply'],['groupactivity','👥','Groups & group chats','Browse group photos, members and captured messages'],['groups','🌐','Connected groups','View registered groups and status'],['userlist','🧑‍🤝‍🧑','User directory','Search users and manage access'],['promorequests','📬','Promotion requests','Review and manage incoming requests'],['broadcast','📨','DM broadcast','Send confirmed announcements'],['groupmessage','✉️','Group messages','Send to selected connected groups'],['controls','🛡️','Security controls','Manage global moderation settings'],['ai','🧠','AI controls','Manage global AI settings'],['referrals','🎁','Referrals & rewards','Review referral activity'],['statistics','📈','Statistics','View bot analytics'],['health','💚','Bot health','Check runtime service status'],['logs','📜','Action logs','Review recent admin activity']];
-$('pageBody').innerHTML='<p>Owner workspace. Open a working Mini App section below, or use the original Telegram owner workflow for controls that still require Telegram confirmations.</p><div class="grid" id="ownerWorkspaceLinks">'+workspaceLinks.map(x=>'<button class="tile" data-workspace="'+x[0]+'"><span class="ico">'+x[1]+'</span><span><b>'+x[2]+'</b><small>'+x[3]+'</small></span></button>').join('')+'</div><div class="actions"><button class="primary" id="openBot">Open existing Telegram owner workflow</button></div><p class="muted">Existing Telegram callbacks and confirmation-based actions remain available in the bot.</p>';
+$('pageBody').innerHTML='<p>Owner workspace. Open a working Mini App section below, or use the original Telegram owner workflow for controls that still require Telegram confirmations.</p><div class="modules" id="ownerWorkspaceLinks">'+workspaceLinks.map(x=>'<button class="tile" data-workspace="'+x[0]+'"><span class="ico">'+x[1]+'</span><span><b>'+x[2]+'</b><small>'+x[3]+'</small></span></button>').join('')+'</div><div class="actions"><button class="primary" id="openBot">Open existing Telegram owner workflow</button></div><p class="muted">Existing Telegram callbacks and confirmation-based actions remain available in the bot.</p>';
 document.querySelectorAll('[data-workspace]').forEach(b=>b.onclick=()=>openModule(b.dataset.workspace));
 $('openBot').onclick=()=>tg.openTelegramLink('https://t.me/'+(tg.initDataUnsafe?.bot?.username||'AlexaSuper_Bot')+'?start=owner');
 return}
