@@ -564,6 +564,10 @@ async def owner_overview_handler(request):
     if not _verify_owner_telegram_init_data(init_data):
         return web.json_response({"error": "Unauthorized"}, status=401, headers={"Cache-Control": "no-store"})
     try:
+        # Resolve the lazy database session maker explicitly in this function.
+        # Module-level __getattr__ does not resolve unbound global names.
+        from bot.database.connection import async_session_maker
+
         # User.last_seen is timezone-aware in the model; compare using aware UTC.
         today = datetime.now(timezone.utc) - timedelta(hours=24)
         async with async_session_maker() as session:
