@@ -499,7 +499,7 @@ def _verify_owner_telegram_init_data(init_data: str) -> bool:
         auth_date = int(pairs.get("auth_date", "0"))
         if not supplied_hash or auth_date <= 0 or time.time() - auth_date > 86400 or auth_date > time.time() + 60:
             return False
-        data_check_string = "\\n".join(f"{key}={value}" for key, value in sorted(pairs.items()))
+        data_check_string = "\n".join(f"{key}={value}" for key, value in sorted(pairs.items()))
         secret_key = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
         expected_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(expected_hash, supplied_hash):
