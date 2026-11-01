@@ -748,7 +748,7 @@ async def owner_inbox_messages_handler(request):
             "text": item.preview or "[" + item.content_type + "]",
             "contentType": item.content_type,
             "createdAt": item.created_at.isoformat() if item.created_at else None,
-            "direction": "incoming"
+            "direction": "outgoing" if item.content_type == "outgoing_text" else "incoming"
         } for item in reversed(rows)]
     return web.json_response({"messages": messages, "hasMore": len(rows) == limit},
                              headers={"Cache-Control": "no-store"})
@@ -944,8 +944,18 @@ async def owner_inbox_reply_handler(request):
         from bot.config import settings
         from aiogram import Bot
         bot = Bot(token=settings.BOT_TOKEN)
-        await bot.send_message(chat_id=user_id, text=message_text)
-        return web.json_response({"success": True, "userId": str(user_id)})
+        sent_message = await bot.send_message(chat_id=user_id, text=message_text)
+        # Keep the owner's sent reply in the same conversation timeline.
+        async with async_session_maker() as session:
+            session.add(InboxMessage(
+                user_id=user_id,
+                telegram_message_id=sent_message.message_id,
+                content_type="outgoing_text",
+                preview=message_text[:1000],
+                is_read=True,
+            ))
+            await session.commit()
+        return web.json_response({"success": True, "userId": str(user_id), "messageId": sent_message.message_id})
     except (ValueError, TypeError):
         return web.json_response({"error": "Invalid user ID."}, status=400)
     except Exception:
