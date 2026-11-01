@@ -3,7 +3,7 @@ from bot.handlers import start, security, moderation, economy, games, duels, sta
 from bot.handlers.auto_delete_middleware import StartMenuAutoDeleteMessageMiddleware, StartMenuAutoDeleteCallbackMiddleware
 
 class DailyGroupMessageCounterMiddleware:
-    """Count incoming human group messages for per-day activity reports."""
+    """Count group messages in the update's existing DB session."""
     async def __call__(self, handler, event, data):
         message = event
         chat_type = getattr(getattr(message, "chat", None), "type", None)
@@ -20,39 +20,40 @@ class DailyGroupMessageCounterMiddleware:
             from zoneinfo import ZoneInfo
             from sqlalchemy import select
             from sqlalchemy.exc import IntegrityError
-            from bot.database.connection import async_session_maker
             from bot.database.models import DailyGroupMessageStat
-            day_key = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
-            try:
-                async with async_session_maker() as session:
-                    row = await session.scalar(select(DailyGroupMessageStat).where(
-                        DailyGroupMessageStat.group_id == message.chat.id,
-                        DailyGroupMessageStat.day_key == day_key,
-                    ))
-                    if row:
-                        row.message_count = (row.message_count or 0) + 1
-                    else:
-                        session.add(DailyGroupMessageStat(
-                            group_id=message.chat.id, day_key=day_key, message_count=1
-                        ))
-                    await session.commit()
-            except IntegrityError:
+
+            session = data.get("db_session")
+            if session is not None:
+                day_key = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
                 try:
-                    async with async_session_maker() as session:
+                    # Reuse DatabaseMiddleware's transaction instead of opening
+                    # a second SQLite writer for every group message.
+                    async with session.begin_nested():
                         row = await session.scalar(select(DailyGroupMessageStat).where(
                             DailyGroupMessageStat.group_id == message.chat.id,
                             DailyGroupMessageStat.day_key == day_key,
                         ))
                         if row:
                             row.message_count = (row.message_count or 0) + 1
-                            await session.commit()
+                        else:
+                            session.add(DailyGroupMessageStat(
+                                group_id=message.chat.id, day_key=day_key, message_count=1
+                            ))
+                except IntegrityError:
+                    # Another update may have created today's row concurrently.
+                    try:
+                        row = await session.scalar(select(DailyGroupMessageStat).where(
+                            DailyGroupMessageStat.group_id == message.chat.id,
+                            DailyGroupMessageStat.day_key == day_key,
+                        ))
+                        if row:
+                            row.message_count = (row.message_count or 0) + 1
+                    except Exception:
+                        logger.warning("Daily group message count update skipped")
                 except Exception:
-                    pass
-            except Exception:
-                # Never interrupt group handlers if optional stats tracking fails.
-                pass
+                    # Optional analytics must never interrupt group handlers.
+                    logger.warning("Daily group message count update skipped")
         return await handler(event, data)
-
 
 
 def get_main_router() -> Router:
