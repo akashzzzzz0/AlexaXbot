@@ -10,7 +10,7 @@ from aiohttp import web
 from sqlalchemy import select, func, and_, or_, desc, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.models import User, Group, GroupMember, Wallet, Economy, ActionLog, SecuritySettings, Referral, AffiliateRequest, InboxMessage, GroupInboxMessage, GroupPromotionRequest, GlobalSetting
+from bot.database.models import User, Group, GroupMember, Wallet, Economy, ActionLog, SecuritySettings, Referral, AffiliateRequest, InboxMessage, GroupInboxMessage, GroupPromotionRequest, GlobalSetting\nfrom bot.database.force_join import ForceJoinSetting
 
 ADMIN_KEY = os.environ.get("ADMIN_KEY", "")
 
@@ -1366,9 +1366,280 @@ async def owner_group_action_handler(request):
             await bot.session.close()
 
 
+
+
+@require_admin
+async def owner_promotion_handler(request):
+    """Send a confirmed plain-text owner promotion to selected active groups."""
+    if request.method == "GET":
+        from bot.database.connection import async_session_maker
+        async with async_session_maker() as session:
+            groups = (await session.scalars(
+                select(Group).where(Group.is_active.is_(True)).order_by(Group.title.asc())
+            )).all()
+            return web.json_response({"groups": [_group_to_dict(g) for g in groups]},
+                                     headers={"Cache-Control": "no-store"})
+    bot = None
+    try:
+        body = await request.json()
+        message = str(body.get("message", "")).strip()
+        raw_ids = body.get("groupIds")
+        if not message or len(message) > 4000 or not isinstance(raw_ids, list) or not raw_ids:
+            return web.json_response({"error": "Message and at least one group are required."}, status=400)
+        group_ids = list(dict.fromkeys(int(x) for x in raw_ids))
+        if len(group_ids) > 200:
+            return web.json_response({"error": "Select no more than 200 groups per promotion."}, status=400)
+        from bot.database.connection import async_session_maker
+        async with async_session_maker() as session:
+            groups = (await session.scalars(
+                select(Group).where(Group.id.in_(group_ids), Group.is_active.is_(True))
+            )).all()
+            groups_by_id = {g.id: g for g in groups}
+        if len(groups_by_id) != len(group_ids):
+            return web.json_response({"error": "One or more selected groups are no longer active."}, status=409)
+        from bot.config import settings
+        from aiogram import Bot
+        from aiogram.exceptions import TelegramRetryAfter
+        import asyncio
+        bot = Bot(token=settings.BOT_TOKEN)
+        sent = failed = 0
+        failures = []
+        for group_id in group_ids:
+            group = groups_by_id[group_id]
+            try:
+                for attempt in range(5):
+                    try:
+                        await bot.send_message(chat_id=group_id, text=message)
+                        sent += 1
+                        break
+                    except TelegramRetryAfter as exc:
+                        if attempt == 4:
+                            raise
+                        await asyncio.sleep(max(1, int(exc.retry_after)) + 1)
+                await asyncio.sleep(0.05)
+            except Exception as exc:
+                failed += 1
+                failures.append({"groupId": str(group_id), "title": group.title or str(group_id),
+                                 "error": str(exc)[:160]})
+        return web.json_response({"sent": sent, "failed": failed, "total": len(group_ids),
+                                  "failures": failures[:30]}, headers={"Cache-Control": "no-store"})
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid group selection."}, status=400)
+    except Exception:
+        return web.json_response({"error": "Promotion delivery failed. Check bot connectivity and logs."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
+@require_admin
+async def owner_force_join_handler(request):
+    """Read and update per-group Force Join settings with live Telegram permission checks."""
+    from bot.database.connection import async_session_maker
+    if request.method == "GET":
+        async with async_session_maker() as session:
+            groups = (await session.scalars(
+                select(Group).where(Group.is_active.is_(True)).order_by(Group.title.asc())
+            )).all()
+            settings_by_group = {}
+            if groups:
+                rows = (await session.scalars(
+                    select(ForceJoinSetting).where(ForceJoinSetting.group_id.in_([g.id for g in groups]))
+                )).all()
+                settings_by_group = {row.group_id: row for row in rows}
+            return web.json_response({"groups": [{
+                **_group_to_dict(g),
+                "enabled": bool(settings_by_group.get(g.id) and settings_by_group[g.id].enabled),
+                "requiredChatId": settings_by_group[g.id].required_chat_id if g.id in settings_by_group else "",
+                "requiredLink": settings_by_group[g.id].required_link if g.id in settings_by_group else "",
+            } for g in groups]}, headers={"Cache-Control": "no-store"})
+    bot = None
+    try:
+        body = await request.json()
+        action = body.get("action")
+        group_id = int(body.get("groupId", 0))
+        async with async_session_maker() as session:
+            group = await session.get(Group, group_id)
+            if not group or not group.is_active:
+                return web.json_response({"error": "Active protected group not found."}, status=404)
+            setting = await session.scalar(select(ForceJoinSetting).where(ForceJoinSetting.group_id == group_id))
+            if action == "configure":
+                target = str(body.get("requiredChatId", "")).strip()
+                link = str(body.get("requiredLink", "")).strip()
+                if not ((target.startswith("@") and len(target) > 1) or
+                        (target.startswith("-") and target[1:].isdigit())):
+                    return web.json_response({"error": "Required chat must be an @username or numeric chat ID."}, status=400)
+                if not (link.startswith("https://t.me/") and len(link) <= 512):
+                    return web.json_response({"error": "Join link must be a valid https://t.me/ link."}, status=400)
+                if setting is None:
+                    setting = ForceJoinSetting(group_id=group_id, required_chat_id=target,
+                                               required_link=link, enabled=False)
+                    session.add(setting)
+                else:
+                    setting.required_chat_id = target
+                    setting.required_link = link
+                    setting.enabled = False
+                await session.commit()
+                return web.json_response({"success": True, "enabled": False,
+                                          "message": "Destination saved; Force Join remains OFF."})
+            if action != "toggle" or setting is None:
+                return web.json_response({"error": "Configure a required destination first."}, status=400)
+            enabling = not bool(setting.enabled)
+            if enabling:
+                from bot.config import settings
+                from aiogram import Bot
+                bot = Bot(token=settings.BOT_TOKEN)
+                me = await bot.get_me()
+                required_bot = await bot.get_chat_member(setting.required_chat_id, me.id)
+                required_status = str(getattr(required_bot.status, "value", required_bot.status))
+                if required_status not in {"administrator", "creator"}:
+                    return web.json_response({"error": "Alexa must be an administrator in the required channel/group."}, status=403)
+                protected_bot = await bot.get_chat_member(group_id, me.id)
+                protected_status = str(getattr(protected_bot.status, "value", protected_bot.status))
+                if protected_status not in {"administrator", "creator"}:
+                    return web.json_response({"error": "Alexa must be an administrator in the protected group."}, status=403)
+                if protected_status == "administrator" and not getattr(protected_bot, "can_delete_messages", False):
+                    return web.json_response({"error": "Alexa needs Delete Messages permission in the protected group."}, status=403)
+            setting.enabled = enabling
+            await session.commit()
+        return web.json_response({"success": True, "enabled": enabling})
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid Force Join settings."}, status=400)
+    except Exception:
+        return web.json_response({"error": "Could not update Force Join. Verify both chats and Alexa's admin permissions."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
+@require_admin
+async def owner_ban_all_preview_handler(request):
+    bot = None
+    try:
+        group_id = int(request.match_info["group_id"])
+        from bot.database.connection import async_session_maker
+        async with async_session_maker() as session:
+            group = await session.get(Group, group_id)
+            if not group or not group.is_active:
+                return web.json_response({"error": "Active group not found."}, status=404)
+            rows = (await session.execute(
+                select(GroupMember, User).join(User, User.id == GroupMember.user_id).where(
+                    GroupMember.group_id == group_id, GroupMember.is_banned.is_(False)
+                )
+            )).all()
+            title = group.title or str(group_id)
+        from bot.config import settings
+        from aiogram import Bot
+        bot = Bot(token=settings.BOT_TOKEN)
+        me = await bot.get_me()
+        bot_member = await bot.get_chat_member(group_id, me.id)
+        bot_status = str(getattr(bot_member.status, "value", bot_member.status))
+        if bot_status not in {"administrator", "creator"}:
+            return web.json_response({"error": "Alexa must be a group administrator."}, status=403)
+        if bot_status == "administrator" and not getattr(bot_member, "can_restrict_members", False):
+            return web.json_response({"error": "Alexa lacks Restrict Members permission."}, status=403)
+        eligible = skipped = failed = 0
+        for member, user in rows:
+            try:
+                if member.user_id == settings.effective_owner_id:
+                    skipped += 1
+                    continue
+                target = await bot.get_chat_member(group_id, member.user_id)
+                status = str(getattr(target.status, "value", target.status))
+                if status in {"creator", "administrator", "left", "kicked"} or target.user.is_bot:
+                    skipped += 1
+                else:
+                    eligible += 1
+            except Exception:
+                failed += 1
+        return web.json_response({"group": {"id": str(group_id), "title": title},
+                                  "tracked": len(rows), "eligible": eligible,
+                                  "skipped": skipped, "unavailable": failed},
+                                 headers={"Cache-Control": "no-store"})
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid group ID."}, status=400)
+    except Exception:
+        return web.json_response({"error": "Could not preview Ban All. Check Telegram connectivity and bot permissions."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
+@require_admin
+async def owner_ban_all_execute_handler(request):
+    bot = None
+    try:
+        group_id = int(request.match_info["group_id"])
+        body = await request.json()
+        confirmation = str(body.get("confirmGroupTitle", ""))
+        from bot.database.connection import async_session_maker
+        async with async_session_maker() as session:
+            group = await session.get(Group, group_id)
+            if not group or not group.is_active:
+                return web.json_response({"error": "Active group not found."}, status=404)
+            title = group.title or str(group_id)
+            if confirmation != title:
+                return web.json_response({"error": "Exact group-name confirmation is required."}, status=400)
+            rows = (await session.execute(
+                select(GroupMember).where(GroupMember.group_id == group_id, GroupMember.is_banned.is_(False))
+            )).scalars().all()
+        from bot.config import settings
+        from aiogram import Bot
+        bot = Bot(token=settings.BOT_TOKEN)
+        me = await bot.get_me()
+        bot_member = await bot.get_chat_member(group_id, me.id)
+        bot_status = str(getattr(bot_member.status, "value", bot_member.status))
+        if bot_status not in {"administrator", "creator"}:
+            return web.json_response({"error": "Alexa must be a group administrator."}, status=403)
+        if bot_status == "administrator" and not getattr(bot_member, "can_restrict_members", False):
+            return web.json_response({"error": "Alexa lacks Restrict Members permission."}, status=403)
+        banned = skipped = failed = 0
+        for member in rows:
+            try:
+                if member.user_id == settings.effective_owner_id:
+                    skipped += 1
+                    continue
+                target = await bot.get_chat_member(group_id, member.user_id)
+                status = str(getattr(target.status, "value", target.status))
+                if status in {"creator", "administrator", "left", "kicked"} or target.user.is_bot:
+                    skipped += 1
+                    continue
+                await bot.ban_chat_member(chat_id=group_id, user_id=member.user_id, revoke_messages=True)
+                member.is_banned = True
+                banned += 1
+            except Exception as exc:
+                failed += 1
+                import logging
+                logging.getLogger(__name__).warning("Owner Mini App Ban All member failed: %s", exc)
+        async with async_session_maker() as session:
+            for member in rows:
+                if member.is_banned:
+                    stored = await session.scalar(select(GroupMember).where(
+                        GroupMember.group_id == group_id, GroupMember.user_id == member.user_id))
+                    if stored is not None:
+                        stored.is_banned = True
+            await session.commit()
+        return web.json_response({"success": True, "groupId": str(group_id),
+                                  "banned": banned, "skipped": skipped, "failed": failed},
+                                 headers={"Cache-Control": "no-store"})
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid Ban All request."}, status=400)
+    except Exception:
+        return web.json_response({"error": "Ban All could not be completed. Check Telegram permissions and logs."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
 def setup_admin_routes(app):
     app.router.add_get('/owner', owner_app_handler)
     app.router.add_get('/owner-api/overview', owner_overview_handler)
+    app.router.add_get('/owner-api/promotion', owner_promotion_handler)
+    app.router.add_post('/owner-api/promotion', owner_promotion_handler)
+    app.router.add_get('/owner-api/force-join', owner_force_join_handler)
+    app.router.add_post('/owner-api/force-join', owner_force_join_handler)
+    app.router.add_get('/owner-api/groups/{group_id}/ban-all-preview', owner_ban_all_preview_handler)
+    app.router.add_post('/owner-api/groups/{group_id}/ban-all', owner_ban_all_execute_handler)
     app.router.add_get('/owner-api/security', owner_security_status)
     app.router.add_get('/owner-api/system-controls', owner_system_controls_handler)
     app.router.add_post('/owner-api/system-controls', owner_system_controls_update_handler)
