@@ -1035,6 +1035,87 @@ async def owner_group_permissions_handler(request):
             await bot.session.close()
 
 
+@require_admin
+async def owner_group_action_handler(request):
+    """Perform a small set of Telegram actions only after checking live bot rights."""
+    bot = None
+    try:
+        group_id = int(request.match_info["group_id"])
+        action = request.match_info["action"]
+        body = await request.json()
+        target_id = int(body.get("userId", 0) or 0)
+        message_id = int(body.get("messageId", 0) or 0)
+        seconds = min(30 * 24 * 60 * 60, max(60, int(body.get("seconds", 3600) or 3600)))
+        if action not in ("mute", "unmute", "ban", "unban", "pin", "invite"):
+            return web.json_response({"error": "Unsupported group action."}, status=400)
+        if action in ("mute", "unmute", "ban", "unban") and target_id <= 0:
+            return web.json_response({"error": "A valid target user ID is required."}, status=400)
+        if action == "pin" and message_id <= 0:
+            return web.json_response({"error": "A valid Telegram message ID is required."}, status=400)
+        async with async_session_maker() as session:
+            group = await session.get(Group, group_id)
+            if not group or not group.is_active:
+                return web.json_response({"error": "Active group not found."}, status=404)
+        from bot.config import settings
+        from aiogram import Bot
+        from aiogram.types import ChatPermissions
+        from datetime import timedelta
+        bot = Bot(token=settings.BOT_TOKEN)
+        me = await bot.get_me()
+        member = await bot.get_chat_member(chat_id=group_id, user_id=me.id)
+        status = str(getattr(member.status, "value", member.status))
+        creator = status == "creator"
+        if status not in ("administrator", "creator"):
+            return web.json_response({"error": "ALEXA must be a group administrator."}, status=403)
+        if action in ("mute", "unmute", "ban", "unban"):
+            if not creator and not getattr(member, "can_restrict_members", False):
+                return web.json_response({"error": "ALEXA lacks Restrict Members permission."}, status=403)
+            target = await bot.get_chat_member(chat_id=group_id, user_id=target_id)
+            target_status = str(getattr(target.status, "value", target.status))
+            if target_status in ("administrator", "creator"):
+                return web.json_response({"error": "Telegram does not allow this action on group administrators."}, status=409)
+            if action == "mute":
+                await bot.restrict_chat_member(
+                    chat_id=group_id, user_id=target_id,
+                    permissions=ChatPermissions(can_send_messages=False, can_send_audios=False,
+                        can_send_documents=False, can_send_photos=False, can_send_videos=False,
+                        can_send_video_notes=False, can_send_voice_notes=False,
+                        can_send_polls=False, can_send_other_messages=False,
+                        can_add_web_page_previews=False),
+                    until_date=timedelta(seconds=seconds),
+                )
+            elif action == "unmute":
+                await bot.restrict_chat_member(
+                    chat_id=group_id, user_id=target_id,
+                    permissions=ChatPermissions(can_send_messages=True, can_send_audios=True,
+                        can_send_documents=True, can_send_photos=True, can_send_videos=True,
+                        can_send_video_notes=True, can_send_voice_notes=True,
+                        can_send_polls=True, can_send_other_messages=True,
+                        can_add_web_page_previews=True),
+                )
+            elif action == "ban":
+                await bot.ban_chat_member(chat_id=group_id, user_id=target_id)
+            else:
+                await bot.unban_chat_member(chat_id=group_id, user_id=target_id, only_if_banned=True)
+        elif action == "pin":
+            if not creator and not getattr(member, "can_pin_messages", False):
+                return web.json_response({"error": "ALEXA lacks Pin Messages permission."}, status=403)
+            await bot.pin_chat_message(chat_id=group_id, message_id=message_id, disable_notification=True)
+        elif action == "invite":
+            if not creator and not getattr(member, "can_invite_users", False):
+                return web.json_response({"error": "ALEXA lacks Invite Users permission."}, status=403)
+            invite = await bot.create_chat_invite_link(chat_id=group_id, creates_join_request=False)
+            return web.json_response({"success": True, "inviteLink": invite.invite_link})
+        return web.json_response({"success": True, "action": action})
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid action parameters."}, status=400)
+    except Exception:
+        return web.json_response({"error": "Telegram rejected this action or the target is unavailable."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
 def setup_admin_routes(app):
     app.router.add_get('/owner', owner_app_handler)
     app.router.add_get('/owner-api/overview', owner_overview_handler)
@@ -1051,6 +1132,7 @@ def setup_admin_routes(app):
     app.router.add_post('/owner-api/inbox/{user_id}/reply', owner_inbox_reply_handler)
     app.router.add_get('/owner-api/groups/{group_id}/activity', owner_group_activity_handler)
     app.router.add_get('/owner-api/groups/{group_id}/permissions', owner_group_permissions_handler)
+    app.router.add_post('/owner-api/groups/{group_id}/actions/{action}', owner_group_action_handler)
     app.router.add_get('/owner-api/statistics', owner_statistics_handler)
     app.router.add_get('/owner-api/health', owner_health_handler)
     app.router.add_post('/owner-api/group-message', owner_group_message_handler)
