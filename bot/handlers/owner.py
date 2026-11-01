@@ -1970,6 +1970,14 @@ async def start_broadcast(callback: CallbackQuery, _: callable, state: FSMContex
     await callback.answer()
 
 
+async def load_maintenance_mode(session: AsyncSession) -> bool:
+    """Restore the persistent owner maintenance switch during startup."""
+    global _maintenance_mode
+    row = await session.get(GlobalSetting, "owner_maintenance_mode")
+    _maintenance_mode = bool(row and row.value == "1")
+    return _maintenance_mode
+
+
 def get_maintenance_mode() -> bool:
     return _maintenance_mode
 
