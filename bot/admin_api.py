@@ -10,7 +10,7 @@ from aiohttp import web
 from sqlalchemy import select, func, and_, or_, desc, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.models import User, Group, GroupMember, Wallet, Economy, ActionLog
+from bot.database.models import User, Group, GroupMember, Wallet, Economy, ActionLog, SecuritySettings
 
 ADMIN_KEY = os.environ.get("ADMIN_KEY", "")
 
@@ -585,9 +585,43 @@ async def owner_overview_handler(request):
 
 
 
+
+@require_admin
+async def owner_security_status(request):
+    async with async_session_maker() as session:
+        groups = (await session.scalars(select(Group).where(Group.is_active.is_(True)))).all()
+        keys = ("anti_spam", "anti_flood", "emergency_mode")
+        counts = {key: 0 for key in keys}
+        for group in groups:
+            row = await session.scalar(select(SecuritySettings).where(SecuritySettings.group_id == group.id))
+            if row:
+                for key in keys:
+                    counts[key] += int(bool(getattr(row, key, False)))
+        return web.json_response({"totalGroups": len(groups), "counts": counts})
+
+@require_admin
+async def owner_security_update(request):
+    body = await request.json()
+    key, enabled = body.get("field"), body.get("enabled")
+    if key not in {"anti_spam", "anti_flood", "emergency_mode"} or not isinstance(enabled, bool):
+        return web.json_response({"error": "Invalid setting"}, status=400)
+    async with async_session_maker() as session:
+        groups = (await session.scalars(select(Group).where(Group.is_active.is_(True)))).all()
+        for group in groups:
+            row = await session.scalar(select(SecuritySettings).where(SecuritySettings.group_id == group.id))
+            if row is None:
+                row = SecuritySettings(group_id=group.id)
+                session.add(row)
+            setattr(row, key, enabled)
+        await session.commit()
+    return web.json_response({"success": True, "updatedGroups": len(groups), "field": key, "enabled": enabled})
+
+
 def setup_admin_routes(app):
     app.router.add_get('/owner', owner_app_handler)
     app.router.add_get('/owner-api/overview', owner_overview_handler)
+    app.router.add_get('/owner-api/security', owner_security_status)
+    app.router.add_post('/owner-api/security', owner_security_update)
     # Reuse existing admin handlers behind Telegram owner-session verification.
     app.router.add_get('/owner-api/users', users_handler)
     app.router.add_post('/owner-api/users/{user_id}/ban', ban_user_handler)
