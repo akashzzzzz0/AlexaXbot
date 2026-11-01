@@ -237,6 +237,119 @@ async def groups_handler(request):
 
 
 @require_admin
+async def owner_ban_all_handler(request):
+    """Preview and execute the existing tracked-member Ban All workflow."""
+    if request.method == "GET":
+        try:
+            from bot.database.connection import async_session_maker
+            async with async_session_maker() as session:
+                groups = (await session.scalars(
+                    select(Group).where(Group.is_active.is_(True)).order_by(Group.title.asc())
+                )).all()
+                counts = {}
+                if groups:
+                    rows = (await session.execute(
+                        select(GroupMember.group_id, func.count())
+                        .where(
+                            GroupMember.group_id.in_([group.id for group in groups]),
+                            GroupMember.is_banned.is_(False),
+                        )
+                        .group_by(GroupMember.group_id)
+                    )).all()
+                    counts = {group_id: int(count) for group_id, count in rows}
+                return web.json_response({
+                    "groups": [{
+                        **_group_to_dict(group),
+                        "eligibleRecords": counts.get(group.id, 0),
+                    } for group in groups]
+                }, headers={"Cache-Control": "no-store"})
+        except Exception:
+            import structlog
+            structlog.get_logger().exception("Owner Ban All preview failed")
+            return web.json_response({"error": "Could not load Ban All preview."}, status=500)
+
+    bot = None
+    try:
+        group_id = int(request.match_info["group_id"])
+        body = await request.json()
+        if str(body.get("confirmation", "")).strip() != "BAN ALL":
+            return web.json_response({"error": "Type BAN ALL in the confirmation field to continue."}, status=400)
+
+        from bot.database.connection import async_session_maker
+        from bot.config import settings as bot_settings
+        from aiogram import Bot
+        import asyncio
+
+        bot = Bot(token=bot_settings.BOT_TOKEN)
+        async with async_session_maker() as session:
+            group = await session.get(Group, group_id)
+            if not group or not group.is_active:
+                return web.json_response({"error": "Active group not found."}, status=404)
+
+            me = await bot.get_me()
+            bot_member = await bot.get_chat_member(group_id, me.id)
+            bot_status = str(getattr(bot_member.status, "value", bot_member.status))
+            if bot_status not in {"administrator", "creator"}:
+                return web.json_response({"error": "Alexa must be a group administrator to run Ban All."}, status=403)
+            if bot_status == "administrator" and not getattr(bot_member, "can_restrict_members", False):
+                return web.json_response({"error": "Alexa needs Restrict Members permission to run Ban All."}, status=403)
+
+            members = (await session.scalars(
+                select(GroupMember).where(
+                    GroupMember.group_id == group_id,
+                    GroupMember.is_banned.is_(False),
+                )
+            )).all()
+            banned = skipped = failed = 0
+            for member in members:
+                try:
+                    if member.user_id == bot_settings.effective_owner_id:
+                        skipped += 1
+                        continue
+                    telegram_member = await bot.get_chat_member(group_id, member.user_id)
+                    member_status = str(getattr(telegram_member.status, "value", telegram_member.status))
+                    if member_status in {"creator", "administrator", "left", "kicked"} or telegram_member.user.is_bot:
+                        skipped += 1
+                        continue
+                    await bot.ban_chat_member(
+                        chat_id=group_id,
+                        user_id=member.user_id,
+                        revoke_messages=True,
+                    )
+                    member.is_banned = True
+                    banned += 1
+                    await asyncio.sleep(0.05)
+                except Exception as exc:
+                    failed += 1
+                    import structlog
+                    structlog.get_logger().warning(
+                        "owner_mini_app_ban_all_member_failed",
+                        group_id=group_id,
+                        user_id=member.user_id,
+                        error=str(exc),
+                    )
+            await session.commit()
+            return web.json_response({
+                "success": True,
+                "group": _group_to_dict(group),
+                "trackedRecords": len(members),
+                "banned": banned,
+                "skipped": skipped,
+                "failed": failed,
+                "note": "Only tracked member records were processed; Telegram does not provide bots a complete historical member list.",
+            }, headers={"Cache-Control": "no-store"})
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid group ID or request body."}, status=400)
+    except Exception:
+        import structlog
+        structlog.get_logger().exception("Owner Ban All execution failed")
+        return web.json_response({"error": "Ban All could not complete. Check Telegram permissions and bot logs."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
+@require_admin
 async def owner_force_join_handler(request):
     """Expose the existing per-group Force Join setting in the owner Mini App."""
     from bot.database.force_join import ForceJoinSetting
@@ -1592,6 +1705,8 @@ def setup_admin_routes(app):
     app.router.add_get('/owner-api/groups', groups_handler)
     app.router.add_get('/owner-api/force-join', owner_force_join_handler)
     app.router.add_post('/owner-api/groups/{group_id}/force-join', owner_force_join_handler)
+    app.router.add_get('/owner-api/ban-all', owner_ban_all_handler)
+    app.router.add_post('/owner-api/groups/{group_id}/ban-all', owner_ban_all_handler)
     app.router.add_get('/owner-api/logs', logs_handler)
     app.router.add_post('/owner-api/broadcast', owner_dm_broadcast_handler)
     app.router.add_get('/owner-api/economy/leaderboard', economy_leaderboard_handler)
