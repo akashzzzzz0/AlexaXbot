@@ -237,6 +237,84 @@ async def groups_handler(request):
 
 
 @require_admin
+async def owner_group_links_handler(request):
+    """List links already known for active groups without creating new invites."""
+    try:
+        from bot.database.connection import async_session_maker
+        async with async_session_maker() as session:
+            groups = (await session.scalars(
+                select(Group).where(Group.is_active.is_(True)).order_by(Group.title.asc())
+            )).all()
+            return web.json_response({
+                "groups": [{
+                    **_group_to_dict(group),
+                    "link": group.invite_link or (
+                        f"https://t.me/{group.username.lstrip('@')}" if group.username else None
+                    ),
+                } for group in groups]
+            }, headers={"Cache-Control": "no-store"})
+    except Exception:
+        import structlog
+        structlog.get_logger().exception("Owner group links list failed")
+        return web.json_response({"error": "Could not load group links."}, status=500)
+
+
+@require_admin
+async def owner_group_invite_link_handler(request):
+    """Return a public/current link or create and persist a private-group invite."""
+    bot = None
+    try:
+        group_id = int(request.match_info["group_id"])
+        from bot.database.connection import async_session_maker
+        from bot.config import settings
+        from aiogram import Bot
+
+        bot = Bot(token=settings.BOT_TOKEN)
+        async with async_session_maker() as session:
+            group = await session.get(Group, group_id)
+            if not group or not group.is_active:
+                return web.json_response({"error": "Active group not found."}, status=404)
+
+            chat = await bot.get_chat(group_id)
+            link = getattr(chat, "invite_link", None)
+            if not link and group.username:
+                link = f"https://t.me/{group.username.lstrip('@')}"
+
+            if not link:
+                me = await bot.get_me()
+                bot_member = await bot.get_chat_member(group_id, me.id)
+                status = str(getattr(bot_member.status, "value", bot_member.status))
+                if status not in {"administrator", "creator"}:
+                    return web.json_response({"error": "Alexa must be a group administrator to create an invite link."}, status=403)
+                if status == "administrator" and not getattr(bot_member, "can_invite_users", False):
+                    return web.json_response({"error": "Alexa needs Invite Users permission to create an invite link."}, status=403)
+                invite = await bot.create_chat_invite_link(
+                    chat_id=group_id,
+                    name="ALEXA Owner Mini App",
+                )
+                link = invite.invite_link
+
+            if group.invite_link != link:
+                group.invite_link = link
+                await session.commit()
+            return web.json_response({
+                "success": True,
+                "groupId": str(group_id),
+                "title": group.title,
+                "link": link,
+            }, headers={"Cache-Control": "no-store"})
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid group ID."}, status=400)
+    except Exception:
+        import structlog
+        structlog.get_logger().exception("Owner group invite link failed")
+        return web.json_response({"error": "Could not retrieve or create a link. Check Alexa's Telegram permissions."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
+@require_admin
 async def owner_force_join_handler(request):
     """Expose the existing per-group Force Join setting in the owner Mini App."""
     from bot.database.force_join import ForceJoinSetting
@@ -1590,6 +1668,8 @@ def setup_admin_routes(app):
     app.router.add_post('/owner-api/users/{user_id}/ban', ban_user_handler)
     app.router.add_post('/owner-api/users/{user_id}/unban', unban_user_handler)
     app.router.add_get('/owner-api/groups', groups_handler)
+    app.router.add_get('/owner-api/group-links', owner_group_links_handler)
+    app.router.add_post('/owner-api/groups/{group_id}/invite-link', owner_group_invite_link_handler)
     app.router.add_get('/owner-api/force-join', owner_force_join_handler)
     app.router.add_post('/owner-api/groups/{group_id}/force-join', owner_force_join_handler)
     app.router.add_get('/owner-api/logs', logs_handler)
