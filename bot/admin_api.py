@@ -1710,6 +1710,43 @@ async def owner_group_purge_handler(request):
         return web.json_response({"error": "Telegram could not complete the purge. Check permissions and message age."}, status=502)
     finally:
         if bot is not None: await bot.session.close()
+@require_admin
+async def owner_group_leave_handler(request):
+    """Leave one selected active group, then mark it inactive in the registry."""
+    bot = None
+    try:
+        group_id = int(request.match_info["group_id"])
+        from bot.database.connection import async_session_maker
+        from bot.config import settings
+        from aiogram import Bot
+        async with async_session_maker() as session:
+            group = await session.get(Group, group_id)
+            if not group or not group.is_active:
+                return web.json_response({"error": "Active group not found."}, status=404)
+            group_title = group.title or str(group_id)
+        bot = Bot(token=settings.BOT_TOKEN)
+        await bot.leave_chat(chat_id=group_id)
+        try:
+            async with async_session_maker() as session:
+                group = await session.get(Group, group_id)
+                if group:
+                    group.is_active = False
+                    await session.commit()
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("Alexa left group but registry update failed", extra={"group_id": group_id})
+            return web.json_response({"success": False, "left": True, "groupId": str(group_id), "groupTitle": group_title, "warning": "Alexa left Telegram, but the group registry could not be updated."}, status=500)
+        return web.json_response({"success": True, "left": True, "groupId": str(group_id), "groupTitle": group_title})
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid group ID."}, status=400)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Owner requested Alexa leave group failed")
+        return web.json_response({"error": "Telegram could not remove Alexa from this group."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
 def setup_admin_routes(app):
     app.router.add_get('/owner', owner_app_handler)
     app.router.add_get('/owner-api/overview', owner_overview_handler)
@@ -1737,6 +1774,7 @@ def setup_admin_routes(app):
     app.router.add_get('/owner-api/groups/{group_id}/permissions', owner_group_permissions_handler)
     app.router.add_post('/owner-api/groups/{group_id}/actions/{action}', owner_group_action_handler)
     app.router.add_post('/owner-api/groups/{group_id}/purge', owner_group_purge_handler)
+    app.router.add_post('/owner-api/groups/{group_id}/leave', owner_group_leave_handler)
     app.router.add_get('/owner-api/statistics', owner_statistics_handler)
     app.router.add_get('/owner-api/health', owner_health_handler)
     app.router.add_post('/owner-api/group-message', owner_group_message_handler)
