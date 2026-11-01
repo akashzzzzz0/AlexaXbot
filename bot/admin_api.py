@@ -674,6 +674,43 @@ async def owner_affiliate_request_update(request):
 
 
 @require_admin
+async def owner_system_controls_handler(request):
+    """Read and update the existing persistent owner AI and maintenance switches."""
+    async with async_session_maker() as session:
+        ai_row = await session.get(GlobalSetting, "owner_ai_enabled")
+        maintenance_row = await session.get(GlobalSetting, "owner_maintenance_mode")
+        return web.json_response({
+            "aiEnabled": bool(ai_row and ai_row.value == "1"),
+            "maintenanceEnabled": bool(maintenance_row and maintenance_row.value == "1"),
+        }, headers={"Cache-Control": "no-store"})
+
+
+@require_admin
+async def owner_system_controls_update_handler(request):
+    try:
+        body = await request.json()
+        field = body.get("field")
+        enabled = body.get("enabled")
+        if field not in {"ai", "maintenance"} or not isinstance(enabled, bool):
+            return web.json_response({"error": "Invalid system control."}, status=400)
+        key = "owner_ai_enabled" if field == "ai" else "owner_maintenance_mode"
+        async with async_session_maker() as session:
+            row = await session.get(GlobalSetting, key)
+            if row is None:
+                session.add(GlobalSetting(key=key, value="1" if enabled else "0"))
+            else:
+                row.value = "1" if enabled else "0"
+            await session.commit()
+        if field == "maintenance":
+            # Keep the running bot's existing in-memory gate in sync with its DB setting.
+            from bot.handlers import owner as owner_handler
+            owner_handler._maintenance_mode = enabled
+        return web.json_response({"success": True, "field": field, "enabled": enabled})
+    except Exception:
+        return web.json_response({"error": "Could not update system control."}, status=500)
+
+
+@require_admin
 async def owner_promotion_requests_handler(request):
     async with async_session_maker() as session:
         rows = (await session.scalars(
@@ -1320,6 +1357,8 @@ def setup_admin_routes(app):
     app.router.add_get('/owner', owner_app_handler)
     app.router.add_get('/owner-api/overview', owner_overview_handler)
     app.router.add_get('/owner-api/security', owner_security_status)
+    app.router.add_get('/owner-api/system-controls', owner_system_controls_handler)
+    app.router.add_post('/owner-api/system-controls', owner_system_controls_update_handler)
     app.router.add_get('/owner-api/referrals', owner_referrals_handler)
     app.router.add_post('/owner-api/referrals/requests/{request_id}', owner_affiliate_request_update)
     app.router.add_get('/owner-api/promotion-requests', owner_promotion_requests_handler)
