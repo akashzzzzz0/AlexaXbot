@@ -5,7 +5,7 @@ import hashlib
 import time
 from pathlib import Path
 from urllib.parse import parse_qsl
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from aiohttp import web
 from sqlalchemy import select, func, and_, or_, desc, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -564,7 +564,8 @@ async def owner_overview_handler(request):
     if not _verify_owner_telegram_init_data(init_data):
         return web.json_response({"error": "Unauthorized"}, status=401, headers={"Cache-Control": "no-store"})
     try:
-        today = datetime.utcnow() - timedelta(hours=24)
+        # User.last_seen is timezone-aware in the model; compare using aware UTC.
+        today = datetime.now(timezone.utc) - timedelta(hours=24)
         async with async_session_maker() as session:
             total_users = await session.scalar(select(func.count()).select_from(User))
             active_today = await session.scalar(
@@ -572,7 +573,7 @@ async def owner_overview_handler(request):
             )
             total_groups = await session.scalar(select(func.count()).select_from(Group))
             banned_users = await session.scalar(
-                select(func.count()).select_from(User).where(User.is_banned == True)
+                select(func.count()).select_from(User).where(User.is_banned.is_(True))
             )
         return web.json_response({
             "totalUsers": int(total_users or 0),
@@ -581,6 +582,8 @@ async def owner_overview_handler(request):
             "bannedUsers": int(banned_users or 0),
         }, headers={"Cache-Control": "no-store"})
     except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Owner Mini App dashboard query failed")
         return web.json_response({"error": "Dashboard data is temporarily unavailable."}, status=503)
 
 
