@@ -243,6 +243,7 @@ async def owner_force_join_handler(request):
 
     if request.method == "GET":
         try:
+            from bot.database.connection import async_session_maker
             async with async_session_maker() as session:
                 groups = (await session.scalars(
                     select(Group).where(Group.is_active.is_(True)).order_by(Group.title.asc())
