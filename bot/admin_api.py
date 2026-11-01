@@ -848,6 +848,47 @@ async def owner_group_activity_handler(request):
     }, headers={"Cache-Control": "no-store"})
 
 
+
+@require_admin
+async def owner_group_permissions_handler(request):
+    """Return the bot's current Telegram administrator permissions for one registered group."""
+    bot = None
+    try:
+        group_id = int(request.match_info["group_id"])
+        async with async_session_maker() as session:
+            group = await session.get(Group, group_id)
+            if not group or not group.is_active:
+                return web.json_response({"error": "Active group not found."}, status=404)
+        from bot.config import settings
+        from aiogram import Bot
+        bot = Bot(token=settings.BOT_TOKEN)
+        me = await bot.get_me()
+        member = await bot.get_chat_member(chat_id=group_id, user_id=me.id)
+        status = str(getattr(member.status, "value", member.status))
+        creator = status == "creator"
+        admin = status == "administrator"
+        perms = {
+            "isAdministrator": admin or creator,
+            "canDeleteMessages": creator or bool(getattr(member, "can_delete_messages", False)),
+            "canRestrictMembers": creator or bool(getattr(member, "can_restrict_members", False)),
+            "canInviteUsers": creator or bool(getattr(member, "can_invite_users", False)),
+            "canPinMessages": creator or bool(getattr(member, "can_pin_messages", False)),
+            "canPromoteMembers": creator or bool(getattr(member, "can_promote_members", False)),
+            "canChangeInfo": creator or bool(getattr(member, "can_change_info", False)),
+            "canManageChat": creator or admin,
+            "status": status,
+        }
+        return web.json_response({"groupId": str(group_id), "permissions": perms},
+                                 headers={"Cache-Control": "no-store"})
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid group ID."}, status=400)
+    except Exception:
+        return web.json_response({"error": "Could not read Telegram permissions. Check bot membership and connectivity."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
 def setup_admin_routes(app):
     app.router.add_get('/owner', owner_app_handler)
     app.router.add_get('/owner-api/overview', owner_overview_handler)
@@ -859,6 +900,7 @@ def setup_admin_routes(app):
     app.router.add_get('/owner-api/inbox', owner_inbox_handler)
     app.router.add_post('/owner-api/inbox/{user_id}/reply', owner_inbox_reply_handler)
     app.router.add_get('/owner-api/groups/{group_id}/activity', owner_group_activity_handler)
+    app.router.add_get('/owner-api/groups/{group_id}/permissions', owner_group_permissions_handler)
     app.router.add_get('/owner-api/statistics', owner_statistics_handler)
     app.router.add_get('/owner-api/health', owner_health_handler)
     app.router.add_post('/owner-api/group-message', owner_group_message_handler)
