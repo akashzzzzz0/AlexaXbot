@@ -3,6 +3,111 @@
 <style>
 :root{color-scheme:dark;--bg:#090817;--panel:#191731dd;--line:#ae99ff33;--muted:#aaa6c7;--white:#f7f4ff;--purple:#a78bfa;--cyan:#67e8f9;--gold:#f7cf78}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 10% 0%,#35205f 0,transparent 38%),radial-gradient(ellipse at 100% 20%,#123d59 0,transparent 34%),var(--bg);color:var(--white);font:14px/1.45 system-ui,sans-serif;min-height:100vh;padding:15px;overflow-x:hidden}.wrap{max-width:850px;margin:auto}.top,.toolbar,.row{display:flex;align-items:center;justify-content:space-between;gap:9px}.top{margin:5px 2px 18px}.brand{display:flex;gap:10px;align-items:center}.logo{width:43px;height:43px;border-radius:14px;display:grid;place-items:center;font-size:23px;background:linear-gradient(135deg,#8b5cf6,#2563eb 65%,#22d3ee);box-shadow:0 0 28px #8b5cf655}.brand b{letter-spacing:2px}.brand small{display:block;color:var(--muted);font-size:10px;letter-spacing:2px}.status,.pill{border:1px solid #4ade8045;background:#163c2c88;color:#86efac;border-radius:30px;padding:6px 10px;font-size:10px}.hero,.panel,.stat,.tile{border:1px solid var(--line);background:var(--panel);border-radius:18px;padding:16px;box-shadow:0 8px 28px #0003}.hero{padding:22px;background:linear-gradient(125deg,#7048bf44,#18254c88 55%,#0f738033)}.eyebrow{color:var(--gold);font-size:10px;letter-spacing:2px;font-weight:800}.hero h1{font-size:27px;line-height:1.1;margin:8px 0}.muted,small{color:var(--muted)}.section{display:flex;justify-content:space-between;align-items:center;margin:22px 3px 10px}.section h2{font-size:12px;letter-spacing:1.4px;margin:0}.stats,.modules{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.stat strong{display:block;font-size:24px;margin:5px 0}.tile{display:flex;align-items:center;gap:11px;cursor:pointer;text-align:left;color:inherit;width:100%;min-height:78px}.tile:active,button:active{transform:scale(.98)}.tile .ico{font-size:23px}.tile b{display:block}.tile small{font-size:10px}.toolbar{margin:14px 0}.toolbar button,button,.btn{border:1px solid var(--line);background:#282344;color:var(--white);border-radius:12px;padding:10px 12px;font:inherit;cursor:pointer}.toolbar button:disabled{opacity:.35}.primary{background:linear-gradient(110deg,#7048bf,#155e75);border:0}.danger{background:#6b2638}.field{width:100%;padding:12px;border-radius:11px;background:#100e22;color:white;border:1px solid var(--line);margin:6px 0 10px;font:inherit}.item{padding:13px 0;border-bottom:1px solid var(--line)}.item:last-child{border:0}.item b{display:block}.item .meta{font-size:11px;color:var(--muted);margin:3px 0}.actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}.actions button{padding:7px 10px;font-size:12px}.error,.notice{display:none;padding:12px;border-radius:12px;margin:12px 0;background:#7f1d1d44;border:1px solid #fb718555;color:#fecaca}.notice{background:#164e6333;border-color:#67e8f944;color:#cffafe}.hidden{display:none!important}.foot{text-align:center;color:#77738f;font-size:10px;margin:22px 0}.searchbar{display:flex;gap:7px}.searchbar input{flex:1;min-width:0}.bottomnav{position:sticky;bottom:8px;z-index:20;display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin:18px 0 8px;padding:8px;border:1px solid #ae99ff44;border-radius:18px;background:#100e22ee;backdrop-filter:blur(16px);box-shadow:0 8px 30px #0008}.bottomnav button{padding:10px 4px;border:0;background:transparent;color:#aaa6c7;font-size:11px}.bottomnav button.active{color:#fff;background:linear-gradient(120deg,#7048bf88,#155e7588);box-shadow:inset 0 0 0 1px #b69cff55}.avatar{width:42px;height:42px;border-radius:50%;display:inline-grid;place-items:center;background:linear-gradient(135deg,#8b5cf6,#155e75);font-weight:800;color:white;flex:none}.chatrow{display:flex;align-items:center;gap:11px;padding:12px 4px;border-bottom:1px solid var(--line)}.chatrow .chatmain{min-width:0;flex:1}.chatrow .chatmain b{display:block}.chatrow .chatmain small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.perm{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}@media(min-width:620px){body{padding:25px}.stats{grid-template-columns:repeat(4,1fr)}.modules{grid-template-columns:repeat(3,1fr)}}
+
+/* ALEXA NEON CYBER UI — presentation-only layer; module logic and API behavior stay unchanged */
+:root{
+  color-scheme:dark;
+  --bg:#050914;--panel:#0b1425ee;--line:#00e5ff55;--muted:#91a8c4;
+  --white:#eafcff;--purple:#a855f7;--cyan:#00e5ff;--gold:#f5d76e;
+}
+html{background:var(--bg);scroll-behavior:smooth}
+body{
+  position:relative;isolation:isolate;padding:16px 13px 24px;
+  background:
+    linear-gradient(#00e5ff08 1px,transparent 1px),
+    linear-gradient(90deg,#00e5ff08 1px,transparent 1px),
+    radial-gradient(ellipse at 8% 0%,#172d60 0,transparent 38%),
+    radial-gradient(ellipse at 100% 18%,#073b4b 0,transparent 34%),var(--bg);
+  background-size:32px 32px,32px 32px,auto,auto,auto;
+  color:var(--white);font-family:Inter,ui-sans-serif,system-ui,sans-serif;
+}
+body:before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;background:linear-gradient(180deg,transparent 0%,#00e5ff04 50%,transparent 100%);opacity:.7}
+.wrap{max-width:900px}
+.top{margin:4px 2px 17px}
+.logo{
+  width:46px;height:46px;border-radius:14px;font-size:24px;
+  background:linear-gradient(140deg,#00e5ff,#2563eb 48%,#a855f7);
+  border:1px solid #8af5ff99;box-shadow:0 0 12px #00e5ff77,0 0 30px #7c3aed55;
+}
+.brand b{font-size:15px;letter-spacing:3px;text-shadow:0 0 14px #00e5ff88}
+.brand small{color:#72ddec;font-size:9px;letter-spacing:2.3px}
+.status,.pill{
+  border:1px solid #00e5ff88;background:#042a37cc;color:#7df4ff;
+  border-radius:8px;padding:7px 10px;font-size:9px;font-weight:800;letter-spacing:1px;
+  box-shadow:inset 0 0 12px #00e5ff12,0 0 14px #00e5ff18;
+}
+.hero,.panel,.stat,.tile{
+  border:1px solid #00d9ff42;background:linear-gradient(145deg,#0c1b30f2,#0a1020f5);
+  border-radius:15px;box-shadow:0 10px 30px #0008,inset 0 1px #a5f5ff0b;
+}
+.hero{
+  position:relative;overflow:hidden;padding:22px;
+  background:linear-gradient(112deg,#102a48ed,#11152ff2 58%,#17204aee);
+  border-color:#00e5ff77;box-shadow:0 0 26px #00c8ff15,inset 0 0 30px #00d9ff0a;
+}
+.hero:after{content:"";position:absolute;right:-38px;top:-70px;width:190px;height:190px;border:1px solid #00e5ff44;border-radius:50%;box-shadow:0 0 0 18px #00e5ff08,0 0 0 38px #a855f708;pointer-events:none}
+.eyebrow{color:#69f4ff;font-size:9px;letter-spacing:2.5px}
+.hero h1{font-size:clamp(23px,5vw,31px);letter-spacing:.2px;text-shadow:0 0 18px #00d9ff35}
+.muted,small{color:var(--muted)}
+.section{margin:21px 3px 10px}
+.section h2{color:#76efff;font-size:10px;letter-spacing:2px}
+.section>span{font-size:10px}
+.stats,.modules{gap:10px}
+.stat{position:relative;min-height:104px;padding:14px;border-color:#1b7b9a88}
+.stat:before{content:"";display:block;width:22px;height:2px;background:var(--cyan);box-shadow:0 0 10px var(--cyan);margin-bottom:10px}
+.stat strong{font-size:25px;color:#e8fdff;text-shadow:0 0 14px #00d9ff55}
+.stat small{font-size:10px;letter-spacing:.2px}
+.tile{
+  min-height:83px;padding:14px;border-color:#245b83;
+  transition:border-color .18s,box-shadow .18s,transform .18s;
+}
+.tile:hover,.tile:focus-visible{border-color:#00e5ff;box-shadow:0 0 18px #00d9ff22,inset 0 0 18px #00d9ff0b;outline:none}
+.tile .ico{width:38px;height:38px;display:grid;place-items:center;flex:none;border-radius:11px;background:#062a3b;border:1px solid #00d9ff55;filter:drop-shadow(0 0 7px #00d9ff35)}
+.tile b{font-size:12px;color:#e9fbff;letter-spacing:.2px}
+.tile small{display:block;margin-top:3px;font-size:10px;line-height:1.35}
+.toolbar{gap:7px;margin:13px 0}
+.toolbar button,button,.btn{
+  border:1px solid #23627d;background:#0b2032;color:#dffaff;
+  border-radius:9px;padding:10px 12px;font:inherit;cursor:pointer;
+  transition:background .15s,border-color .15s,box-shadow .15s;
+}
+.toolbar button:hover,button:hover,.btn:hover{border-color:#00e5ff;box-shadow:0 0 12px #00d9ff20}
+.toolbar button:disabled{opacity:.32}
+.primary{background:linear-gradient(110deg,#075c83,#493080);border:1px solid #00e5ff99;color:#fff;box-shadow:0 0 14px #00c8ff20}
+.danger{background:#481d36;border:1px solid #fb718577;color:#ffd8e5}
+.field{
+  background:#050d1b;color:#eafcff;border:1px solid #1b6580;border-radius:9px;
+  outline:none;box-shadow:inset 0 2px 12px #0006;
+}
+.field:focus{border-color:#00e5ff;box-shadow:0 0 0 2px #00e5ff20,0 0 14px #00e5ff18}
+.item{border-bottom:1px solid #1b526a;padding:14px 0}
+.item b{color:#e9fbff}
+.item .meta{color:#8daac3}
+.actions{gap:8px}
+.actions button{border-radius:8px}
+.error,.notice{border-radius:9px}
+.error{background:#45182a;border:1px solid #fb718577;color:#ffd5df}
+.notice{background:#063344;border:1px solid #00e5ff66;color:#b9f8ff}
+.bottomnav{
+  bottom:8px;padding:7px;gap:5px;margin:16px 0 9px;
+  border:1px solid #00d9ff66;border-radius:13px;background:#050d1bf2;
+  box-shadow:0 8px 28px #000a,0 0 18px #00d9ff16;backdrop-filter:blur(18px);
+}
+.bottomnav button{border:1px solid transparent;border-radius:9px;padding:9px 3px;color:#8ba8bf;font-size:10px}
+.bottomnav button.active{color:#eaffff;background:linear-gradient(120deg,#07516b99,#40216c99);border-color:#00d9ff66;box-shadow:inset 0 0 15px #00d9ff12,0 0 12px #00d9ff16}
+.avatar{background:linear-gradient(135deg,#00a6c8,#5132a3);border:1px solid #78f4ff88;box-shadow:0 0 12px #00d9ff33}
+.chatrow{border-bottom:1px solid #1b526a}
+.perm{border-bottom:1px solid #1b526a}
+.foot{color:#5e829d;letter-spacing:1.1px;font-size:9px}
+@media(max-width:420px){
+  body{padding:12px 10px 20px}
+  .hero{padding:18px}
+  .toolbar button{padding:9px 8px;font-size:11px}
+  .tile{padding:11px;gap:9px;min-height:78px}
+  .tile .ico{width:34px;height:34px;font-size:20px}
+}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;transition:none!important}}
+
 </style></head><body><main class="wrap">
 <header class="top"><div class="brand"><div class="logo">✦</div><div><b>ALEXA</b><small>VIP OWNER CONSOLE</small></div></div><div class="status" id="status">● VERIFYING</div></header>
 <section class="hero"><div class="eyebrow">CONTROL • COMMAND • PROTECT</div><h1 id="heading">Welcome back, Owner.</h1><p class="muted" id="subheading">Private command center for the Alexa network.</p></section>
@@ -41,7 +146,7 @@ const modules=[
 {id:'userlist',icon:'🧑‍🤝‍🧑',name:'Owner User List',desc:'Existing Telegram user-list workflow',kind:'api'},
 {id:'groupactivity',icon:'🛰️',name:'Group Activity Center',desc:'Group activity, links and permissions',kind:'api'}
 ];
-let stack=['home'], pageNo=1, searchText='', lastPage='home', overview=null;
+let stack=['home'], pageNo=1, searchText='', lastPage='home', overview=null, inboxContacts={};
 function showError(msg){$('error').textContent=msg;$('error').style.display='block'}
 function clearError(){$('error').style.display='none'}
 function note(msg){$('notice').textContent=msg;$('notice').style.display='block'}
@@ -108,8 +213,8 @@ async function loadReferrals(){try{const d=await api('/owner-api/referrals');$('
 async function reviewAffiliate(id,status){if(!confirm(status.toUpperCase()+' affiliate request #'+id+'?'))return;try{await api('/owner-api/referrals/requests/'+id,{method:'POST',body:JSON.stringify({status})});note('Request '+status+'.');loadReferrals()}catch(e){showError(e.message)}}
 async function loadPromotionRequests(){try{const d=await api('/owner-api/promotion-requests');$('promotionRows').innerHTML=(d.requests||[]).map(x=>'<div class="item"><b>'+esc(x.title)+'</b><div class="meta">Request #'+x.id+' · '+esc(x.status)+' · User '+esc(x.userId)+'</div><p><a href="'+esc(x.link)+'" target="_blank" rel="noopener">Open group link</a></p>'+(x.status==='pending'?'<div class="actions"><button class="primary" data-promo="'+x.id+'" data-status="approved">Approve</button><button class="danger" data-promo="'+x.id+'" data-status="rejected">Reject</button></div>':'')+'</div>').join('')||'<p>No promotion requests.</p>';document.querySelectorAll('[data-promo]').forEach(b=>b.onclick=()=>reviewPromotion(b.dataset.promo,b.dataset.status))}catch(e){showError(e.message)}}
 async function reviewPromotion(id,status){if(!confirm(status.toUpperCase()+' promotion request #'+id+'?'))return;try{await api('/owner-api/promotion-requests/'+id,{method:'POST',body:JSON.stringify({status})});note('Promotion request '+status+'.');loadPromotionRequests()}catch(e){showError(e.message)}}
-async function loadInbox(){try{const d=await api('/owner-api/inbox');$('inboxRows').innerHTML=(d.conversations||[]).map(x=>'<div class="item"><div class="row"><img data-secure-src="/owner-api/avatar/'+esc(x.userId)+'" alt="Profile photo" style="display:none;width:38px;height:38px;border-radius:50%;object-fit:cover"><b>'+esc(x.name)+(x.username?' @'+esc(x.username):'')+'</b></div><div class="meta">User '+esc(x.userId)+' · Unread '+x.unread+' · '+esc(x.createdAt||'')+'</div><p>'+esc(x.preview)+'</p><button data-open-inbox="'+esc(x.userId)+'">Open chat history</button><textarea class="field" rows="2" maxlength="4000" id="reply-'+esc(x.userId)+'" placeholder="Write a private reply…"></textarea><div class="actions"><button class="primary" data-reply="'+esc(x.userId)+'">Send reply</button></div></div>').join('')||'<p>No user messages yet.</p>';loadSecureMedia();document.querySelectorAll('[data-reply]').forEach(b=>b.onclick=()=>sendInboxReply(b.dataset.reply));document.querySelectorAll('[data-open-inbox]').forEach(b=>b.onclick=()=>openInboxChat(b.dataset.openInbox))}catch(e){showError(e.message)}}
-async function openInboxChat(id){try{const d=await api('/owner-api/inbox/'+id+'/messages?limit=50');$('inboxRows').innerHTML='<button id="inboxBack">← Conversations</button><h3>Private chat</h3><div class="item"><img data-secure-src="/owner-api/avatar/'+esc(id)+'" alt="Telegram profile photo" style="display:none;width:48px;height:48px;border-radius:50%;object-fit:cover"><b>Telegram user · '+esc(id)+'</b></div>'+((d.messages||[]).map(m=>'<div class="item" style="border-left:3px solid '+(m.direction==='outgoing'?'#a78bfa':'#64748b')+'"><div class="meta">'+(m.direction==='outgoing'?'ALEXA → USER':'USER → ALEXA')+' · '+esc(m.createdAt||'')+' · '+esc(m.contentType)+'</div><p>'+esc(m.text)+'</p>'+mediaMarkup(m)+'<button class="danger" data-delete-inbox="'+esc(m.id)+'">Delete Telegram message</button></div>').join('')||'<p>No stored messages in this conversation.</p>')+'<textarea class="field" rows="3" maxlength="4000" id="chatReply" placeholder="Write a reply…"></textarea><button class="primary" id="chatSend">Send reply</button>';loadSecureMedia();document.getElementById('inboxBack').onclick=loadInbox;document.getElementById('chatSend').onclick=async()=>{const f=$('chatReply'),message=f.value.trim();if(!message)return showError('Write a reply first.');try{await api('/owner-api/inbox/'+id+'/reply',{method:'POST',body:JSON.stringify({message})});f.value='';note('Reply sent.');await openInboxChat(id)}catch(e){showError(e.message)}};document.querySelectorAll('[data-delete-inbox]').forEach(b=>b.onclick=async()=>{if(!confirm('Delete this message in Telegram?'))return;try{await api('/owner-api/inbox/'+id+'/messages/'+b.dataset.deleteInbox+'/delete',{method:'POST'});note('Message deleted.');openInboxChat(id)}catch(e){showError(e.message)}})}catch(e){showError(e.message)}}
+async function loadInbox(){try{const d=await api('/owner-api/inbox');inboxContacts=Object.fromEntries((d.conversations||[]).map(x=>[String(x.userId),x]));$('inboxRows').innerHTML=(d.conversations||[]).map(x=>'<div class="item"><div class="row"><img data-secure-src="/owner-api/avatar/'+esc(x.userId)+'" alt="Profile photo" style="display:none;width:38px;height:38px;border-radius:50%;object-fit:cover"><b>'+esc(x.name)+(x.username?' @'+esc(x.username):'')+'</b></div><div class="meta">User '+esc(x.userId)+' · Unread '+x.unread+' · '+esc(x.createdAt||'')+'</div><p>'+esc(x.preview)+'</p><button data-open-inbox="'+esc(x.userId)+'">Open chat history</button><textarea class="field" rows="2" maxlength="4000" id="reply-'+esc(x.userId)+'" placeholder="Write a private reply…"></textarea><div class="actions"><button class="primary" data-reply="'+esc(x.userId)+'">Send reply</button></div></div>').join('')||'<p>No user messages yet.</p>';loadSecureMedia();document.querySelectorAll('[data-reply]').forEach(b=>b.onclick=()=>sendInboxReply(b.dataset.reply));document.querySelectorAll('[data-open-inbox]').forEach(b=>b.onclick=()=>openInboxChat(b.dataset.openInbox))}catch(e){showError(e.message)}}
+async function openInboxChat(id){try{const contact=inboxContacts[String(id)]||{};const d=await api('/owner-api/inbox/'+id+'/messages?limit=50');$('inboxRows').innerHTML='<button id="inboxBack">← Conversations</button><h3>Private chat</h3><div class="item"><div class="row"><img data-secure-src="/owner-api/avatar/'+esc(id)+'" alt="Telegram profile photo" style="display:none;width:48px;height:48px;border-radius:50%;object-fit:cover"><div><b>'+esc(contact.name||'Telegram user')+'</b><div class="meta">'+(contact.username?'@'+esc(contact.username)+' · ':'')+'ID '+esc(id)+'</div></div></div></div>'+((d.messages||[]).map(m=>'<div class="item" style="border-left:3px solid '+(m.direction==='outgoing'?'#a78bfa':'#64748b')+'"><div class="meta">'+(m.direction==='outgoing'?'ALEXA → USER':'USER → ALEXA')+' · '+esc(m.createdAt||'')+' · '+esc(m.contentType)+'</div><p>'+esc(m.text)+'</p>'+mediaMarkup(m)+'<button class="danger" data-delete-inbox="'+esc(m.id)+'">Delete Telegram message</button></div>').join('')||'<p>No stored messages in this conversation.</p>')+'<textarea class="field" rows="3" maxlength="4000" id="chatReply" placeholder="Write a reply…"></textarea><button class="primary" id="chatSend">Send reply</button>';loadSecureMedia();document.getElementById('inboxBack').onclick=loadInbox;document.getElementById('chatSend').onclick=async()=>{const f=$('chatReply'),message=f.value.trim();if(!message)return showError('Write a reply first.');try{await api('/owner-api/inbox/'+id+'/reply',{method:'POST',body:JSON.stringify({message})});f.value='';note('Reply sent.');await openInboxChat(id)}catch(e){showError(e.message)}};document.querySelectorAll('[data-delete-inbox]').forEach(b=>b.onclick=async()=>{if(!confirm('Delete this message in Telegram?'))return;try{await api('/owner-api/inbox/'+id+'/messages/'+b.dataset.deleteInbox+'/delete',{method:'POST'});note('Message deleted.');openInboxChat(id)}catch(e){showError(e.message)}})}catch(e){showError(e.message)}}
 async function loadStatistics(){try{const d=await api('/owner-api/statistics');$('statisticsRows').innerHTML=Object.entries(d).map(([k,v])=>'<div class="item"><b>'+esc(k.replace(/[A-Z]/g,x=>' '+x.toLowerCase()))+'</b><div class="meta">'+Number(v).toLocaleString()+'</div></div>').join('')}catch(e){showError(e.message)}}
 
 async function loadSecurity(){const box=$('securityControls');if(!box)return;try{const d=await api('/owner-api/security');const names={anti_spam:'Anti-Spam',anti_flood:'Anti-Flood',emergency_mode:'Emergency Lockdown'};box.innerHTML='<p><b>Active groups:</b> '+d.totalGroups+'</p>'+Object.entries(names).map(([key,label])=>{const n=d.counts[key]||0;const all=d.totalGroups>0&&n===d.totalGroups;return '<div class="item"><b>'+label+'</b><div class="meta">Enabled in '+n+' / '+d.totalGroups+' groups</div><div class="actions"><button data-security="'+key+'" data-value="'+(!all)+'" class="'+(all?'danger':'primary')+'">Turn '+(all?'OFF':'ON')+' everywhere</button></div></div>'}).join('');box.querySelectorAll('[data-security]').forEach(b=>b.onclick=()=>updateSecurity(b.dataset.security,b.dataset.value==='true'))}catch(e){showError(e.message);box.innerHTML=''}}
