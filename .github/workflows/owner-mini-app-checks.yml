@@ -2,7 +2,7 @@ name: Owner Mini App checks
 
 on:
   push:
-    branches: [main, feature/vip-owner-mini-app]
+    branches: [main, feature/vip-owner-mini-app, fix/sqlite-contention-owner-miniapp]
   pull_request:
     branches: [main]
 
