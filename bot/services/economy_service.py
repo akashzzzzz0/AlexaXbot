@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, or_
+from sqlalchemy import select, update, or_, func
 from sqlalchemy.exc import IntegrityError
 from bot.database.models import Wallet, Transaction, Referral
 from bot.services.user_service import get_or_create_wallet
@@ -27,17 +27,24 @@ async def add_coins(
     wallet = await get_or_create_wallet(session, user_id)
     if amount <= 0:
         return wallet.balance or 0
-    wallet.balance = (wallet.balance or 0) + amount
-    wallet.total_earned = (wallet.total_earned or 0) + amount
-    tx = Transaction(
+    await session.execute(
+        update(Wallet)
+        .where(Wallet.id == wallet.id)
+        .values(
+            balance=func.coalesce(Wallet.balance, 0) + amount,
+            total_earned=func.coalesce(Wallet.total_earned, 0) + amount,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    await session.refresh(wallet)
+    session.add(Transaction(
         wallet_id=wallet.id,
         amount=amount,
         type=tx_type,
         description=description,
         reference_id=reference_id,
-    )
-    session.add(tx)
-    return wallet.balance
+    ))
+    return wallet.balance or 0
 
 
 async def deduct_coins(
@@ -48,36 +55,65 @@ async def deduct_coins(
     description: str = "",
 ) -> Tuple[bool, int]:
     wallet = await get_or_create_wallet(session, user_id)
-    if amount <= 0 or (wallet.balance or 0) < amount:
+    if amount <= 0:
         return False, wallet.balance or 0
-    wallet.balance -= amount
-    wallet.total_spent = (wallet.total_spent or 0) + amount
-    tx = Transaction(
+    result = await session.execute(
+        update(Wallet)
+        .where(Wallet.id == wallet.id, func.coalesce(Wallet.balance, 0) >= amount)
+        .values(
+            balance=Wallet.balance - amount,
+            total_spent=func.coalesce(Wallet.total_spent, 0) + amount,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    await session.refresh(wallet)
+    if not result.rowcount:
+        return False, wallet.balance or 0
+    session.add(Transaction(
         wallet_id=wallet.id,
         amount=-amount,
         type=tx_type,
         description=description,
-    )
-    session.add(tx)
-    return True, wallet.balance
+    ))
+    return True, wallet.balance or 0
 
 
 async def deposit_to_bank(session: AsyncSession, user_id: int, amount: int) -> Tuple[bool, int, int]:
     wallet = await get_or_create_wallet(session, user_id)
-    if amount <= 0 or (wallet.balance or 0) < amount:
+    if amount <= 0:
         return False, wallet.balance or 0, wallet.bank_balance or 0
-    wallet.balance -= amount
-    wallet.bank_balance = (wallet.bank_balance or 0) + amount
-    return True, wallet.balance, wallet.bank_balance
+    result = await session.execute(
+        update(Wallet)
+        .where(Wallet.id == wallet.id, Wallet.balance >= amount)
+        .values(
+            balance=Wallet.balance - amount,
+            bank_balance=func.coalesce(Wallet.bank_balance, 0) + amount,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    await session.refresh(wallet)
+    if not result.rowcount:
+        return False, wallet.balance or 0, wallet.bank_balance or 0
+    return True, wallet.balance or 0, wallet.bank_balance or 0
 
 
 async def withdraw_from_bank(session: AsyncSession, user_id: int, amount: int) -> Tuple[bool, int, int]:
     wallet = await get_or_create_wallet(session, user_id)
-    if amount <= 0 or (wallet.bank_balance or 0) < amount:
+    if amount <= 0:
         return False, wallet.balance or 0, wallet.bank_balance or 0
-    wallet.bank_balance -= amount
-    wallet.balance = (wallet.balance or 0) + amount
-    return True, wallet.balance, wallet.bank_balance
+    result = await session.execute(
+        update(Wallet)
+        .where(Wallet.id == wallet.id, func.coalesce(Wallet.bank_balance, 0) >= amount)
+        .values(
+            bank_balance=Wallet.bank_balance - amount,
+            balance=func.coalesce(Wallet.balance, 0) + amount,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    await session.refresh(wallet)
+    if not result.rowcount:
+        return False, wallet.balance or 0, wallet.bank_balance or 0
+    return True, wallet.balance or 0, wallet.bank_balance or 0
 
 
 async def transfer_coins(
