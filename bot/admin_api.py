@@ -1739,6 +1739,100 @@ async def owner_group_action_handler(request):
 
 
 @require_admin
+async def owner_group_ban_all_handler(request):
+    """Owner-only Ban All for tracked members, with a typed group-specific confirmation."""
+    bot = None
+    try:
+        group_id = int(request.match_info["group_id"])
+        body = await request.json()
+        if body.get("confirmText") != f"BAN ALL {group_id}":
+            return web.json_response({"error": f'Type BAN ALL {group_id} to confirm this group action.'}, status=400)
+
+        from bot.database.connection import async_session_maker
+        from bot.config import settings
+        from aiogram import Bot
+
+        async with async_session_maker() as session:
+            group = await session.get(Group, group_id)
+            if not group or not group.is_active:
+                return web.json_response({"error": "Active group not found."}, status=404)
+            group_title = group.title or str(group_id)
+            rows = (await session.execute(
+                select(GroupMember.user_id, User.telegram_id, User.is_bot)
+                .join(User, User.id == GroupMember.user_id)
+                .where(
+                    GroupMember.group_id == group_id,
+                    GroupMember.is_banned.is_(False),
+                )
+            )).all()
+        targets = []
+        seen = set()
+        for internal_id, telegram_id, is_bot in rows:
+            target_id = int(telegram_id or internal_id)
+            if target_id > 0 and target_id not in seen:
+                seen.add(target_id)
+                targets.append((int(internal_id), target_id, bool(is_bot)))
+
+        bot = Bot(token=settings.BOT_TOKEN)
+        me = await bot.get_me()
+        bot_member = await bot.get_chat_member(chat_id=group_id, user_id=me.id)
+        bot_status = str(getattr(bot_member.status, "value", bot_member.status))
+        if bot_status not in {"administrator", "creator"}:
+            return web.json_response({"error": "Alexa must be a group administrator."}, status=403)
+        if bot_status != "creator" and not getattr(bot_member, "can_restrict_members", False):
+            return web.json_response({"error": "Alexa needs Restrict Members permission."}, status=403)
+
+        banned = skipped = failed = 0
+        owner_id = int(settings.effective_owner_id or 0)
+        newly_banned_ids = []
+        for internal_id, target_id, is_bot in targets:
+            if target_id == owner_id or is_bot:
+                skipped += 1
+                continue
+            try:
+                target = await bot.get_chat_member(chat_id=group_id, user_id=target_id)
+                target_status = str(getattr(target.status, "value", target.status))
+                if target_status in {"creator", "administrator", "left", "kicked"} or getattr(target.user, "is_bot", False):
+                    skipped += 1
+                    continue
+                await bot.ban_chat_member(chat_id=group_id, user_id=target_id, revoke_messages=True)
+                newly_banned_ids.append(internal_id)
+                banned += 1
+            except Exception as exc:
+                failed += 1
+                import structlog
+                structlog.get_logger().warning(
+                    "owner_miniapp_ban_all_member_failed",
+                    group_id=group_id, user_id=target_id, error=str(exc),
+                )
+
+        if newly_banned_ids:
+            async with async_session_maker() as session:
+                records = (await session.scalars(select(GroupMember).where(
+                    GroupMember.group_id == group_id,
+                    GroupMember.user_id.in_(newly_banned_ids),
+                ))).all()
+                for record in records:
+                    record.is_banned = True
+                await session.commit()
+
+        return web.json_response({
+            "success": True, "groupId": str(group_id), "groupTitle": group_title,
+            "tracked": len(targets), "banned": banned, "skipped": skipped, "failed": failed,
+            "note": "Only tracked members were considered. Telegram does not expose a complete historical member list to bots.",
+        }, headers={"Cache-Control": "no-store"})
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid group ID or confirmation."}, status=400)
+    except Exception:
+        import structlog
+        structlog.get_logger().exception("Owner Mini App Ban All failed")
+        return web.json_response({"error": "Ban All could not be completed. Check Alexa's Telegram permissions."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
+@require_admin
 async def owner_group_purge_handler(request):
     """Run the bounded Owner Panel purge with a Mini App confirmation."""
     bot = None
@@ -2011,6 +2105,7 @@ def setup_admin_routes(app):
     app.router.add_get('/owner-api/groups/{group_id}/service-settings', owner_group_service_settings_handler)
     app.router.add_post('/owner-api/groups/{group_id}/service-settings', owner_group_service_settings_handler)
     app.router.add_post('/owner-api/groups/{group_id}/actions/{action}', owner_group_action_handler)
+    app.router.add_post('/owner-api/groups/{group_id}/ban-all', owner_group_ban_all_handler)
     app.router.add_post('/owner-api/groups/{group_id}/purge', owner_group_purge_handler)
     app.router.add_post('/owner-api/groups/{group_id}/leave', owner_group_leave_handler)
     app.router.add_get('/owner-api/statistics', owner_statistics_handler)
