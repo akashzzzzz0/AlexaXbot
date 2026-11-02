@@ -203,9 +203,9 @@ async def groups_handler(request):
         # Resolve the lazy database accessor explicitly; a bare global name
         # cannot be supplied by this module's __getattr__.
         from bot.database.connection import async_session_maker
-        page = int(request.rel_url.query.get("page", 1))
-        limit = min(int(request.rel_url.query.get("limit", 20)), 100)
-        search = request.rel_url.query.get("search", "")
+        page = max(1, int(request.rel_url.query.get("page", 1)))
+        limit = max(1, min(int(request.rel_url.query.get("limit", 20)), 100))
+        search = (request.rel_url.query.get("search", "") or "").strip()
         offset = (page - 1) * limit
 
         async with async_session_maker() as session:
@@ -232,7 +232,11 @@ async def groups_handler(request):
             count_query = select(func.count()).select_from(Group).where(Group.is_active.is_(True))
             if search:
                 like = f"%{search}%"
-                cond = or_(Group.title.ilike(like), Group.username.ilike(like))
+                cond = or_(
+                    Group.title.ilike(like),
+                    Group.username.ilike(like),
+                    cast(Group.id, String).contains(search),
+                )
                 query = query.where(cond)
                 count_query = count_query.where(cond)
 
