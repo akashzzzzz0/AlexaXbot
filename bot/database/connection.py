@@ -265,6 +265,43 @@ async def create_tables() -> None:
                 WHERE status = 'active'
             """))
 
+        # Retrofit the active-CAPTCHA uniqueness rule on existing databases.
+        if conn.dialect.name == "sqlite":
+            await conn.execute(text("""
+                UPDATE captcha_challenges
+                SET is_solved = 1
+                WHERE is_solved = 0
+                  AND id NOT IN (
+                    SELECT MAX(id) FROM captcha_challenges
+                    WHERE is_solved = 0
+                    GROUP BY group_id, user_id
+                  )
+            """))
+            await conn.execute(text("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_captcha_one_unsolved_per_member_group
+                ON captcha_challenges (group_id, user_id)
+                WHERE is_solved = 0
+            """))
+        elif conn.dialect.name == "postgresql":
+            await conn.execute(text("""
+                WITH ranked AS (
+                    SELECT id, ROW_NUMBER() OVER (
+                        PARTITION BY group_id, user_id ORDER BY id DESC
+                    ) AS rn
+                    FROM captcha_challenges
+                    WHERE is_solved = FALSE
+                )
+                UPDATE captcha_challenges AS target
+                SET is_solved = TRUE
+                FROM ranked
+                WHERE target.id = ranked.id AND ranked.rn > 1
+            """))
+            await conn.execute(text("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_captcha_one_unsolved_per_member_group
+                ON captcha_challenges (group_id, user_id)
+                WHERE is_solved = FALSE
+            """))
+
     logger.info("Database tables ensured")
 
 
