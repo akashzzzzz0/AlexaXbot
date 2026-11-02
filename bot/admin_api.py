@@ -23,6 +23,12 @@ def __getattr__(name):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
+def async_session_maker():
+    """Return the lazily initialized database session factory."""
+    from bot.database.connection import async_session_maker as session_factory
+    return session_factory()
+
+
 def require_admin(handler):
     async def wrapper(request):
         key = request.headers.get("X-Admin-Key", "")
