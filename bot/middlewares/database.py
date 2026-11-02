@@ -139,18 +139,23 @@ class DatabaseMiddleware(BaseMiddleware):
                                 target_member.role = event.chat_member.new_chat_member.status
                                 data["db_member"] = target_member
 
-                        # A delivered group message proves the bot is still present.
-                        # This also repairs older rows whose membership status update
-                        # was missed while the bot was offline.
-                        if isinstance(event, Update) and event.message and event.message.chat.type in ("group", "supergroup"):
-                            db_group.is_active = True
-
-                        # Keep the owner panel synchronized with the bot's actual
-                        # Telegram membership. aiogram may expose status as an enum.
+                        # Any update delivered from a group (message, callback, or
+                        # member update) proves ALEXA is currently present there.
+                        # This repairs stale inactive rows even when the update is not
+                        # a regular message.
                         if isinstance(event, Update) and event.my_chat_member:
-                            raw_status = event.my_chat_member.new_chat_member.status
+                            # ALEXA's own membership update is authoritative: never
+                            # let the generic group-update fallback reactivate a chat
+                            # after Telegram reports that ALEXA was removed.
+                            bot_member = event.my_chat_member.new_chat_member
+                            raw_status = bot_member.status
                             bot_status = getattr(raw_status, "value", raw_status)
-                            db_group.is_active = bot_status in ("member", "administrator", "creator")
+                            is_member = bot_status in ("member", "administrator", "creator")
+                            if bot_status == "restricted":
+                                is_member = bool(getattr(bot_member, "is_member", False))
+                            db_group.is_active = is_member
+                        else:
+                            db_group.is_active = True
 
                         security = await session.scalar(
                             select(SecuritySettings).where(SecuritySettings.group_id == chat.id)
