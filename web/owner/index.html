@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><meta name="theme-color" content="#090817"><title>ALEXA • VIP Owner Console</title><script src="https://telegram.org/js/telegram-web-app.js"></script>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><meta name="theme-color" content="#080807"><title>ALEXA • VIP Owner Console</title><script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root{color-scheme:dark;--bg:#090817;--panel:#191731dd;--line:#ae99ff33;--muted:#aaa6c7;--white:#f7f4ff;--purple:#a78bfa;--cyan:#67e8f9;--gold:#f7cf78}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 10% 0%,#35205f 0,transparent 38%),radial-gradient(ellipse at 100% 20%,#123d59 0,transparent 34%),var(--bg);color:var(--white);font:14px/1.45 system-ui,sans-serif;min-height:100vh;padding:15px;overflow-x:hidden}.wrap{max-width:850px;margin:auto}.top,.toolbar,.row{display:flex;align-items:center;justify-content:space-between;gap:9px}.top{margin:5px 2px 18px}.brand{display:flex;gap:10px;align-items:center}.logo{width:43px;height:43px;border-radius:14px;display:grid;place-items:center;font-size:23px;background:linear-gradient(135deg,#8b5cf6,#2563eb 65%,#22d3ee);box-shadow:0 0 28px #8b5cf655}.brand b{letter-spacing:2px}.brand small{display:block;color:var(--muted);font-size:10px;letter-spacing:2px}.status,.pill{border:1px solid #4ade8045;background:#163c2c88;color:#86efac;border-radius:30px;padding:6px 10px;font-size:10px}.hero,.panel,.stat,.tile{border:1px solid var(--line);background:var(--panel);border-radius:18px;padding:16px;box-shadow:0 8px 28px #0003}.hero{padding:22px;background:linear-gradient(125deg,#7048bf44,#18254c88 55%,#0f738033)}.eyebrow{color:var(--gold);font-size:10px;letter-spacing:2px;font-weight:800}.hero h1{font-size:27px;line-height:1.1;margin:8px 0}.muted,small{color:var(--muted)}.section{display:flex;justify-content:space-between;align-items:center;margin:22px 3px 10px}.section h2{font-size:12px;letter-spacing:1.4px;margin:0}.stats,.modules{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.stat strong{display:block;font-size:24px;margin:5px 0}.tile{display:flex;align-items:center;gap:11px;cursor:pointer;text-align:left;color:inherit;width:100%;min-height:78px}.tile:active,button:active{transform:scale(.98)}.tile .ico{font-size:23px}.tile b{display:block}.tile small{font-size:10px}.toolbar{margin:14px 0}.toolbar button,button,.btn{border:1px solid var(--line);background:#282344;color:var(--white);border-radius:12px;padding:10px 12px;font:inherit;cursor:pointer}.toolbar button:disabled{opacity:.35}.primary{background:linear-gradient(110deg,#7048bf,#155e75);border:0}.danger{background:#6b2638}.field{width:100%;padding:12px;border-radius:11px;background:#100e22;color:white;border:1px solid var(--line);margin:6px 0 10px;font:inherit}.item{padding:13px 0;border-bottom:1px solid var(--line)}.item:last-child{border:0}.item b{display:block}.item .meta{font-size:11px;color:var(--muted);margin:3px 0}.actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}.actions button{padding:7px 10px;font-size:12px}.error,.notice{display:none;padding:12px;border-radius:12px;margin:12px 0;background:#7f1d1d44;border:1px solid #fb718555;color:#fecaca}.notice{background:#164e6333;border-color:#67e8f944;color:#cffafe}.hidden{display:none!important}.foot{text-align:center;color:#77738f;font-size:10px;margin:22px 0}.searchbar{display:flex;gap:7px}.searchbar input{flex:1;min-width:0}.bottomnav{position:sticky;bottom:8px;z-index:20;display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin:18px 0 8px;padding:8px;border:1px solid #ae99ff44;border-radius:18px;background:#100e22ee;backdrop-filter:blur(16px);box-shadow:0 8px 30px #0008}.bottomnav button{padding:10px 4px;border:0;background:transparent;color:#aaa6c7;font-size:11px}.bottomnav button.active{color:#fff;background:linear-gradient(120deg,#7048bf88,#155e7588);box-shadow:inset 0 0 0 1px #b69cff55}.avatar{width:42px;height:42px;border-radius:50%;display:inline-grid;place-items:center;background:linear-gradient(135deg,#8b5cf6,#155e75);font-weight:800;color:white;flex:none}.chatrow{display:flex;align-items:center;gap:11px;padding:12px 4px;border-bottom:1px solid var(--line)}.chatrow .chatmain{min-width:0;flex:1}.chatrow .chatmain b{display:block}.chatrow .chatmain small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.perm{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}@media(min-width:620px){body{padding:25px}.stats{grid-template-columns:repeat(4,1fr)}.modules{grid-template-columns:repeat(3,1fr)}}
@@ -107,6 +107,120 @@ body:before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;bac
   .tile .ico{width:34px;height:34px;font-size:20px}
 }
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;transition:none!important}}
+
+
+/* ALEXA PRIVÉ — luxury owner interface; visual layer only */
+:root{
+  color-scheme:dark;
+  --bg:#080807;--panel:#15130fee;--line:#b99a594d;--muted:#aaa18e;
+  --white:#f7f1e4;--purple:#c9a96e;--cyan:#e4c985;--gold:#e8ca83;
+}
+html{background:#080807;scroll-behavior:smooth}
+body{
+  background:
+    radial-gradient(ellipse at 12% -8%,#75552a3d 0,transparent 36%),
+    radial-gradient(ellipse at 100% 24%,#3c34221f 0,transparent 34%),
+    linear-gradient(145deg,#090908,#10100d 58%,#080807);
+  color:var(--white);font-family:Inter,ui-sans-serif,system-ui,sans-serif;
+}
+body:before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.28;background:linear-gradient(115deg,transparent 0 48%,#e8ca8308 49%,transparent 50% 100%);background-size:7px 7px}
+.wrap{max-width:940px}
+.top{margin:5px 2px 20px}
+.logo{
+  background:linear-gradient(145deg,#f2dda5,#a77a36 55%,#5b421e);
+  color:#171109;border:1px solid #f4dfac;box-shadow:0 0 0 4px #c9a96e12,0 8px 28px #000b,inset 0 1px #fff8;
+}
+.brand b{font-size:16px;letter-spacing:4px;color:#f4e8c9;text-shadow:0 2px 18px #d9b66b35}
+.brand small{color:#c9ad73;letter-spacing:2.5px;font-size:9px}
+.status,.pill{
+  border:1px solid #c9a96e77;background:linear-gradient(135deg,#3c301b,#17140e);
+  color:#f0d99e;border-radius:30px;padding:7px 11px;font-size:9px;font-weight:800;letter-spacing:1.1px;
+  box-shadow:inset 0 1px #fff1,0 4px 16px #0005;
+}
+.hero,.panel,.stat,.tile{
+  border:1px solid #b99a5940;
+  background:linear-gradient(145deg,#1b1913f5,#11110ff5 72%);
+  border-radius:19px;box-shadow:0 14px 36px #0008,inset 0 1px #fff08;
+}
+.hero{
+  position:relative;overflow:hidden;padding:25px 23px;
+  background:linear-gradient(112deg,#282116 0%,#17150f 54%,#211b10 100%);
+  border-color:#c9a96e88;box-shadow:0 18px 44px #0009,inset 0 1px #fff2,0 0 30px #c9a96e0b;
+}
+.hero:before{content:"A";position:absolute;right:26px;top:-44px;font-family:Georgia,serif;font-size:180px;line-height:1;color:#e7cb8710;pointer-events:none}
+.hero:after{content:"";position:absolute;right:-48px;bottom:-118px;width:230px;height:230px;border:1px solid #d5b56b55;border-radius:50%;box-shadow:0 0 0 14px #d5b56b0a,0 0 0 30px #d5b56b08,0 0 50px #d5b56b0b;pointer-events:none}
+.eyebrow{color:#dfc17c;font-size:9px;letter-spacing:3px;font-weight:800}
+.hero h1{font-family:Georgia,'Times New Roman',serif;font-weight:500;font-size:clamp(26px,5vw,36px);letter-spacing:.2px;color:#fff6df;text-shadow:0 4px 24px #0008}
+.muted,small{color:var(--muted)}
+.section{margin:24px 3px 11px}
+.section h2{color:#dfc17c;font-size:10px;letter-spacing:2.4px}
+.section>span{font-size:10px;color:#91866f}
+.stats,.modules{gap:11px}
+.stat{
+  position:relative;overflow:hidden;min-height:112px;padding:15px;
+  border-color:#8d713e88;background:linear-gradient(145deg,#201c13,#12110e 78%);
+}
+.stat:before{content:"";display:block;width:30px;height:2px;background:linear-gradient(90deg,#f3dda0,#9c7538);box-shadow:0 0 12px #d9b66b77;margin-bottom:10px}
+.stat:after{content:"";position:absolute;right:-24px;top:-27px;width:75px;height:75px;border:1px solid #d9b66b20;border-radius:50%;box-shadow:0 0 0 9px #d9b66b08}
+.stat strong{font-family:Georgia,serif;font-size:29px;color:#f4dfad;text-shadow:0 2px 15px #d9b66b35}
+.stat>b{display:block;color:#f5ead0;margin:5px 0}
+.stat small{display:block;font-size:10px;line-height:1.4}
+.tile{
+  min-height:86px;padding:14px;border-color:#80663a88;
+  background:linear-gradient(145deg,#1d1a13,#11110e);
+  transition:border-color .18s,box-shadow .18s,transform .18s;
+}
+.tile:hover,.tile:focus-visible{border-color:#e0c17c;box-shadow:0 0 0 1px #e0c17c22,0 12px 28px #0009,inset 0 0 22px #d9b66b0b;outline:none}
+.tile .ico{
+  width:40px;height:40px;display:grid;place-items:center;flex:none;border-radius:13px;
+  color:#f2d99d;background:linear-gradient(145deg,#44351c,#211b10);
+  border:1px solid #c9a96e77;filter:drop-shadow(0 5px 10px #0008);
+}
+.tile b{font-size:12px;color:#f5ead0;letter-spacing:.3px}
+.tile small{display:block;margin-top:3px;font-size:10px;line-height:1.4;color:#a99e88}
+.toolbar{gap:7px;margin:14px 0}
+.toolbar button,button,.btn{
+  border:1px solid #80663a88;background:linear-gradient(145deg,#292317,#17140e);
+  color:#f3e8ce;border-radius:11px;padding:10px 13px;font:inherit;cursor:pointer;
+  transition:background .15s,border-color .15s,box-shadow .15s,transform .15s;
+}
+.toolbar button:hover,button:hover,.btn:hover{border-color:#dfc17c;box-shadow:0 5px 18px #0008,0 0 13px #d9b66b18}
+.toolbar button:disabled{opacity:.32}
+.primary{background:linear-gradient(115deg,#d9bd7c,#98713a);border:1px solid #f0d99e;color:#171109;font-weight:750;box-shadow:0 5px 18px #0007,inset 0 1px #fff6}
+.danger{background:linear-gradient(120deg,#542b24,#301713);border:1px solid #b86b53;color:#ffe0d2}
+.field{background:#0d0c09;color:#f7f1e4;border:1px solid #80663a88;border-radius:11px;outline:none;box-shadow:inset 0 2px 12px #0009}
+.field:focus{border-color:#dfc17c;box-shadow:0 0 0 2px #dfc17c20,0 0 16px #dfc17c14}
+.item{border-bottom:1px solid #6d583444;padding:14px 0}
+.item b{color:#f5ead0}
+.item .meta{color:#a99e88}
+.actions{gap:8px}
+.actions button{border-radius:9px}
+.error,.notice{border-radius:11px}
+.error{background:#3d1d18;border:1px solid #b86b53;color:#ffdbce}
+.notice{background:#292313;border:1px solid #c9a96e77;color:#f5dfaa}
+.bottomnav{
+  bottom:8px;padding:8px;gap:5px;margin:18px 0 9px;
+  border:1px solid #a9894d88;border-radius:17px;
+  background:#100f0cf2;box-shadow:0 12px 32px #000c,0 0 22px #d9b66b0c;backdrop-filter:blur(20px);
+}
+.bottomnav button{border:1px solid transparent;border-radius:11px;padding:10px 3px;color:#a99e88;font-size:10px}
+.bottomnav button.active{color:#f6e7c1;background:linear-gradient(135deg,#5a4524aa,#282012cc);border-color:#c9a96e88;box-shadow:inset 0 1px #fff2,0 4px 16px #0007}
+.avatar{background:linear-gradient(145deg,#d9bd7c,#76552a);border:1px solid #f0d99e;color:#171109;box-shadow:0 5px 15px #0008}
+.chatrow{border-bottom:1px solid #6d583444}
+.perm{border-bottom:1px solid #6d583444}
+.foot{color:#80765f;letter-spacing:1.5px;font-size:9px}
+.panel{padding:17px}
+#pageTitle{color:#f1dfb5;font-family:Georgia,serif;font-weight:500}
+#pageCount{white-space:nowrap}
+@media(max-width:420px){
+  body{padding:12px 10px 20px}
+  .hero{padding:20px 17px}
+  .toolbar button{padding:9px 8px;font-size:11px}
+  .tile{padding:11px;gap:9px;min-height:78px}
+  .tile .ico{width:35px;height:35px;font-size:19px}
+  .stat{padding:12px;min-height:105px}
+}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{transition:none!important}}
 
 </style></head><body><main class="wrap">
 <header class="top"><div class="brand"><div class="logo">✦</div><div><b>ALEXA</b><small>VIP OWNER CONSOLE</small></div></div><div class="status" id="status">● VERIFYING</div></header>
