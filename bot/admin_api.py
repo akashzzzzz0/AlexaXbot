@@ -10,7 +10,8 @@ from aiohttp import web
 from sqlalchemy import select, func, and_, or_, desc, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.models import User, Group, GroupMember, Wallet, Economy, ActionLog, SecuritySettings, Referral, AffiliateRequest, InboxMessage, GroupInboxMessage, GroupPromotionRequest, GlobalSetting\nfrom bot.database.force_join import ForceJoinSetting
+from bot.database.models import User, Group, GroupMember, Wallet, Economy, ActionLog, SecuritySettings, Referral, AffiliateRequest, InboxMessage, GroupInboxMessage, GroupPromotionRequest, GlobalSetting
+from bot.database.force_join import ForceJoinSetting
 
 ADMIN_KEY = os.environ.get("ADMIN_KEY", "")
 
