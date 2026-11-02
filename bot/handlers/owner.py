@@ -11,6 +11,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
+from sqlalchemy.exc import IntegrityError
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.database.models import User, Group, GroupMember, GroupSettings, ActionLog, SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig, ScamReview, InboxMessage, GlobalSetting
 from bot.keyboards.main_menu import back_button_kb
@@ -21,6 +22,25 @@ from html import escape
 
 logger = structlog.get_logger()
 router = Router()
+
+async def _owner_get_or_create(session: AsyncSession, model, *criteria, **defaults):
+    """Race-safe creation of one-per-group owner-managed settings rows."""
+    row = await session.scalar(select(model).where(*criteria))
+    if row is not None:
+        return row
+    candidate = model(**defaults)
+    try:
+        async with session.begin_nested():
+            session.add(candidate)
+            await session.flush()
+        return candidate
+    except IntegrityError:
+        row = await session.scalar(select(model).where(*criteria))
+        if row is None:
+            raise
+        return row
+
+
 _INBOX_TIMEZONE = ZoneInfo("Asia/Kolkata")
 
 
@@ -467,11 +487,9 @@ async def _render_owner_security(callback: CallbackQuery, session: AsyncSession,
     if not group or not group.is_active:
         await callback.answer("Group is not active/registered.", show_alert=True)
         return
-    security = await session.scalar(select(SecuritySettings).where(SecuritySettings.group_id == group_id))
-    if security is None:
-        security = SecuritySettings(group_id=group_id)
-        session.add(security)
-        await session.flush()
+    security = await _owner_get_or_create(
+        session, SecuritySettings, SecuritySettings.group_id == group_id, group_id=group_id,
+    )
     title = "Content Locks" if locks else "Security Settings"
     description = (
         "Toggle the content types ALEXA should block in this group."
@@ -516,19 +534,16 @@ async def _owner_render_biolink(callback: CallbackQuery, session: AsyncSession, 
     if not group or not group.is_active:
         await callback.answer("Group is not active.", show_alert=True)
         return
-    setting = await session.scalar(
-        select(BioLinkProtectionSetting).where(BioLinkProtectionSetting.group_id == group_id)
+    setting = await _owner_get_or_create(
+        session, BioLinkProtectionSetting,
+        BioLinkProtectionSetting.group_id == group_id,
+        group_id=group_id, enabled=False,
     )
-    config = await session.scalar(
-        select(BioLinkProtectionConfig).where(BioLinkProtectionConfig.group_id == group_id)
+    config = await _owner_get_or_create(
+        session, BioLinkProtectionConfig,
+        BioLinkProtectionConfig.group_id == group_id,
+        group_id=group_id, action="warn_mute", mute_duration=3600,
     )
-    if setting is None:
-        setting = BioLinkProtectionSetting(group_id=group_id, enabled=False)
-        session.add(setting)
-    if config is None:
-        config = BioLinkProtectionConfig(group_id=group_id, action="warn_mute", mute_duration=3600)
-        session.add(config)
-    await session.flush()
     labels = {
         "warn_mute": "3 warnings then mute",
         "warn_ban": "3 warnings then ban",
@@ -571,12 +586,11 @@ async def owner_biolink_toggle(callback: CallbackQuery, db_session: AsyncSession
     except ValueError:
         await callback.answer("Invalid group.", show_alert=True)
         return
-    setting = await db_session.scalar(
-        select(BioLinkProtectionSetting).where(BioLinkProtectionSetting.group_id == group_id)
+    setting = await _owner_get_or_create(
+        db_session, BioLinkProtectionSetting,
+        BioLinkProtectionSetting.group_id == group_id,
+        group_id=group_id, enabled=False,
     )
-    if setting is None:
-        setting = BioLinkProtectionSetting(group_id=group_id, enabled=False)
-        db_session.add(setting)
     setting.enabled = not bool(setting.enabled)
     await db_session.flush()
     await _owner_render_biolink(callback, db_session, group_id)
@@ -597,14 +611,12 @@ async def owner_biolink_action(callback: CallbackQuery, db_session: AsyncSession
     if action not in {"warn_mute", "warn_ban", "mute", "ban"}:
         await callback.answer("Invalid action.", show_alert=True)
         return
-    config = await db_session.scalar(
-        select(BioLinkProtectionConfig).where(BioLinkProtectionConfig.group_id == group_id)
+    config = await _owner_get_or_create(
+        db_session, BioLinkProtectionConfig,
+        BioLinkProtectionConfig.group_id == group_id,
+        group_id=group_id, action=action, mute_duration=3600,
     )
-    if config is None:
-        config = BioLinkProtectionConfig(group_id=group_id, action=action, mute_duration=3600)
-        db_session.add(config)
-    else:
-        config.action = action
+    config.action = action
     await db_session.flush()
     await _owner_render_biolink(callback, db_session, group_id)
     await callback.answer("Bio Link action updated.")
@@ -624,14 +636,12 @@ async def owner_biolink_duration(callback: CallbackQuery, db_session: AsyncSessi
     if duration not in {900, 1800, 3600, 21600, 86400}:
         await callback.answer("Invalid duration.", show_alert=True)
         return
-    config = await db_session.scalar(
-        select(BioLinkProtectionConfig).where(BioLinkProtectionConfig.group_id == group_id)
+    config = await _owner_get_or_create(
+        db_session, BioLinkProtectionConfig,
+        BioLinkProtectionConfig.group_id == group_id,
+        group_id=group_id, action="warn_mute", mute_duration=duration,
     )
-    if config is None:
-        config = BioLinkProtectionConfig(group_id=group_id, action="warn_mute", mute_duration=duration)
-        db_session.add(config)
-    else:
-        config.mute_duration = duration
+    config.mute_duration = duration
     await db_session.flush()
     await _owner_render_biolink(callback, db_session, group_id)
     await callback.answer("Mute duration updated.")
@@ -681,9 +691,9 @@ async def owner_security_toggle(callback: CallbackQuery, db_session: AsyncSessio
     group = await db_session.get(Group, group_id)
     if not group or not group.is_active:
         await callback.answer("Group is not active.", show_alert=True); return
-    security = await db_session.scalar(select(SecuritySettings).where(SecuritySettings.group_id == group_id))
-    if security is None:
-        security = SecuritySettings(group_id=group_id); db_session.add(security); await db_session.flush()
+    security = await _owner_get_or_create(
+        db_session, SecuritySettings, SecuritySettings.group_id == group_id, group_id=group_id,
+    )
     setattr(security, field, not bool(getattr(security, field, False)))
     try: await db_session.commit()
     except Exception as exc:
@@ -772,12 +782,9 @@ async def owner_global_toggle(callback: CallbackQuery, _: callable, db_session: 
 
     try:
         for group in groups:
-            security = await db_session.scalar(
-                select(SecuritySettings).where(SecuritySettings.group_id == group.id)
+            security = await _owner_get_or_create(
+                db_session, SecuritySettings, SecuritySettings.group_id == group.id, group_id=group.id,
             )
-            if security is None:
-                security = SecuritySettings(group_id=group.id)
-                db_session.add(security)
             setattr(security, field, enabled)
         await db_session.commit()
     except Exception as exc:
@@ -803,9 +810,9 @@ async def owner_global_set(callback: CallbackQuery, _: callable, db_session: Asy
     groups = await _active_groups(db_session); changed = 0
     try:
         for group in groups:
-            security = await db_session.scalar(select(SecuritySettings).where(SecuritySettings.group_id == group.id))
-            if security is None:
-                security = SecuritySettings(group_id=group.id); db_session.add(security)
+            security = await _owner_get_or_create(
+                db_session, SecuritySettings, SecuritySettings.group_id == group.id, group_id=group.id,
+            )
             setattr(security, field, enabled); changed += 1
         await db_session.commit()
     except Exception as exc:
@@ -1146,16 +1153,12 @@ async def owner_toggle_silent_service_messages(callback: CallbackQuery, db_sessi
     if not group or not group.is_active:
         await callback.answer("Group is not active/registered.", show_alert=True)
         return
-    settings_row = await db_session.scalar(
-        select(GroupSettings).where(GroupSettings.group_id == group_id)
+    settings_row = await _owner_get_or_create(
+        db_session, GroupSettings, GroupSettings.group_id == group_id,
+        group_id=group_id, silent_service_messages=True,
     )
-    if not settings_row:
-        settings_row = GroupSettings(group_id=group_id, silent_service_messages=True)
-        db_session.add(settings_row)
-        enabled = True
-    else:
-        settings_row.silent_service_messages = not bool(settings_row.silent_service_messages)
-        enabled = bool(settings_row.silent_service_messages)
+    settings_row.silent_service_messages = not bool(settings_row.silent_service_messages)
+    enabled = bool(settings_row.silent_service_messages)
     await db_session.commit()
     try:
         await _render_group(callback, db_session, group_id)
@@ -1702,7 +1705,10 @@ async def toggle_maintenance(callback: CallbackQuery, _: callable, db_session: A
     current = bool(row and row.value == "1")
     _maintenance_mode = not current
     if row is None:
-        db_session.add(GlobalSetting(key="owner_maintenance_mode", value="1" if _maintenance_mode else "0"))
+        row = await _owner_get_or_create(
+            db_session, GlobalSetting, GlobalSetting.key == "owner_maintenance_mode",
+            key="owner_maintenance_mode", value="1" if _maintenance_mode else "0",
+        )
     else:
         row.value = "1" if _maintenance_mode else "0"
     await db_session.commit()
@@ -1744,11 +1750,9 @@ async def owner_emergency_toggle(callback: CallbackQuery, _: callable, db_sessio
     group = await db_session.get(Group, group_id)
     if not group or not group.is_active:
         await callback.answer("Group is not active.", show_alert=True); return
-    security = await db_session.scalar(select(SecuritySettings).where(SecuritySettings.group_id == group_id))
-    if not security:
-        security = SecuritySettings(group_id=group_id)
-        db_session.add(security)
-        await db_session.flush()
+    security = await _owner_get_or_create(
+        db_session, SecuritySettings, SecuritySettings.group_id == group_id, group_id=group_id,
+    )
     security.emergency_mode = not bool(security.emergency_mode)
     await db_session.flush()
     await db_session.commit()
