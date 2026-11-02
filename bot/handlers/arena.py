@@ -21,6 +21,20 @@ from bot.services.arena_service import (
 
 router = Router()
 
+async def _insert_or_get(session: AsyncSession, candidate, model, *conditions):
+    try:
+        async with session.begin_nested():
+            session.add(candidate)
+            await session.flush()
+        return candidate, True
+    except IntegrityError:
+        existing = await session.scalar(select(model).where(*conditions))
+        if existing is None:
+            raise
+        return existing, False
+
+
+
 
 def _menu_keyboard():
     kb = InlineKeyboardBuilder()
@@ -51,11 +65,11 @@ def _is_expired(value: datetime) -> bool:
 async def _ensure_group(session: AsyncSession, chat_id: int, title: str) -> ArenaGroup:
     group = await session.get(ArenaGroup, chat_id)
     if group is None:
-        group = ArenaGroup(group_id=chat_id, title=title or "Telegram group", enabled=True)
-        session.add(group)
-        await session.flush()
-    else:
-        group.title = title or group.title
+        group, _created = await _insert_or_get(
+            session, ArenaGroup(group_id=chat_id, title=title or "Telegram group", enabled=True),
+            ArenaGroup, ArenaGroup.group_id == chat_id,
+        )
+    group.title = title or group.title
     return group
 
 
@@ -79,8 +93,16 @@ async def _issue_challenge(target: Message, actor_id: int, session: AsyncSession
             state = "completed" if claim.completed else "already started"
             await target.answer(f"📜 Your daily Arena mission is {state}. Come back tomorrow.")
             return
-        session.add(ArenaDailyClaim(user_id=actor_id, day_key=day_key, completed=False))
-        await session.flush()
+        _claim, created = await _insert_or_get(
+            session,
+            ArenaDailyClaim(user_id=actor_id, day_key=day_key, completed=False),
+            ArenaDailyClaim,
+            ArenaDailyClaim.user_id == actor_id,
+            ArenaDailyClaim.day_key == day_key,
+        )
+        if not created:
+            await target.answer("📜 Your daily Arena mission is already started. Come back tomorrow.")
+            return
 
     question = choose_question("mixed")
     session_id = uuid4().hex
@@ -271,13 +293,15 @@ async def battle_command(message: Message, db_session: AsyncSession = None, **kw
         return
     target_user = await db_session.get(User, opponent.id)
     if target_user is None:
-        target_user = User(
-            id=opponent.id, telegram_id=opponent.id, username=opponent.username,
-            first_name=opponent.first_name or "Player", last_name=opponent.last_name,
-            is_bot=False,
+        target_user, _created = await _insert_or_get(
+            db_session,
+            User(
+                id=opponent.id, telegram_id=opponent.id, username=opponent.username,
+                first_name=opponent.first_name or "Player", last_name=opponent.last_name,
+                is_bot=False,
+            ),
+            User, User.id == opponent.id,
         )
-        db_session.add(target_user)
-        await db_session.flush()
     question = choose_question("mixed")
     battle_id = uuid4().hex
     battle = ArenaBattle(
