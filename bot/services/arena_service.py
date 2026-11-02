@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import random
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import ArenaProfile, ArenaScoreEvent
@@ -72,9 +73,16 @@ def calculate_battle_rewards(challenger_correct: bool, opponent_correct: bool,
 async def get_or_create_profile(session: AsyncSession, user_id: int) -> ArenaProfile:
     profile = await session.get(ArenaProfile, user_id)
     if profile is None:
-        profile = ArenaProfile(user_id=user_id)
-        session.add(profile)
-        await session.flush()
+        candidate = ArenaProfile(user_id=user_id)
+        try:
+            async with session.begin_nested():
+                session.add(candidate)
+                await session.flush()
+            profile = candidate
+        except IntegrityError:
+            profile = await session.get(ArenaProfile, user_id)
+            if profile is None:
+                raise
     return profile
 
 
@@ -87,13 +95,19 @@ async def award_xp(session: AsyncSession, user_id: int, group_id: int | None,
     if existing is not None:
         return False
     profile = await get_or_create_profile(session, user_id)
-    session.add(ArenaScoreEvent(
-        event_key=event_key,
-        user_id=user_id,
-        group_id=group_id,
-        mode=mode,
-        xp_delta=amount,
-    ))
+    try:
+        async with session.begin_nested():
+            session.add(ArenaScoreEvent(
+                event_key=event_key,
+                user_id=user_id,
+                group_id=group_id,
+                mode=mode,
+                xp_delta=amount,
+            ))
+            await session.flush()
+    except IntegrityError:
+        # The event key is globally unique; do not award XP twice on retries.
+        return False
     profile.xp = int(profile.xp or 0) + amount
     profile.total_games = int(profile.total_games or 0) + 1
     profile.wins = int(profile.wins or 0) + wins
