@@ -1147,20 +1147,42 @@ async def owner_inbox_handler(request):
     async with async_session_maker() as session:
         # Older installations may have inbox history from before dm_started
         # was tracked. Treat any stored private message as proof of a started DM.
-        started_filter = or_(
-            User.dm_started.is_(True),
-            User.id.in_(select(InboxMessage.user_id).distinct()),
-        )
-        total = await session.scalar(
-            select(func.count()).select_from(User).where(started_filter)
-        ) or 0
-        users = (await session.scalars(
-            select(User)
-            .where(started_filter)
-            .order_by(desc(User.last_seen), desc(User.id))
-            .offset((page - 1) * limit)
-            .limit(limit)
-        )).all()
+        try:
+            started_filter = or_(
+                User.dm_started.is_(True),
+                User.id.in_(select(InboxMessage.user_id).distinct()),
+            )
+            total = await session.scalar(
+                select(func.count()).select_from(User).where(started_filter)
+            ) or 0
+            users = (await session.scalars(
+                select(User)
+                .where(started_filter)
+                .order_by(desc(User.last_seen), desc(User.id))
+                .offset((page - 1) * limit)
+                .limit(limit)
+            )).all()
+        except Exception as exc:
+            # Some older databases may still be missing the dm_started column.
+            # Preserve inbox access from the message history while that schema
+            # compatibility issue is being repaired.
+            message = str(exc).lower()
+            if "dm_started" not in message or not any(
+                marker in message for marker in ("no such column", "does not exist", "undefined column")
+            ):
+                raise
+            await session.rollback()
+            history_users = User.id.in_(select(InboxMessage.user_id).distinct())
+            total = await session.scalar(
+                select(func.count()).select_from(User).where(history_users)
+            ) or 0
+            users = (await session.scalars(
+                select(User)
+                .where(history_users)
+                .order_by(desc(User.last_seen), desc(User.id))
+                .offset((page - 1) * limit)
+                .limit(limit)
+            )).all()
 
         data = []
         for user in users:
