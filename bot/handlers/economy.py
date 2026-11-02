@@ -4,7 +4,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from bot.services.economy_service import (
     get_balance, claim_daily_reward, claim_weekly_reward, claim_monthly_reward,
@@ -609,13 +609,25 @@ async def claim_mission(callback: CallbackQuery, _: callable, db_session: AsyncS
     mission = await db_session.get(Mission, row.mission_id)
     if not mission or not row.completed:
         await callback.answer("Mission is not complete yet.", show_alert=True); return
-    if row.completed_at:
+    # Claim with one conditional UPDATE before paying anything. Only one
+    # concurrent callback can transition completed_at from NULL.
+    claim_result = await db_session.execute(
+        update(UserMission)
+        .where(
+            UserMission.id == row.id,
+            UserMission.user_id == db_user.id,
+            UserMission.completed.is_(True),
+            UserMission.completed_at.is_(None),
+        )
+        .values(completed_at=datetime.now(timezone.utc))
+        .execution_options(synchronize_session=False)
+    )
+    if claim_result.rowcount != 1:
         await callback.answer("Reward already claimed.", show_alert=True); return
     if mission.reward_coins:
         await add_coins(db_session, db_user.id, mission.reward_coins, "mission_reward", mission.name_key)
     if mission.reward_xp:
         await add_xp(db_session, db_user.id, mission.reward_xp)
-    row.completed_at = datetime.now(timezone.utc)
     await db_session.flush()
     await callback.answer(f"Reward claimed: {mission.reward_coins} coins + {mission.reward_xp} XP", show_alert=True)
     await callback.message.edit_reply_markup(reply_markup=None)
