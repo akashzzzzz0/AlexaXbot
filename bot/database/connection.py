@@ -60,6 +60,9 @@ def _init_engine():
         "echo": False,
         "connect_args": connect_args,
     }
+    if clean_url.startswith("sqlite+"):
+        # Serialize local SQLite transactions through one pooled connection.
+        engine_options.update({"pool_size": 1, "max_overflow": 0})
     # SQLite uses a different pool implementation and rejects PostgreSQL pool
     # sizing arguments. Only pass these options to network databases.
     if not clean_url.startswith("sqlite+"):
