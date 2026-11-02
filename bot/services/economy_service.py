@@ -84,9 +84,9 @@ async def deposit_to_bank(session: AsyncSession, user_id: int, amount: int) -> T
         return False, wallet.balance or 0, wallet.bank_balance or 0
     result = await session.execute(
         update(Wallet)
-        .where(Wallet.id == wallet.id, Wallet.balance >= amount)
+        .where(Wallet.id == wallet.id, func.coalesce(Wallet.balance, 0) >= amount)
         .values(
-            balance=Wallet.balance - amount,
+            balance=func.coalesce(Wallet.balance, 0) - amount,
             bank_balance=func.coalesce(Wallet.bank_balance, 0) + amount,
         )
         .execution_options(synchronize_session=False)
@@ -156,8 +156,8 @@ async def _claim_periodic_reward(
         .values(
             **{
                 field: now,
-                "balance": Wallet.balance + amount,
-                "total_earned": Wallet.total_earned + amount,
+                "balance": func.coalesce(Wallet.balance, 0) + amount,
+                "total_earned": func.coalesce(Wallet.total_earned, 0) + amount,
             }
         )
         .execution_options(synchronize_session=False)
