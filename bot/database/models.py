@@ -746,6 +746,12 @@ class CaptchaChallenge(Base):
     __tablename__ = "captcha_challenges"
     __table_args__ = (
         Index("ix_captcha_group_user", "group_id", "user_id"),
+        Index(
+            "uq_captcha_one_unsolved_per_member_group",
+            "group_id", "user_id", unique=True,
+            sqlite_where=text("is_solved = 0"),
+            postgresql_where=text("is_solved = FALSE"),
+        ),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
