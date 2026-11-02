@@ -89,6 +89,31 @@ async def get_or_create_game_stats(session: AsyncSession, user_id: int) -> GameS
     return stats
 
 
+async def add_reputation(
+    session: AsyncSession,
+    user_id: int,
+    *,
+    positive: int = 0,
+    negative: int = 0,
+) -> tuple[int, int]:
+    """Atomically add reputation points without losing concurrent updates."""
+    if positive < 0 or negative < 0 or (positive == 0 and negative == 0):
+        raise ValueError("Reputation increments must be non-negative and non-zero")
+    reputation = await get_or_create_reputation(session, user_id)
+    await session.execute(
+        update(Reputation)
+        .where(Reputation.user_id == user_id)
+        .values(
+            positive=func.coalesce(Reputation.positive, 0) + positive,
+            negative=func.coalesce(Reputation.negative, 0) + negative,
+            last_given=datetime.now(timezone.utc),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    await session.refresh(reputation)
+    return reputation.positive or 0, reputation.negative or 0
+
+
 async def set_user_language(session: AsyncSession, user_id: int, lang: str) -> None:
     await session.execute(
         update(User).where(User.id == user_id).values(language=lang)
