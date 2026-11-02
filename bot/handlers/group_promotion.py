@@ -11,6 +11,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import desc, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import settings
@@ -19,6 +20,20 @@ from bot.database.models import Group, GroupPromotionRequest
 logger = logging.getLogger(__name__)
 
 router = Router(name="alexa_group_promotion")
+
+async def _insert_or_get_group(session: AsyncSession, candidate: Group) -> Group:
+    try:
+        async with session.begin_nested():
+            session.add(candidate)
+            await session.flush()
+        return candidate
+    except IntegrityError:
+        group = await session.get(Group, candidate.id)
+        if group is None:
+            raise
+        return group
+
+
 
 _TRIGGER_RE = re.compile(r"(?is)^\s*\.done\b.*|.*t\.me/.*$")
 _LINK_RE = re.compile(r"(?i)(?:https?://)?t\.me/(?:\+[\w-]+|joinchat/[\w-]+|[A-Za-z0-9_]{5,})")
@@ -158,22 +173,23 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
 
     group = await db_session.get(Group, chat.id)
     if not group:
-        group = Group(
-            id=chat.id,
-            title=chat.title or "Telegram Group",
-            username=chat.username,
-            type=chat_type,
-            is_active=True,
-            invite_link=group_link if is_private_invite else None,
+        group = await _insert_or_get_group(
+            db_session,
+            Group(
+                id=chat.id,
+                title=chat.title or "Telegram Group",
+                username=chat.username,
+                type=chat_type,
+                is_active=True,
+                invite_link=group_link if is_private_invite else None,
+            ),
         )
-        db_session.add(group)
-    else:
-        group.title = chat.title or group.title
-        group.username = chat.username
-        group.type = chat_type
-        group.is_active = True
-        if is_private_invite:
-            group.invite_link = group_link
+    group.title = chat.title or group.title
+    group.username = chat.username
+    group.type = chat_type
+    group.is_active = True
+    if is_private_invite:
+        group.invite_link = group_link
     await db_session.flush()
 
     existing = await db_session.scalar(
