@@ -175,14 +175,22 @@ class DatabaseMiddleware(BaseMiddleware):
                         from bot.handlers.owner import is_owner
                         if not is_owner(user.id):
                             incoming = event.message
-                            preview = _owner_inbox_preview(incoming)
-                            session.add(InboxMessage(
-                                user_id=user.id,
-                                telegram_message_id=incoming.message_id,
-                                content_type=str(incoming.content_type),
-                                preview=preview[:1000],
-                                is_read=False,
+                            # Telegram may redeliver an update after a timeout.
+                            # Match the group inbox behavior and avoid duplicate
+                            # private conversation rows for the same Telegram message.
+                            already_saved = await session.scalar(select(InboxMessage.id).where(
+                                InboxMessage.user_id == user.id,
+                                InboxMessage.telegram_message_id == incoming.message_id,
                             ))
+                            if not already_saved:
+                                preview = _owner_inbox_preview(incoming)
+                                session.add(InboxMessage(
+                                    user_id=user.id,
+                                    telegram_message_id=incoming.message_id,
+                                    content_type=str(incoming.content_type),
+                                    preview=preview[:1000],
+                                    is_read=False,
+                                ))
                     except Exception as inbox_error:
                         logger.warning("Could not save private message to owner inbox", user_id=user.id, error=str(inbox_error))
 
