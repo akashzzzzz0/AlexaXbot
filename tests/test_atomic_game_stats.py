@@ -6,9 +6,10 @@ import unittest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from bot.database.models import Base, DuelStats, GameStats, ArenaProfile, User
+from bot.database.models import Base, DuelStats, GameStats, ArenaProfile, Reputation, User
 from bot.services.game_service import _increment_game_stats, _record_duel_result
 from bot.services.arena_service import award_xp
+from bot.services.user_service import add_reputation
 
 
 class AtomicGameStatsTests(unittest.IsolatedAsyncioTestCase):
@@ -64,6 +65,21 @@ class AtomicGameStatsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(loser.losses, 2)
             self.assertEqual(loser.win_streak, 0)
             self.assertEqual(loser.coins_lost, 20)
+
+    async def test_reputation_counters_accumulate_across_sessions(self):
+        async with self.sessions() as session:
+            await add_reputation(session, 987654321, positive=2)
+            await session.commit()
+        async with self.sessions() as session:
+            await add_reputation(session, 987654321, positive=3, negative=1)
+            await session.commit()
+        async with self.sessions() as session:
+            reputation = await session.scalar(
+                select(Reputation).where(Reputation.user_id == 987654321)
+            )
+            self.assertEqual(reputation.positive, 5)
+            self.assertEqual(reputation.negative, 1)
+            self.assertIsNotNone(reputation.last_given)
 
     async def test_arena_score_events_accumulate_and_are_idempotent(self):
         async with self.sessions() as session:
