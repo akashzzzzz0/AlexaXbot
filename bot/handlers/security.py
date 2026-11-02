@@ -3,6 +3,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from bot.database.models import Group, SecuritySettings, GroupMember, User
 from bot.keyboards.security import security_menu_kb, locks_menu_kb, captcha_menu_kb
 import structlog
@@ -10,6 +11,20 @@ from bot.middlewares.admin_actions import AdminActionMiddleware
 
 logger = structlog.get_logger()
 router = Router()
+
+async def _insert_or_get(db_session: AsyncSession, candidate, model, *conditions):
+    try:
+        async with db_session.begin_nested():
+            db_session.add(candidate)
+            await db_session.flush()
+        return candidate
+    except IntegrityError:
+        existing = await db_session.scalar(select(model).where(*conditions))
+        if existing is None:
+            raise
+        return existing
+
+
 router.message.outer_middleware(AdminActionMiddleware(commands={"security", "lock", "unlock", "locks", "locktypes", "setflood", "flood", "setfloodmode", "clearflood", "approve", "unapprove"}))
 router.callback_query.outer_middleware(AdminActionMiddleware(prefixes=("sec:", "lock:", "captcha:")))
 
@@ -17,9 +32,10 @@ router.callback_query.outer_middleware(AdminActionMiddleware(prefixes=("sec:", "
 async def _get_or_create_security(db_session: AsyncSession, chat_id: int) -> SecuritySettings:
     security = await db_session.scalar(select(SecuritySettings).where(SecuritySettings.group_id == chat_id))
     if not security:
-        security = SecuritySettings(group_id=chat_id)
-        db_session.add(security)
-        await db_session.flush()
+        security = await _insert_or_get(
+            db_session, SecuritySettings(group_id=chat_id),
+            SecuritySettings, SecuritySettings.group_id == chat_id,
+        )
     return security
 
 
@@ -324,17 +340,19 @@ async def cmd_sticker_approval(message: Message, db_session: AsyncSession = None
     # before creating or updating the sticker approval record.
     db_target = await db_session.get(User, target.id)
     if db_target is None:
-        db_target = User(
-            id=target.id,
-            telegram_id=target.id,
-            first_name=target.first_name or "User",
-            last_name=target.last_name,
-            username=target.username,
-            is_bot=False,
-        )
-        db_session.add(db_target)
         try:
-            await db_session.flush()
+            db_target = await _insert_or_get(
+                db_session,
+                User(
+                    id=target.id,
+                    telegram_id=target.id,
+                    first_name=target.first_name or "User",
+                    last_name=target.last_name,
+                    username=target.username,
+                    is_bot=False,
+                ),
+                User, User.id == target.id,
+            )
         except Exception as exc:
             await db_session.rollback()
             logger.exception("Could not create sticker-approval user", group_id=message.chat.id, user_id=target.id, error=str(exc))
@@ -348,8 +366,12 @@ async def cmd_sticker_approval(message: Message, db_session: AsyncSession = None
         )
     )
     if member is None:
-        member = GroupMember(group_id=message.chat.id, user_id=target.id)
-        db_session.add(member)
+        member = await _insert_or_get(
+            db_session, GroupMember(group_id=message.chat.id, user_id=target.id),
+            GroupMember,
+            GroupMember.group_id == message.chat.id,
+            GroupMember.user_id == target.id,
+        )
     approved = (message.text or "").split()[0].split("@", 1)[0].lstrip("/").lower() == "approve"
     member.approved_sticker = approved
     try:
