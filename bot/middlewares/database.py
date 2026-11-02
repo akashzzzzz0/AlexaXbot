@@ -289,7 +289,17 @@ is_bot=tg_user.is_bot,
             user.first_name = tg_user.first_name or "User"
             user.last_name = tg_user.last_name
             from datetime import datetime, timezone
-            user.last_seen = datetime.now(timezone.utc)
+            now = datetime.now(timezone.utc)
+            last_seen = user.last_seen
+            if last_seen is None:
+                user.last_seen = now
+            else:
+                # SQLite may return naive UTC datetimes for timezone columns.
+                if last_seen.tzinfo is None:
+                    last_seen = last_seen.replace(tzinfo=timezone.utc)
+                # Activity statistics do not need a database write per update.
+                if (now - last_seen).total_seconds() >= 60:
+                    user.last_seen = now
         return user
 
     async def _get_or_create_group(self, session: AsyncSession, chat) -> Group:
