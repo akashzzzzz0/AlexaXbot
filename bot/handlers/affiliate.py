@@ -529,13 +529,19 @@ async def premium_successful_payment(message: Message, db_session: AsyncSession,
         requested_stars=payment.total_amount,
         status="pending",
     )
-    db_session.add(req)
-    await db_session.flush()
-    order.status = "paid"
-    order.telegram_payment_charge_id = payment.telegram_payment_charge_id
-    order.request_id = req.id
-    order.paid_at = datetime.now(timezone.utc)
-    await db_session.flush()
+    try:
+        async with db_session.begin_nested():
+            db_session.add(req)
+            await db_session.flush()
+            order.status = "paid"
+            order.telegram_payment_charge_id = payment.telegram_payment_charge_id
+            order.request_id = req.id
+            order.paid_at = datetime.now(timezone.utc)
+            await db_session.flush()
+    except IntegrityError:
+        # A concurrent Telegram retry already recorded this unique charge ID.
+        await message.answer("This Telegram Stars payment has already been recorded.")
+        return
 
     await message.answer(
         f"✅ Telegram confirmed your payment of {payment.total_amount} Stars.\n"
