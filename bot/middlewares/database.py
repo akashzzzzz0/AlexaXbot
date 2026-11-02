@@ -140,14 +140,13 @@ class DatabaseMiddleware(BaseMiddleware):
                                 target_member.role = event.chat_member.new_chat_member.status
                                 data["db_member"] = target_member
 
-                        # A delivered group message proves the bot is still present.
-                        # This also repairs older rows whose membership status update
-                        # was missed while the bot was offline.
-                        if isinstance(event, Update) and event.message and event.message.chat.type in ("group", "supergroup"):
+                        # Any update delivered from a group proves ALEXA is currently
+                        # present there. This repairs stale records even when Telegram
+                        # delivers callbacks or member updates instead of a message.
+                        if isinstance(event, Update) and chat and chat.type in ("group", "supergroup"):
                             db_group.is_active = True
 
-                        # Keep the owner panel synchronized with the bot's actual
-                        # Telegram membership. aiogram may expose status as an enum.
+                        # Membership updates carry the authoritative new bot status.
                         if isinstance(event, Update) and event.my_chat_member:
                             raw_status = event.my_chat_member.new_chat_member.status
                             bot_status = getattr(raw_status, "value", raw_status)
