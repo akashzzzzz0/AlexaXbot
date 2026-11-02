@@ -10,6 +10,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 
@@ -20,6 +21,26 @@ from bot.handlers.owner import is_owner
 
 logger = structlog.get_logger()
 router = Router()
+
+async def _get_or_create_force_join_setting(session: AsyncSession, group_id: int, *, target: str, link: str):
+    setting = await session.scalar(select(ForceJoinSetting).where(ForceJoinSetting.group_id == group_id))
+    if setting is not None:
+        return setting
+    candidate = ForceJoinSetting(
+        group_id=group_id, required_chat_id=target, required_link=link, enabled=False,
+    )
+    try:
+        async with session.begin_nested():
+            session.add(candidate)
+            await session.flush()
+        return candidate
+    except IntegrityError:
+        setting = await session.scalar(select(ForceJoinSetting).where(ForceJoinSetting.group_id == group_id))
+        if setting is None:
+            raise
+        return setting
+
+
 _notice_cooldowns: dict[tuple[int, int], float] = {}
 
 
@@ -171,14 +192,12 @@ async def force_join_save_destination(message: Message, state: FSMContext, db_se
         await state.clear()
         await message.answer("That protected group is no longer active. Open Owner Panel → Force Join again.")
         return
-    setting = await db_session.scalar(select(ForceJoinSetting).where(ForceJoinSetting.group_id == group.id))
-    if setting is None:
-        setting = ForceJoinSetting(group_id=group.id, required_chat_id=target, required_link=link, enabled=False)
-        db_session.add(setting)
-    else:
-        setting.required_chat_id = target
-        setting.required_link = link
-        setting.enabled = False
+    setting = await _get_or_create_force_join_setting(
+        db_session, group.id, target=target, link=link,
+    )
+    setting.required_chat_id = target
+    setting.required_link = link
+    setting.enabled = False
     await db_session.commit()
     await state.clear()
     await message.answer(
