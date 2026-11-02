@@ -11,8 +11,9 @@ from bot.database.models import (
     Base, User, Wallet, Transaction, Referral, Mission, UserMission,
 )
 from bot.services.economy_service import (
-    add_coins, deduct_coins, process_referral,
+    add_coins, deduct_coins, process_referral, claim_daily_reward,
 )
+from bot.config import settings
 
 
 class AtomicWalletAndClaimTests(unittest.IsolatedAsyncioTestCase):
