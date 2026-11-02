@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.database.models import GroupSettings, WelcomeSettings, GoodbyeSettings
 from bot.keyboards.main_menu import nav_kb
@@ -17,6 +18,25 @@ from bot.middlewares.admin_actions import AdminActionMiddleware
 
 logger = structlog.get_logger()
 router = Router()
+
+async def _get_or_create_group_setting(session: AsyncSession, model, group_id: int, **defaults):
+    """Race-safe get-or-create for one-per-group settings rows."""
+    row = await session.scalar(select(model).where(model.group_id == group_id))
+    if row is not None:
+        return row
+    candidate = model(group_id=group_id, **defaults)
+    try:
+        async with session.begin_nested():
+            session.add(candidate)
+            await session.flush()
+        return candidate
+    except IntegrityError:
+        row = await session.scalar(select(model).where(model.group_id == group_id))
+        if row is None:
+            raise
+        return row
+
+
 router.callback_query.outer_middleware(AdminActionMiddleware(prefixes=("settings:", "welcome:", "goodbye:", "logs:", "log:", "gs:", "slowmode:", "autodel:")))
 router.message.outer_middleware(AdminActionMiddleware(commands={"setwelcome"}))
 
@@ -137,10 +157,7 @@ async def set_welcome_command(message: Message, db_session: AsyncSession, db_gro
             await state.set_state(WelcomeStates.waiting_message)
         return
     welcome_text = raw_html[1].strip()
-    ws = await db_session.scalar(select(WelcomeSettings).where(WelcomeSettings.group_id == db_group.id))
-    if not ws:
-        ws = WelcomeSettings(group_id=db_group.id, enabled=True, message=welcome_text)
-        db_session.add(ws)
+    ws = await _get_or_create_group_setting(db_session, WelcomeSettings, db_group.id, enabled=True, message=welcome_text)
     else:
         ws.enabled = True
         ws.message = welcome_text
@@ -156,16 +173,12 @@ async def save_welcome_message(message: Message, _: callable, db_session: AsyncS
         if state:
             await state.clear()
         return
-    ws = await db_session.scalar(select(WelcomeSettings).where(WelcomeSettings.group_id == db_group.id))
     # html_text serializes custom_emoji entities into Telegram-supported HTML,
     # allowing arbitrary Premium emojis to animate in the eventual welcome.
     welcome_content = message.html_text or message.text or message.caption or ""
-    if not ws:
-        ws = WelcomeSettings(group_id=db_group.id, message=welcome_content)
-        db_session.add(ws)
-    else:
-        ws.message = welcome_content
-        ws.enabled = True
+    ws = await _get_or_create_group_setting(db_session, WelcomeSettings, db_group.id, message=welcome_content)
+    ws.message = welcome_content
+    ws.enabled = True
     await db_session.flush()
     await message.reply("✅ Custom welcome saved and enabled, including any Telegram Premium custom emojis.")
     if state:
@@ -196,12 +209,8 @@ async def toggle_welcome(callback: CallbackQuery, _: callable, db_session: Async
     if not db_group:
         await callback.answer(_("error_group_only"), show_alert=True)
         return
-    ws = await db_session.scalar(select(WelcomeSettings).where(WelcomeSettings.group_id == db_group.id))
-    if not ws:
-        ws = WelcomeSettings(group_id=db_group.id, enabled=True)
-        db_session.add(ws)
-    else:
-        ws.enabled = not ws.enabled
+    ws = await _get_or_create_group_setting(db_session, WelcomeSettings, db_group.id, enabled=True)
+    ws.enabled = not ws.enabled
     await db_session.flush()
     status = _("btn_enabled") if ws.enabled else _("btn_disabled")
     await callback.answer(f"{_('btn_welcome')}: {status}")
@@ -242,12 +251,8 @@ async def save_goodbye_message(message: Message, _: callable, db_session: AsyncS
     if not db_group:
         if state: await state.clear()
         return
-    gs = await db_session.scalar(select(GoodbyeSettings).where(GoodbyeSettings.group_id == db_group.id))
-    if not gs:
-        gs = GoodbyeSettings(group_id=db_group.id, enabled=True, message=message.text or "")
-        db_session.add(gs)
-    else:
-        gs.message = message.text or ""
+    gs = await _get_or_create_group_setting(db_session, GoodbyeSettings, db_group.id, enabled=True, message=message.text or "")
+    gs.message = message.text or ""
     await db_session.flush()
     await message.reply("✅ Goodbye message saved.")
     if state: await state.clear()
@@ -258,12 +263,8 @@ async def goodbye_toggle(callback: CallbackQuery, _: callable, db_session: Async
     if not db_group:
         await callback.answer(_("error_group_only"), show_alert=True)
         return
-    gs = await db_session.scalar(select(GoodbyeSettings).where(GoodbyeSettings.group_id == db_group.id))
-    if not gs:
-        gs = GoodbyeSettings(group_id=db_group.id, enabled=True)
-        db_session.add(gs)
-    else:
-        gs.enabled = not gs.enabled
+    gs = await _get_or_create_group_setting(db_session, GoodbyeSettings, db_group.id, enabled=True)
+    gs.enabled = not gs.enabled
     await db_session.flush()
     await goodbye_menu(callback, _, db_session=db_session, db_group=db_group)
 
@@ -325,10 +326,7 @@ async def save_log_channel(message: Message, _: callable, db_session: AsyncSessi
     except Exception:
         await message.reply("Could not access that channel. Add ALEXA to it and send a valid @username or chat ID.")
         return
-    gs = await db_session.scalar(select(GroupSettings).where(GroupSettings.group_id == db_group.id))
-    if not gs:
-        gs = GroupSettings(group_id=db_group.id)
-        db_session.add(gs)
+    gs = await _get_or_create_group_setting(db_session, GroupSettings, db_group.id)
     gs.log_channel_id = chat.id
     await db_session.flush()
     await message.reply(f"✅ Log channel saved: <code>{chat.id}</code>", parse_mode="HTML")
@@ -340,11 +338,7 @@ async def log_events_menu(callback: CallbackQuery, _: callable, db_session: Asyn
     if not db_group:
         await callback.answer(_("error_group_only"), show_alert=True)
         return
-    gs = await db_session.scalar(select(GroupSettings).where(GroupSettings.group_id == db_group.id))
-    if not gs:
-        gs = GroupSettings(group_id=db_group.id)
-        db_session.add(gs)
-        await db_session.flush()
+    gs = await _get_or_create_group_setting(db_session, GroupSettings, db_group.id)
     s = lambda v: _status_icon(v)
     builder = InlineKeyboardBuilder()
     for txt, cb, field in [
@@ -370,11 +364,7 @@ async def toggle_log_event(callback: CallbackQuery, _: callable, db_session: Asy
         await callback.answer(_("error_group_only"), show_alert=True)
         return
     event = callback.data.split("log:")[1]
-    gs = await db_session.scalar(select(GroupSettings).where(GroupSettings.group_id == db_group.id))
-    if not gs:
-        gs = GroupSettings(group_id=db_group.id)
-        db_session.add(gs)
-        await db_session.flush()
+    gs = await _get_or_create_group_setting(db_session, GroupSettings, db_group.id)
     field_map = {"join": "log_join", "leave": "log_leave", "delete": "log_delete",
                  "edit": "log_edit", "ban": "log_ban", "mute": "log_mute", "warn": "log_warn"}
     field = field_map.get(event)
@@ -404,11 +394,7 @@ async def general_settings(callback: CallbackQuery, _: callable, db_session: Asy
     if not db_group:
         await callback.answer(_("error_group_only"), show_alert=True)
         return
-    gs = await db_session.scalar(select(GroupSettings).where(GroupSettings.group_id == db_group.id))
-    if not gs:
-        gs = GroupSettings(group_id=db_group.id)
-        db_session.add(gs)
-        await db_session.flush()
+    gs = await _get_or_create_group_setting(db_session, GroupSettings, db_group.id)
     await callback.message.edit_text(_("general_settings_menu"), reply_markup=general_settings_kb(_, gs), parse_mode="HTML")
     await callback.answer()
 
@@ -419,11 +405,7 @@ async def toggle_general_setting(callback: CallbackQuery, _: callable, db_sessio
         await callback.answer(_("error_group_only"), show_alert=True)
         return
     key = callback.data.split("gs:")[1]
-    gs = await db_session.scalar(select(GroupSettings).where(GroupSettings.group_id == db_group.id))
-    if not gs:
-        gs = GroupSettings(group_id=db_group.id)
-        db_session.add(gs)
-        await db_session.flush()
+    gs = await _get_or_create_group_setting(db_session, GroupSettings, db_group.id)
     toggle_map = {"eco": "economy_enabled", "games": "games_enabled", "xp": "xp_enabled",
                   "rep": "reputation_enabled", "silent": "silent_actions"}
     if key in toggle_map:
@@ -484,10 +466,7 @@ async def set_autodel(callback: CallbackQuery, _: callable, db_session: AsyncSes
         await callback.answer(_("error_group_only"), show_alert=True)
         return
     seconds = int(callback.data.split("autodel:")[1])
-    ws = await db_session.scalar(select(WelcomeSettings).where(WelcomeSettings.group_id == db_group.id))
-    if not ws:
-        ws = WelcomeSettings(group_id=db_group.id)
-        db_session.add(ws)
+    ws = await _get_or_create_group_setting(db_session, WelcomeSettings, db_group.id)
     ws.delete_after = seconds
     label = f"{seconds}s" if seconds else _("btn_off")
     await callback.answer(_("autodel_set").format(value=label))
