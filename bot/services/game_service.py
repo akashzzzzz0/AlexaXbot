@@ -305,6 +305,14 @@ async def _play_duel(session: AsyncSession, duel: Duel) -> dict:
         duel.status = "completed"
         duel.winner_id = None
         duel.completed_at = datetime.now(timezone.utc)
+        await get_or_create_duel_stats(session, duel.challenger_id)
+        await get_or_create_duel_stats(session, duel.opponent_id)
+        await session.execute(
+            update(DuelStats)
+            .where(DuelStats.user_id.in_([duel.challenger_id, duel.opponent_id]))
+            .values(draws=func.coalesce(DuelStats.draws, 0) + 1)
+            .execution_options(synchronize_session=False)
+        )
         if duel.wager > 0:
             await add_coins(session, duel.challenger_id, duel.wager, "duel_draw", "Duel draw refund")
             await add_coins(session, duel.opponent_id, duel.wager, "duel_draw", "Duel draw refund")
