@@ -230,7 +230,17 @@ async def process_referral(
         return False
 
     referrer_wallet = await get_or_create_wallet(session, referrer_id)
-    referrer_wallet.balance = (referrer_wallet.balance or 0) + settings.REFERRAL_REWARD
+    # Atomic increment: concurrent referral completions must not overwrite
+    # another reward written to the same wallet.
+    await session.execute(
+        update(Wallet)
+        .where(Wallet.id == referrer_wallet.id)
+        .values(
+            balance=func.coalesce(Wallet.balance, 0) + settings.REFERRAL_REWARD,
+            total_earned=func.coalesce(Wallet.total_earned, 0) + settings.REFERRAL_REWARD,
+        )
+        .execution_options(synchronize_session=False)
+    )
 
     tx = Transaction(
         wallet_id=referrer_wallet.id,
