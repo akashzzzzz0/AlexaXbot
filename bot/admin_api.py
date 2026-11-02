@@ -2178,6 +2178,7 @@ async def owner_group_communication_settings_handler(request):
 
 @require_admin
 async def owner_promotion_handler(request):
+    from bot.database.connection import async_session_maker
     """Send a confirmed text promotion to a selected set of active groups."""
     if request.method == "GET":
         async with async_session_maker() as session:
@@ -2247,6 +2248,7 @@ async def owner_promotion_handler(request):
 
 @require_admin
 async def owner_ban_all_preview_handler(request):
+    from bot.database.connection import async_session_maker
     """Preview the tracked members eligible for the existing confirmed Ban All action."""
     bot = None
     try:
