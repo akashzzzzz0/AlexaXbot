@@ -6,7 +6,7 @@ from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, update
 from aiogram import Bot
 from aiogram.types import Message, ChatPermissions
 from bot.database.models import SecuritySettings, CaptchaChallenge, GroupMember
@@ -230,12 +230,24 @@ async def create_captcha_challenge(
     user_id: int,
     captcha_type: str,
     timeout: int = 60,
-) -> CaptchaChallenge:
+) -> Tuple[CaptchaChallenge, bool]:
+    # Invalidate any previous challenge before creating a fresh one. A partial
+    # unique index below guarantees at most one unsolved challenge per member/group.
+    await session.execute(
+        update(CaptchaChallenge)
+        .where(
+            CaptchaChallenge.group_id == group_id,
+            CaptchaChallenge.user_id == user_id,
+            CaptchaChallenge.is_solved.is_(False),
+        )
+        .values(is_solved=True)
+    )
+
     answer = None
     if captcha_type == "math":
         _, answer = generate_math_question()
 
-    expires_at = datetime.now(timezone.utc) + timedelta(seconds=timeout)
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=max(1, timeout))
     challenge = CaptchaChallenge(
         group_id=group_id,
         user_id=user_id,
@@ -243,38 +255,84 @@ async def create_captcha_challenge(
         answer=answer,
         expires_at=expires_at,
     )
-    session.add(challenge)
-    await session.flush()
-    return challenge
+    try:
+        async with session.begin_nested():
+            session.add(challenge)
+            await session.flush()
+        return challenge, True
+    except Exception as exc:
+        from sqlalchemy.exc import IntegrityError
+        if not isinstance(exc, IntegrityError):
+            raise
+        # A concurrent join already created the one active challenge.
+        existing = await session.scalar(
+            select(CaptchaChallenge).where(
+                CaptchaChallenge.group_id == group_id,
+                CaptchaChallenge.user_id == user_id,
+                CaptchaChallenge.is_solved.is_(False),
+            ).order_by(CaptchaChallenge.id.desc()).limit(1)
+        )
+        if existing is None:
+            raise
+        return existing, False
 
 
 async def verify_captcha(
     session: AsyncSession,
     group_id: int,
     user_id: int,
+    challenge_id: int,
     answer: Optional[str] = None,
-) -> bool:
+) -> Optional[bool]:
     challenge = await session.scalar(
         select(CaptchaChallenge).where(
-            and_(
-                CaptchaChallenge.group_id == group_id,
-                CaptchaChallenge.user_id == user_id,
-                CaptchaChallenge.is_solved == False,
-            )
-        ).order_by(CaptchaChallenge.created_at.desc())
+            CaptchaChallenge.id == challenge_id,
+            CaptchaChallenge.group_id == group_id,
+            CaptchaChallenge.user_id == user_id,
+            CaptchaChallenge.is_solved.is_(False),
+        )
     )
-    if not challenge:
-        return False
-    if datetime.now(timezone.utc) > challenge.expires_at.replace(tzinfo=timezone.utc):
-        return False
+    if challenge is None:
+        return None
+
+    now = datetime.now(timezone.utc)
+    expires_at = challenge.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if now >= expires_at:
+        # Expire it atomically; a stale/expired button must not count as a wrong answer.
+        await session.execute(
+            update(CaptchaChallenge)
+            .where(
+                CaptchaChallenge.id == challenge_id,
+                CaptchaChallenge.is_solved.is_(False),
+            )
+            .values(is_solved=True)
+        )
+        return None
+
     if challenge.challenge_type == "button":
-        challenge.is_solved = True
-        return True
-    if answer and challenge.answer:
-        if answer.strip() == challenge.answer.strip():
-            challenge.is_solved = True
-            return True
-    return False
+        correct = answer == "button"
+    else:
+        correct = bool(answer and challenge.answer and answer.strip() == challenge.answer.strip())
+
+    if not correct:
+        return False
+
+    # Compare-and-set: only one concurrent callback can consume this challenge.
+    claimed = await session.execute(
+        update(CaptchaChallenge)
+        .where(
+            CaptchaChallenge.id == challenge_id,
+            CaptchaChallenge.group_id == group_id,
+            CaptchaChallenge.user_id == user_id,
+            CaptchaChallenge.is_solved.is_(False),
+            CaptchaChallenge.expires_at > now,
+        )
+        .values(is_solved=True)
+        .execution_options(synchronize_session=False)
+    )
+    return True if claimed.rowcount == 1 else None
 
 
 async def is_raid_detected(
