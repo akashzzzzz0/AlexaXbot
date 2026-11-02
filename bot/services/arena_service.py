@@ -6,7 +6,7 @@ score ledger so repeated callbacks cannot award the same event twice.
 from datetime import datetime, timezone
 import random
 
-from sqlalchemy import select
+from sqlalchemy import select, update, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -108,9 +108,19 @@ async def award_xp(session: AsyncSession, user_id: int, group_id: int | None,
     except IntegrityError:
         # The event key is globally unique; do not award XP twice on retries.
         return False
-    profile.xp = int(profile.xp or 0) + amount
-    profile.total_games = int(profile.total_games or 0) + 1
-    profile.wins = int(profile.wins or 0) + wins
+    # Use SQL-side increments so simultaneous Arena events cannot overwrite
+    # XP, games, or wins recorded by another update.
+    await session.execute(
+        update(ArenaProfile)
+        .where(ArenaProfile.user_id == user_id)
+        .values(
+            xp=func.coalesce(ArenaProfile.xp, 0) + amount,
+            total_games=func.coalesce(ArenaProfile.total_games, 0) + 1,
+            wins=func.coalesce(ArenaProfile.wins, 0) + wins,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    await session.refresh(profile)
     badges = list(profile.badges or [])
     milestones = [
         (100, "first_century"),
