@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from bot.services.economy_service import (
     get_balance, claim_daily_reward, claim_weekly_reward, claim_monthly_reward,
     deposit_to_bank, withdraw_from_bank, transfer_coins, get_transactions
@@ -17,6 +18,20 @@ import structlog
 
 logger = structlog.get_logger()
 router = Router()
+
+async def _insert_or_get(session: AsyncSession, candidate, model, *conditions):
+    try:
+        async with session.begin_nested():
+            session.add(candidate)
+            await session.flush()
+        return candidate, True
+    except IntegrityError:
+        existing = await session.scalar(select(model).where(*conditions))
+        if existing is None:
+            raise
+        return existing, False
+
+
 
 
 class EconomyStates(StatesGroup):
@@ -479,7 +494,11 @@ async def shop_category(callback: CallbackQuery, _: callable, db_session: AsyncS
     for code, name, cat, price, desc_text in catalog:
         item = await db_session.scalar(select(ShopItem).where(ShopItem.code == code))
         if not item:
-            db_session.add(ShopItem(code=code, name_key=name, description_key=desc_text, category=cat, price=price, icon=name.split()[0], is_active=True))
+            await _insert_or_get(
+                db_session,
+                ShopItem(code=code, name_key=name, description_key=desc_text, category=cat, price=price, icon=name.split()[0], is_active=True),
+                ShopItem, ShopItem.code == code,
+            )
     await db_session.flush()
     result = await db_session.execute(select(ShopItem).where(ShopItem.category == category, ShopItem.is_active.is_(True)).order_by(ShopItem.price.asc()))
     items = result.scalars().all()
@@ -515,11 +534,22 @@ async def shop_buy(callback: CallbackQuery, _: callable, db_session: AsyncSessio
     if owned:
         await callback.answer("You already own this item.", show_alert=True)
         return
+    owned, created = await _insert_or_get(
+        db_session,
+        UserShopItem(user_id=db_user.id, item_id=item.id, quantity=1, is_equipped=False),
+        UserShopItem,
+        UserShopItem.user_id == db_user.id,
+        UserShopItem.item_id == item.id,
+    )
+    if not created:
+        await callback.answer("You already own this item.", show_alert=True)
+        return
     ok, balance = await deduct_coins(db_session, db_user.id, item.price, "shop_purchase", f"Purchased {item.name_key}")
     if not ok:
+        await db_session.delete(owned)
+        await db_session.flush()
         await callback.answer(f"Not enough coins. Balance: {balance}", show_alert=True)
         return
-    db_session.add(UserShopItem(user_id=db_user.id, item_id=item.id, quantity=1, is_equipped=False))
     await callback.answer(f"Purchased {item.name_key} for {item.price} coins!", show_alert=True)
     await callback.message.edit_reply_markup(reply_markup=None)
 
@@ -542,9 +572,14 @@ async def missions_category(callback: CallbackQuery, _: callable, db_session: As
         for mission in missions:
             row = await db_session.scalar(select(UserMission).where(UserMission.user_id == db_user.id, UserMission.mission_id == mission.id, UserMission.period == key))
             if row is None:
-                row = UserMission(user_id=db_user.id, mission_id=mission.id, period=key, progress=0, completed=False)
-                db_session.add(row)
-                await db_session.flush()
+                row, _created = await _insert_or_get(
+                    db_session,
+                    UserMission(user_id=db_user.id, mission_id=mission.id, period=key, progress=0, completed=False),
+                    UserMission,
+                    UserMission.user_id == db_user.id,
+                    UserMission.mission_id == mission.id,
+                    UserMission.period == key,
+                )
             progress = min(row.progress or 0, mission.requirement_value or 1)
             status = "✅ Claimed" if row.completed_at else ("🎁 Ready to claim" if row.completed else "⏳ In progress")
             lines.append(f"\n{mission.icon or '🎯'} <b>{mission.name_key}</b> — {progress}/{mission.requirement_value}\nReward: {mission.reward_coins} coins + {mission.reward_xp} XP\n{mission.description_key} · {status}")
