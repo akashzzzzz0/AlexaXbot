@@ -87,7 +87,11 @@ def owner_kb(_=None) -> object:
     builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
     builder.button(text="🔨 Ban All", callback_data="owner:banall")
     builder.button(text="⚙️ Owner Settings", callback_data="owner:settings")
-    owner_mini_app_url = os.getenv("OWNER_MINI_APP_URL", "https://alexa-bot.fadehost.app/owner").strip()
+    # A blank host variable must not disable the secure Mini App launcher.
+    owner_mini_app_url = (
+        os.getenv("OWNER_MINI_APP_URL", "").strip()
+        or "https://alexa-bot.fadehost.app/owner"
+    )
     if owner_mini_app_url.startswith("https://"):
         builder.button(text="💎 Open VIP Owner Mini App", web_app=WebAppInfo(url=owner_mini_app_url))
     builder.adjust(2, 2, 2, 2, 2, 2, 2, 1)
@@ -226,7 +230,7 @@ async def _render_group(callback: CallbackQuery, session: AsyncSession, group_id
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=_group_detail_kb(group_id), disable_web_page_preview=True)
 
 
-@router.message(Command("owner", "panel"))
+@router.message(Command("owner"))
 async def owner_panel(message: Message, _: callable, **kwargs):
     if not is_owner(message.from_user.id) or message.chat.type != "private":
         # Never post the owner panel into a group, even if the owner invokes it there.
