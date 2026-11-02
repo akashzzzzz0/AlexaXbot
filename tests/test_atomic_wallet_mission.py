@@ -78,6 +78,26 @@ class AtomicWalletAndClaimTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(referral.reward_given)
             self.assertEqual(len(txs), 1)
 
+    async def test_daily_reward_is_single_use_and_handles_null_balances(self):
+        async with self.sessions() as session:
+            session.add(Wallet(
+                user_id=987650001, balance=None, bank_balance=0,
+                total_earned=None, total_spent=0,
+            ))
+            await session.commit()
+        async with self.sessions() as session:
+            first = await claim_daily_reward(session, 987650001)
+            second = await claim_daily_reward(session, 987650001)
+            self.assertTrue(first[0])
+            self.assertFalse(second[0])
+            await session.commit()
+        async with self.sessions() as session:
+            wallet = await session.scalar(
+                select(Wallet).where(Wallet.user_id == 987650001)
+            )
+            self.assertEqual(wallet.balance, settings.DAILY_REWARD)
+            self.assertEqual(wallet.total_earned, settings.DAILY_REWARD)
+
     async def test_mission_claim_transition_is_single_use(self):
         async with self.sessions() as session:
             mission = Mission(
