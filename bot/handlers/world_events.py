@@ -11,6 +11,7 @@ from aiogram.filters import Command
 from aiogram.types import BufferedInputFile, Message
 from aiogram.dispatcher.event.bases import SkipHandler
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 
 from bot.config import settings
 from bot.database.connection import async_session_maker
@@ -536,7 +537,13 @@ async def _create_event(bot, chat_id: int, chat_title: str, created_by: int | No
             status="active",
             created_by=created_by,
         )
-        session.add(event)
+        try:
+            async with session.begin_nested():
+                session.add(event)
+                await session.flush()
+        except IntegrityError:
+            # Another scheduler worker already created this group's active event.
+            return False
         await session.commit()
         event_id = event.id
     try:
