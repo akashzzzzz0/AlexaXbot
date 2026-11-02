@@ -279,10 +279,15 @@ async def groups_handler(request):
         offset = (page - 1) * limit
 
         async with async_session_maker() as session:
-            # Match the native Owner Panel's connected-groups list and
-            # keep removed chats out of group actions/broadcast selection.
-            query = select(Group).where(Group.is_active.is_(True))
-            count_query = select(func.count()).select_from(Group).where(Group.is_active.is_(True))
+            # Group Activity must show every known chat, including inactive
+            # records, so owners can inspect stale registrations and re-verify
+            # them. Other callers keep the safe active-only default.
+            include_inactive = request.rel_url.query.get("include_inactive", "").lower() in {"1", "true", "yes"}
+            query = select(Group)
+            count_query = select(func.count()).select_from(Group)
+            if not include_inactive:
+                query = query.where(Group.is_active.is_(True))
+                count_query = count_query.where(Group.is_active.is_(True))
             if search:
                 like = f"%{search}%"
                 cond = or_(Group.title.ilike(like), Group.username.ilike(like))
