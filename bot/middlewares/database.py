@@ -3,6 +3,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Message, CallbackQuery, Update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from bot.database.models import User, Group, GroupMember, SecuritySettings, GroupDisabledCommand, InboxMessage, GroupInboxMessage
 import structlog
 
@@ -290,34 +291,44 @@ class DatabaseMiddleware(BaseMiddleware):
 
     async def _get_or_create_user(self, session: AsyncSession, tg_user) -> User:
         user = await session.get(User, tg_user.id)
-        if not user:
-            user = User(
+        if user is None:
+            candidate = User(
                 id=tg_user.id,
                 username=tg_user.username,
                 first_name=tg_user.first_name or "User",
                 last_name=tg_user.last_name,
-is_bot=tg_user.is_bot,
+                is_bot=tg_user.is_bot,
                 is_premium=getattr(tg_user, "is_premium", False) or False,
                 telegram_id=tg_user.id,
             )
-            session.add(user)
-            await session.flush()
+            try:
+                # Concurrent Telegram updates can both observe a missing user.
+                # Isolate the insert so a duplicate-key race does not poison the
+                # update's outer transaction.
+                async with session.begin_nested():
+                    session.add(candidate)
+                    await session.flush()
+                user = candidate
+            except IntegrityError:
+                user = await session.get(User, tg_user.id)
+                if user is None:
+                    raise
+
+        user.username = tg_user.username
+        user.first_name = tg_user.first_name or "User"
+        user.last_name = tg_user.last_name
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        last_seen = user.last_seen
+        if last_seen is None:
+            user.last_seen = now
         else:
-            user.username = tg_user.username
-            user.first_name = tg_user.first_name or "User"
-            user.last_name = tg_user.last_name
-            from datetime import datetime, timezone
-            now = datetime.now(timezone.utc)
-            last_seen = user.last_seen
-            if last_seen is None:
+            # SQLite may return naive UTC datetimes for timezone columns.
+            if last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=timezone.utc)
+            # Activity statistics do not need a database write per update.
+            if (now - last_seen).total_seconds() >= 60:
                 user.last_seen = now
-            else:
-                # SQLite may return naive UTC datetimes for timezone columns.
-                if last_seen.tzinfo is None:
-                    last_seen = last_seen.replace(tzinfo=timezone.utc)
-                # Activity statistics do not need a database write per update.
-                if (now - last_seen).total_seconds() >= 60:
-                    user.last_seen = now
         return user
 
     async def _get_or_create_group(self, session: AsyncSession, chat) -> Group:
@@ -346,7 +357,20 @@ is_bot=tg_user.is_bot,
             )
         )
         if not member:
-            member = GroupMember(group_id=group_id, user_id=user_id)
-            session.add(member)
-            await session.flush()
+            candidate = GroupMember(group_id=group_id, user_id=user_id)
+            try:
+                # The unique constraint is the final concurrency guard. If a
+                # competing update inserted first, load that existing row.
+                async with session.begin_nested():
+                    session.add(candidate)
+                    await session.flush()
+                member = candidate
+            except IntegrityError:
+                member = await session.scalar(
+                    select(GroupMember).where(
+                        and_(GroupMember.group_id == group_id, GroupMember.user_id == user_id)
+                    )
+                )
+                if member is None:
+                    raise
         return member
