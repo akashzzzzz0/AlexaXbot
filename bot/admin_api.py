@@ -1168,6 +1168,7 @@ async def owner_inbox_messages_handler(request):
                              headers={"Cache-Control": "no-store"})
 
 
+@require_admin
 async def owner_inbox_reply_handler(request):
     bot = None
     try:
