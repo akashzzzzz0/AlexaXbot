@@ -261,7 +261,7 @@ const modules=[
 {id:'userlist',icon:'🧑‍🤝‍🧑',name:'Owner User List',desc:'Existing Telegram user-list workflow',kind:'api'},
 {id:'groupactivity',icon:'🛰️',name:'Group Activity Center',desc:'Group activity, links and permissions',kind:'api'}
 ];
-let stack=['home'], pageNo=1, searchText='', lastPage='home', overview=null, inboxContacts={};
+let stack=['home'], pageNo=1, searchText='', lastPage='home', overview=null, inboxContacts={}, inboxPage=1;
 let chatRefreshTimer=null;
 function stopChatRefresh(){if(chatRefreshTimer){clearInterval(chatRefreshTimer);chatRefreshTimer=null}}
 function startChatRefresh(fn){stopChatRefresh();chatRefreshTimer=setInterval(fn,5000)}
@@ -582,7 +582,32 @@ async function saveForceJoin(groupId,enabled){
 
 async function loadPromotionRequests(){try{const d=await api('/owner-api/promotion-requests');$('promotionRows').innerHTML=(d.requests||[]).map(x=>'<div class="item"><b>'+esc(x.title)+'</b><div class="meta">Request #'+x.id+' · '+esc(x.status)+' · User '+esc(x.userId)+'</div><p><a href="'+esc(x.link)+'" target="_blank" rel="noopener">Open group link</a></p>'+(x.status==='pending'?'<div class="actions"><button class="primary" data-promo="'+x.id+'" data-status="approved">Approve</button><button class="danger" data-promo="'+x.id+'" data-status="rejected">Reject</button></div>':'')+'</div>').join('')||'<p>No promotion requests.</p>';document.querySelectorAll('[data-promo]').forEach(b=>b.onclick=()=>reviewPromotion(b.dataset.promo,b.dataset.status))}catch(e){showError(e.message)}}
 async function reviewPromotion(id,status){if(!confirm(status.toUpperCase()+' promotion request #'+id+'?'))return;try{await api('/owner-api/promotion-requests/'+id,{method:'POST',body:JSON.stringify({status})});note('Promotion request '+status+'.');loadPromotionRequests()}catch(e){showError(e.message)}}
-async function loadInbox(){stopChatRefresh();try{const first=await api('/owner-api/inbox?page=1&limit=200');let conversations=[...(first.conversations||[])];const total=Number(first.total||conversations.length);const pages=Math.ceil(total/200);for(let page=2;page<=pages;page++){const next=await api('/owner-api/inbox?page='+page+'&limit=200');conversations.push(...(next.conversations||[]));}inboxContacts=Object.fromEntries(conversations.map(x=>[String(x.userId),x]));$('inboxRows').innerHTML='<div class="section"><h3>All started private chats</h3><span class="muted">'+conversations.length+' / '+total+'</span></div>'+(conversations.map(x=>'<button class="item chat-row" data-open-inbox="'+esc(x.userId)+'" style="display:block;width:100%;text-align:left"><div class="row"><img data-secure-src="/owner-api/avatar/'+esc(x.userId)+'" alt="Profile photo" style="display:none;width:42px;height:42px;border-radius:50%;object-fit:cover"><span><b>'+esc(x.name)+(x.username?' @'+esc(x.username):'')+'</b><div class="meta">User '+esc(x.userId)+' · Unread '+x.unread+'</div></span></div><p>'+esc(x.preview||'No message preview')+'</p><div class="meta">'+esc(x.createdAt||'')+'</div></button>').join('')||'<p>No started private chats are recorded yet.</p>');loadSecureMedia();document.querySelectorAll('[data-open-inbox]').forEach(b=>b.onclick=()=>openInboxChat(b.dataset.openInbox))}catch(e){showError(e.message)}}
+async function loadInbox(page=1){
+  stopChatRefresh();
+  inboxPage=Math.max(1,Number(page)||1);
+  const box=$('inboxRows');
+  box.innerHTML='<p class="muted">Loading conversations…</p>';
+  try{
+    const d=await api('/owner-api/inbox?page='+inboxPage+'&limit=50');
+    const conversations=d.conversations||[];
+    const total=Number(d.total||0);
+    const pages=Math.max(1,Math.ceil(total/50));
+    if(inboxPage>pages){inboxPage=pages;return loadInbox(inboxPage);}
+    inboxContacts=Object.fromEntries(conversations.map(x=>[String(x.userId),x]));
+    box.innerHTML='<div class="section"><h3>All started private chats</h3><span class="muted">'+total.toLocaleString()+' users · Page '+inboxPage+' / '+pages+'</span></div>'+
+      (conversations.map(x=>'<button class="item chat-row" data-open-inbox="'+esc(x.userId)+'" style="display:block;width:100%;text-align:left"><div class="row"><img data-secure-src="/owner-api/avatar/'+esc(x.userId)+'" alt="Profile photo" style="display:none;width:42px;height:42px;border-radius:50%;object-fit:cover"><span><b>'+esc(x.name)+(x.username?' @'+esc(x.username):'')+'</b><div class="meta">User '+esc(x.userId)+' · Unread '+Number(x.unread||0)+'</div></span></div><p>'+esc(x.preview||'No message preview')+'</p><div class="meta">'+esc(x.createdAt||'')+'</div></button>').join('')||'<p>No started private chats are recorded yet.</p>')+
+      '<div class="actions"><button id="inboxPrev" '+(inboxPage<=1?'disabled':'')+'>← Previous</button><button id="inboxRefresh" class="primary">↻ Refresh</button><button id="inboxNext" '+(inboxPage>=pages?'disabled':'')+'>Next →</button></div>';
+    loadSecureMedia();
+    document.querySelectorAll('[data-open-inbox]').forEach(b=>b.onclick=()=>openInboxChat(b.dataset.openInbox));
+    $('inboxPrev').onclick=()=>loadInbox(inboxPage-1);
+    $('inboxNext').onclick=()=>loadInbox(inboxPage+1);
+    $('inboxRefresh').onclick=()=>loadInbox(inboxPage);
+  }catch(e){
+    box.innerHTML='<p class="muted">Conversations could not be loaded.</p><button id="inboxRetry" class="primary">Retry</button>';
+    $('inboxRetry').onclick=()=>loadInbox(inboxPage);
+    showError(e.message);
+  }
+}
 async function openInboxChat(id,silent=false){try{const draft=silent?($('chatReply')?.value||''):'';const contact=inboxContacts[String(id)]||{};const d=await api('/owner-api/inbox/'+id+'/messages?limit=50');$('inboxRows').innerHTML='<button id="inboxBack">← Conversations</button><div class="item"><div class="row"><img data-secure-src="/owner-api/avatar/'+esc(id)+'" alt="Telegram profile photo" style="display:none;width:48px;height:48px;border-radius:50%;object-fit:cover"><div><b>'+esc(contact.name||'Telegram user')+'</b><div class="meta">'+(contact.username?'@'+esc(contact.username)+' · ':'')+'ID '+esc(id)+'</div></div></div></div><div id="privateChatMessages">'+((d.messages||[]).map(m=>'<div class="item" style="margin-left:'+(m.direction==='outgoing'?'12%':'0')+';border-left:3px solid '+(m.direction==='outgoing'?'#a78bfa':'#22d3ee')+'"><div class="meta">'+(m.direction==='outgoing'?'ALEXA':'USER')+' · '+esc(m.createdAt||'')+' · '+esc(m.contentType)+'</div><p>'+esc(m.text)+'</p>'+mediaMarkup(m)+'<button class="danger" data-delete-inbox="'+esc(m.id)+'">Delete Telegram message</button></div>').join('')||'<p>No stored messages in this conversation.</p>')+'</div><textarea class="field" rows="3" maxlength="4000" id="chatReply" placeholder="Write a reply…"></textarea><button class="primary" id="chatSend">Send reply</button><p class="muted">Updates automatically every 5 seconds. Only messages Alexa has received or sent are available here.</p>';if(draft)$('chatReply').value=draft;loadSecureMedia();document.getElementById('inboxBack').onclick=loadInbox;document.getElementById('chatSend').onclick=async()=>{const f=$('chatReply'),message=f.value.trim();if(!message)return showError('Write a reply first.');try{await api('/owner-api/inbox/'+id+'/reply',{method:'POST',body:JSON.stringify({message})});f.value='';note('Reply sent.');await openInboxChat(id)}catch(e){showError(e.message)}};document.querySelectorAll('[data-delete-inbox]').forEach(b=>b.onclick=async()=>{if(!confirm('Delete this message in Telegram?'))return;try{await api('/owner-api/inbox/'+id+'/messages/'+b.dataset.deleteInbox+'/delete',{method:'POST'});note('Message deleted.');await openInboxChat(id)}catch(e){showError(e.message)}});if(!silent)startChatRefresh(()=>openInboxChat(id,true))}catch(e){if(!silent)showError(e.message)}}
 async function loadStatistics(){
   const box=$('statisticsRows');
