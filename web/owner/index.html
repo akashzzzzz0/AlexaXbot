@@ -351,12 +351,16 @@ async function loadOlderGroupMessages(groupId,canPin){
 async function loadGroupMessages(id,silent=false){
  try{
   const previousScroll=silent?($('activityGroupList')?.scrollTop||0):0;
-  const [d,p]=await Promise.all([api('/owner-api/groups/'+id+'/messages?limit=50'),api('/owner-api/groups/'+id+'/permissions')]);
+  const results=await Promise.allSettled([api('/owner-api/groups/'+id+'/messages?limit=50'),api('/owner-api/groups/'+id+'/permissions')]);
+  if(results[0].status==='rejected')throw results[0].reason;
+  const d=results[0].value;
+  const p=results[1].status==='fulfilled'?results[1].value:{permissions:{}};
+  const permissionsUnavailable=results[1].status==='rejected';
   const voiceEvents=(d.messages||[]).filter(m=>String(m.contentType||'').startsWith('voice_chat_'));
   const lastVoice=voiceEvents.at(-1);
   const voiceState=lastVoice?(lastVoice.contentType==='voice_chat_started'?'Active (last event received)':lastVoice.contentType==='voice_chat_ended'?'Ended':'Scheduled / invitation event received'):'No voice-chat event received yet';
   const voiceHtml='<div class="item"><h3>Voice chat · '+esc(voiceState)+'</h3>'+(lastVoice?'<p>'+esc(lastVoice.text)+'</p><div class="meta">'+esc(lastVoice.createdAt||'')+'</div>':'')+'<p class="muted">Telegram bots do not receive a live voice-chat participant roster. This panel shows only start/end/scheduled/invitation events Telegram delivers to Alexa.</p></div>';
-  $('activityGroupList').innerHTML='<button id="backGroupMessages">← Group activity</button><div class="item"><div class="row"><img data-secure-src="/owner-api/group-avatar/'+esc(id)+'" alt="Group photo" style="width:44px;height:44px;border-radius:50%;object-fit:cover"><div><h3>'+esc(d.group?.title||'Group')+' · Live messages</h3><div class="meta">Telegram-style recent conversation · refreshes every 5 seconds</div></div></div></div><button id="loadOlderGroup" '+(d.hasMore?'':'hidden')+'>Load older messages</button><div id="groupChatMessages">'+((d.messages||[]).map(m=>renderGroupMessageCard(m,id,!!p.permissions?.canPinMessages)).join('')||'<p>No messages captured yet. Alexa can only display messages Telegram delivers to the bot.</p>')+'</div>'+voiceHtml;
+  $('activityGroupList').innerHTML='<button id="backGroupMessages">← Group activity</button><div class="item"><div class="row"><img data-secure-src="/owner-api/group-avatar/'+esc(id)+'" alt="Group photo" style="width:44px;height:44px;border-radius:50%;object-fit:cover"><div><h3>'+esc(d.group?.title||'Group')+' · Live messages</h3><div class="meta">Telegram-style recent conversation · refreshes every 5 seconds</div></div></div></div>'+(permissionsUnavailable?'<p class="muted">Telegram permissions are temporarily unavailable. Messages are still shown; permission-dependent actions are disabled.</p>':'')+'<button id="loadOlderGroup" '+(d.hasMore?'':'hidden')+'>Load older messages</button><div id="groupChatMessages">'+((d.messages||[]).map(m=>renderGroupMessageCard(m,id,!!p.permissions?.canPinMessages)).join('')||'<p>No messages captured yet. Alexa can only display messages Telegram delivers to the bot.</p>')+'</div>'+voiceHtml;
   loadSecureMedia();
   $('backGroupMessages').onclick=()=>{stopChatRefresh();loadGroupActivity(id)};
   $('loadOlderGroup').onclick=()=>loadOlderGroupMessages(id,!!p.permissions?.canPinMessages);
