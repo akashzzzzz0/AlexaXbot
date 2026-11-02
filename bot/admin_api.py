@@ -1344,6 +1344,72 @@ async def owner_health_handler(request):
 
 
 @require_admin
+async def owner_group_promotion_handler(request):
+    """Send a confirmed text promotion to every currently active registered group."""
+    bot = None
+    try:
+        body = await request.json()
+        message_text = str(body.get("message", "")).strip()
+        if not message_text or len(message_text) > 4000:
+            return web.json_response({"error": "Message must be 1–4000 characters."}, status=400)
+        if body.get("confirmText") != "SEND TO ALL ACTIVE GROUPS":
+            return web.json_response({"error": "Exact confirmation is required: SEND TO ALL ACTIVE GROUPS."}, status=400)
+
+        async with async_session_maker() as session:
+            groups = (await session.scalars(
+                select(Group).where(Group.is_active.is_(True)).order_by(Group.title.asc())
+            )).all()
+            targets = [(int(group.id), str(group.title or group.id)) for group in groups]
+        if not targets:
+            return web.json_response({"error": "No active registered groups are available."}, status=404)
+
+        from bot.config import settings
+        from aiogram import Bot
+        from aiogram.exceptions import TelegramRetryAfter
+        import asyncio
+        import structlog
+        bot = Bot(token=settings.BOT_TOKEN)
+        sent = 0
+        failed = []
+        for group_id, group_title in targets:
+            last_error = None
+            delivered = False
+            for attempt in range(5):
+                try:
+                    await bot.send_message(chat_id=group_id, text=message_text)
+                    sent += 1
+                    delivered = True
+                    break
+                except TelegramRetryAfter as exc:
+                    last_error = exc
+                    if attempt < 4:
+                        await asyncio.sleep(max(1, int(exc.retry_after)) + 1)
+                except Exception as exc:
+                    last_error = exc
+                    break
+            if not delivered:
+                failed.append({"groupId": str(group_id), "title": group_title, "reason": str(last_error or "Delivery failed")[:160]})
+                structlog.get_logger().warning(
+                    "owner_miniapp_group_promotion_failed",
+                    group_id=group_id, group_title=group_title, error=str(last_error),
+                )
+            await asyncio.sleep(0.05)
+
+        return web.json_response({
+            "success": True, "total": len(targets), "sent": sent,
+            "failed": len(failed), "failures": failed[:20],
+            "note": "Text-only Mini App promotion. Use the original Telegram owner workflow for photos, videos and other media.",
+        }, headers={"Cache-Control": "no-store"})
+    except Exception:
+        import structlog
+        structlog.get_logger().exception("Owner Mini App group promotion failed")
+        return web.json_response({"error": "Group promotion failed. Check Alexa's Telegram connectivity and permissions."}, status=502)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
+@require_admin
 async def owner_group_message_handler(request):
     bot = None
     try:
@@ -2110,6 +2176,7 @@ def setup_admin_routes(app):
     app.router.add_post('/owner-api/groups/{group_id}/leave', owner_group_leave_handler)
     app.router.add_get('/owner-api/statistics', owner_statistics_handler)
     app.router.add_get('/owner-api/health', owner_health_handler)
+    app.router.add_post('/owner-api/group-promotion', owner_group_promotion_handler)
     app.router.add_post('/owner-api/group-message', owner_group_message_handler)
     app.router.add_post('/owner-api/security', owner_security_update)
     # Reuse existing admin handlers behind Telegram owner-session verification.
