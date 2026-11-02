@@ -115,6 +115,15 @@ class ContentLockTests(unittest.IsolatedAsyncioTestCase):
         message3 = fake_message("Repeated message text")
         self.assertNotIn("duplicate_spam", await check_message_violations(message3, self.security))
 
+    async def test_anti_flood_toggle(self):
+        self.security.anti_flood = True
+        self.security.flood_limit = 1
+        self.security.flood_window = 10
+        first = fake_message("one", sender_id=321)
+        second = fake_message("two", sender_id=321)
+        self.assertNotIn("flood", await check_message_violations(first, self.security))
+        self.assertIn("flood", await check_message_violations(second, self.security))
+
 
 if __name__ == "__main__":
     unittest.main()
