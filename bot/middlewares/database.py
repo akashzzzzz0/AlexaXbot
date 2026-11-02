@@ -157,10 +157,20 @@ class DatabaseMiddleware(BaseMiddleware):
                             select(SecuritySettings).where(SecuritySettings.group_id == chat.id)
                         )
                         if not security:
-                            security = SecuritySettings(group_id=chat.id)
-                            session.add(security)
-                            await session.commit()
-                            await session.refresh(security)
+                            candidate = SecuritySettings(group_id=chat.id)
+                            try:
+                                # Avoid committing the entire update transaction
+                                # just to initialize per-group settings.
+                                async with session.begin_nested():
+                                    session.add(candidate)
+                                    await session.flush()
+                                security = candidate
+                            except IntegrityError:
+                                security = await session.scalar(
+                                    select(SecuritySettings).where(SecuritySettings.group_id == chat.id)
+                                )
+                                if security is None:
+                                    raise
                         data["group_security"] = security
 
                         if user and not user.is_bot:
@@ -334,17 +344,23 @@ class DatabaseMiddleware(BaseMiddleware):
     async def _get_or_create_group(self, session: AsyncSession, chat) -> Group:
         group = await session.get(Group, chat.id)
         if not group:
-            group = Group(
+            candidate = Group(
                 id=chat.id,
                 title=chat.title or "Unknown",
                 username=chat.username,
                 type=chat.type,
             )
-            session.add(group)
-            await session.flush()
-        else:
-            group.title = chat.title or group.title
-            group.username = chat.username
+            try:
+                async with session.begin_nested():
+                    session.add(candidate)
+                    await session.flush()
+                group = candidate
+            except IntegrityError:
+                group = await session.get(Group, chat.id)
+                if group is None:
+                    raise
+        group.title = chat.title or group.title
+        group.username = chat.username
         return group
 
     async def _get_or_create_member(
