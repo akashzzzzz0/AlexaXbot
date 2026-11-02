@@ -159,6 +159,112 @@ async def create_tables() -> None:
                 cols = await conn.exec_driver_sql(f"PRAGMA table_info({table})")
                 if column not in {row[1] for row in cols.fetchall()}:
                     await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}"))
+
+        # Add partial unique indexes to existing databases as create_all does not
+        # retrofit indexes onto tables that were already created. Keep the newest
+        # open record and close older duplicate records before enforcing uniqueness.
+        if conn.dialect.name == "sqlite":
+            await conn.execute(text("""
+                UPDATE affiliate_requests
+                SET status = 'cancelled'
+                WHERE status IN ('pending', 'approved')
+                  AND id NOT IN (
+                    SELECT MAX(id) FROM affiliate_requests
+                    WHERE status IN ('pending', 'approved')
+                    GROUP BY user_id, request_type
+                  )
+            """))
+            await conn.execute(text("""
+                UPDATE group_promotion_requests
+                SET status = 'cancelled'
+                WHERE status IN ('pending', 'approved')
+                  AND id NOT IN (
+                    SELECT MAX(id) FROM group_promotion_requests
+                    WHERE status IN ('pending', 'approved')
+                    GROUP BY group_id
+                  )
+            """))
+            await conn.execute(text("""
+                UPDATE speed_type_events
+                SET status = 'cancelled'
+                WHERE status = 'active'
+                  AND id NOT IN (
+                    SELECT MAX(id) FROM speed_type_events
+                    WHERE status = 'active'
+                    GROUP BY chat_id
+                  )
+            """))
+            await conn.execute(text("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_affiliate_requests_open_user_type
+                ON affiliate_requests (user_id, request_type)
+                WHERE status IN ('pending', 'approved')
+            """))
+            await conn.execute(text("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_group_promotion_open_group
+                ON group_promotion_requests (group_id)
+                WHERE status IN ('pending', 'approved')
+            """))
+            await conn.execute(text("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_speed_type_one_active_event_per_chat
+                ON speed_type_events (chat_id)
+                WHERE status = 'active'
+            """))
+        elif conn.dialect.name == "postgresql":
+            await conn.execute(text("""
+                WITH ranked AS (
+                    SELECT id, ROW_NUMBER() OVER (
+                        PARTITION BY user_id, request_type ORDER BY id DESC
+                    ) AS rn
+                    FROM affiliate_requests
+                    WHERE status IN ('pending', 'approved')
+                )
+                UPDATE affiliate_requests AS target
+                SET status = 'cancelled'
+                FROM ranked
+                WHERE target.id = ranked.id AND ranked.rn > 1
+            """))
+            await conn.execute(text("""
+                WITH ranked AS (
+                    SELECT id, ROW_NUMBER() OVER (
+                        PARTITION BY group_id ORDER BY id DESC
+                    ) AS rn
+                    FROM group_promotion_requests
+                    WHERE status IN ('pending', 'approved')
+                )
+                UPDATE group_promotion_requests AS target
+                SET status = 'cancelled'
+                FROM ranked
+                WHERE target.id = ranked.id AND ranked.rn > 1
+            """))
+            await conn.execute(text("""
+                WITH ranked AS (
+                    SELECT id, ROW_NUMBER() OVER (
+                        PARTITION BY chat_id ORDER BY id DESC
+                    ) AS rn
+                    FROM speed_type_events
+                    WHERE status = 'active'
+                )
+                UPDATE speed_type_events AS target
+                SET status = 'cancelled'
+                FROM ranked
+                WHERE target.id = ranked.id AND ranked.rn > 1
+            """))
+            await conn.execute(text("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_affiliate_requests_open_user_type
+                ON affiliate_requests (user_id, request_type)
+                WHERE status IN ('pending', 'approved')
+            """))
+            await conn.execute(text("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_group_promotion_open_group
+                ON group_promotion_requests (group_id)
+                WHERE status IN ('pending', 'approved')
+            """))
+            await conn.execute(text("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_speed_type_one_active_event_per_chat
+                ON speed_type_events (chat_id)
+                WHERE status = 'active'
+            """))
+
     logger.info("Database tables ensured")
 
 

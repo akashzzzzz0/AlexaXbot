@@ -11,12 +11,24 @@ from aiogram.types import (
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import settings
 from bot.database.models import User, Referral, AffiliateRequest, AffiliatePayment
 
 router = Router()
+
+async def _create_open_request(session: AsyncSession, request: AffiliateRequest) -> AffiliateRequest | None:
+    try:
+        async with session.begin_nested():
+            session.add(request)
+            await session.flush()
+        return request
+    except IntegrityError:
+        return None
+
+
 MIN_WITHDRAWAL = 100
 PREMIUM_3_MONTHS_STARS = 1000
 USER_PAGE_SIZE = 10
@@ -292,9 +304,13 @@ async def affiliate_stars(callback: CallbackQuery, db_session: AsyncSession, db_
     if pending:
         await callback.answer("You already have an open Stars request.", show_alert=True)
         return
-    req = AffiliateRequest(user_id=db_user.id, request_type="stars", requested_stars=balance, status="pending")
-    db_session.add(req)
-    await db_session.flush()
+    req = await _create_open_request(
+        db_session,
+        AffiliateRequest(user_id=db_user.id, request_type="stars", requested_stars=balance, status="pending"),
+    )
+    if req is None:
+        await callback.answer("You already have an open Stars request.", show_alert=True)
+        return
     await callback.message.answer(f"✅ Stars withdrawal request #{req.id} submitted. Status: PENDING.")
     await _notify_owner(callback, db_session, req)
     await callback.answer("Request submitted.")
@@ -390,14 +406,18 @@ async def affiliate_premium_request(callback: CallbackQuery, db_session: AsyncSe
         )
         return
 
-    req = AffiliateRequest(
-        user_id=db_user.id,
-        request_type="premium",
-        requested_stars=PREMIUM_3_MONTHS_STARS,
-        status="pending",
+    req = await _create_open_request(
+        db_session,
+        AffiliateRequest(
+            user_id=db_user.id,
+            request_type="premium",
+            requested_stars=PREMIUM_3_MONTHS_STARS,
+            status="pending",
+        ),
     )
-    db_session.add(req)
-    await db_session.flush()
+    if req is None:
+        await callback.answer("You already have an open Premium request.", show_alert=True)
+        return
     await callback.message.answer(
         f"✅ Your 3-month Telegram Premium request #{req.id} has been sent to the bot owner.\n\n"
         "Your 1000 referral-earned Stars are reserved while the request is pending. "

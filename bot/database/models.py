@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional
 from sqlalchemy import (
     BigInteger, Boolean, Column, DateTime, Float, ForeignKey, JSON,
-    Integer, String, Text, Index, UniqueConstraint, func
+    Integer, String, Text, Index, UniqueConstraint, func, text
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 from sqlalchemy.dialects.postgresql import ARRAY
@@ -588,6 +588,14 @@ class Referral(Base):
 class AffiliateRequest(Base):
     """Owner-reviewed Stars withdrawal or Telegram Premium reward request."""
     __tablename__ = "affiliate_requests"
+    __table_args__ = (
+        Index(
+            "uq_affiliate_requests_open_user_type",
+            "user_id", "request_type", unique=True,
+            sqlite_where=text("status IN ('pending', 'approved')"),
+            postgresql_where=text("status IN ('pending', 'approved')"),
+        ),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -1017,6 +1025,12 @@ class GroupPromotionRequest(Base):
     __table_args__ = (
         Index("ix_group_promotion_status_requested", "status", "requested_at"),
         Index("ix_group_promotion_group_status", "group_id", "status"),
+        Index(
+            "uq_group_promotion_open_group",
+            "group_id", unique=True,
+            sqlite_where=text("status IN ('pending', 'approved')"),
+            postgresql_where=text("status IN ('pending', 'approved')"),
+        ),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -1048,7 +1062,15 @@ class DailyGroupMessageStat(Base):
 class SpeedTypeEvent(Base):
     """Per-group spoiler-based typing challenge and its reward schedule."""
     __tablename__ = "speed_type_events"
-    __table_args__ = (Index("ix_speed_type_events_chat_status", "chat_id", "status"),)
+    __table_args__ = (
+        Index("ix_speed_type_events_chat_status", "chat_id", "status"),
+        Index(
+            "uq_speed_type_one_active_event_per_chat",
+            "chat_id", unique=True,
+            sqlite_where=text("status = 'active'"),
+            postgresql_where=text("status = 'active'"),
+        ),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     chat_id = Column(BigInteger, nullable=False, index=True)
