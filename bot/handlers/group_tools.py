@@ -4,6 +4,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy import select, delete
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from html import escape
 import re
@@ -11,6 +12,21 @@ from bot.database.models import GroupRule, GroupFilter, SavedMessage, GroupBlock
 from bot.middlewares.admin_actions import AdminActionMiddleware
 
 router = Router()
+
+async def _insert_or_get(session: AsyncSession, candidate, model, *conditions):
+    """Insert inside a savepoint; reload the unique row if another update won."""
+    try:
+        async with session.begin_nested():
+            session.add(candidate)
+            await session.flush()
+        return candidate
+    except IntegrityError:
+        existing = await session.scalar(select(model).where(*conditions))
+        if existing is None:
+            raise
+        return existing
+
+
 router.message.outer_middleware(AdminActionMiddleware(commands={"setrules", "filter", "stopfilter", "approve", "unapprove", "save", "clear", "addblocklist", "rmblocklist", "locktypes", "disablecmd", "enablecmd", "autodelete", "grouppromo"}))
 
 class GroupToolsStates(StatesGroup):
@@ -253,10 +269,11 @@ async def set_auto_delete(message: Message, db_session: AsyncSession, **kwargs):
             return
     row = await db_session.scalar(select(GroupSettings).where(GroupSettings.group_id == message.chat.id))
     if not row:
-        row = GroupSettings(group_id=message.chat.id, auto_delete_seconds=seconds)
-        db_session.add(row)
-    else:
-        row.auto_delete_seconds = seconds
+        row = await _insert_or_get(
+            db_session, GroupSettings(group_id=message.chat.id, auto_delete_seconds=seconds),
+            GroupSettings, GroupSettings.group_id == message.chat.id,
+        )
+    row.auto_delete_seconds = seconds
     await db_session.flush()
     status = f"{seconds} seconds" if seconds else "OFF"
     await message.reply(f"✅ Command auto-delete is now {status}. ALEXA needs Delete Messages permission.")
@@ -291,7 +308,13 @@ async def disable_command(message: Message, db_session: AsyncSession, **kwargs):
         await message.reply("Use a valid command name."); return
     existing = await db_session.scalar(select(GroupDisabledCommand).where(GroupDisabledCommand.group_id == message.chat.id, GroupDisabledCommand.command == command))
     if not existing:
-        db_session.add(GroupDisabledCommand(group_id=message.chat.id, command=command, disabled_by=message.from_user.id))
+        await _insert_or_get(
+            db_session,
+            GroupDisabledCommand(group_id=message.chat.id, command=command, disabled_by=message.from_user.id),
+            GroupDisabledCommand,
+            GroupDisabledCommand.group_id == message.chat.id,
+            GroupDisabledCommand.command == command,
+        )
     await message.reply(f"✅ /{escape(command)} disabled in this group.", parse_mode="HTML")
 
 @router.message(Command("enablecmd"))
@@ -334,10 +357,11 @@ async def set_rules_finish(message: Message, db_session: AsyncSession, state: FS
         await state.clear(); return
     row = await db_session.get(GroupRule, message.chat.id)
     if not row:
-        row = GroupRule(group_id=message.chat.id, rules=message.text or "")
-        db_session.add(row)
-    else:
-        row.rules = message.text or ""
+        row = await _insert_or_get(
+            db_session, GroupRule(group_id=message.chat.id, rules=message.text or ""),
+            GroupRule, GroupRule.group_id == message.chat.id,
+        )
+    row.rules = message.text or ""
     await db_session.flush(); await state.clear()
     await message.reply("✅ Group rules saved.")
 
@@ -387,7 +411,17 @@ async def add_filter(message: Message, db_session: AsyncSession, **kwargs):
         row.target_user_id = target_user_id
         row.target_username = target_username
     else:
-        db_session.add(GroupFilter(group_id=message.chat.id, keyword=keyword, response=response, response_type=response_type, target_user_id=target_user_id, target_username=target_username))
+        row = await _insert_or_get(
+            db_session,
+            GroupFilter(group_id=message.chat.id, keyword=keyword, response=response, response_type=response_type, target_user_id=target_user_id, target_username=target_username),
+            GroupFilter,
+            GroupFilter.group_id == message.chat.id,
+            GroupFilter.keyword == keyword,
+        )
+        row.response = response
+        row.response_type = response_type
+        row.target_user_id = target_user_id
+        row.target_username = target_username
     await db_session.flush()
     target_text = (f" for @{escape(target_username)}" if target_username else (f" for user <code>{target_user_id}</code>" if target_user_id else " for everyone"))
     kind = "sticker" if response_type == "sticker" else "reply"
@@ -454,13 +488,20 @@ async def approve_stickers(message: Message, db_session: AsyncSession, **kwargs)
         await message.reply("Reply to a member with /approve, or use /approve @username /approve 123456789."); return
     target = await db_session.get(User, target_id)
     if not target:
-        target = User(id=target_id, telegram_id=target_id, username=username, first_name=name or f"User {target_id}")
-        db_session.add(target)
-        await db_session.flush()
+        target = await _insert_or_get(
+            db_session,
+            User(id=target_id, telegram_id=target_id, username=username, first_name=name or f"User {target_id}"),
+            User, User.id == target_id,
+        )
     member = await db_session.scalar(select(GroupMember).where(GroupMember.group_id == message.chat.id, GroupMember.user_id == target_id))
     if not member:
-        member = GroupMember(group_id=message.chat.id, user_id=target_id)
-        db_session.add(member)
+        member = await _insert_or_get(
+            db_session,
+            GroupMember(group_id=message.chat.id, user_id=target_id),
+            GroupMember,
+            GroupMember.group_id == message.chat.id,
+            GroupMember.user_id == target_id,
+        )
     member.approved_sticker = True
     await message.reply(f'✅ Stickers approved for <a href="tg://user?id={target_id}">{escape(name or str(target_id))}</a>. Other locks remain active.', parse_mode="HTML")
 
@@ -498,7 +539,15 @@ async def save_message(message: Message, db_session: AsyncSession, **kwargs):
     if row:
         row.content = content; row.created_by = message.from_user.id
     else:
-        db_session.add(SavedMessage(group_id=message.chat.id, name=name, content=content, created_by=message.from_user.id))
+        row = await _insert_or_get(
+            db_session,
+            SavedMessage(group_id=message.chat.id, name=name, content=content, created_by=message.from_user.id),
+            SavedMessage,
+            SavedMessage.group_id == message.chat.id,
+            SavedMessage.name == name,
+        )
+        row.content = content
+        row.created_by = message.from_user.id
     await db_session.flush(); await message.reply(f"✅ Saved <code>{escape(name)}</code>.", parse_mode="HTML")
 
 @router.message(Command("get"))
@@ -534,7 +583,13 @@ async def add_blocklist(message: Message, db_session: AsyncSession, **kwargs):
     value = parts[1].strip().lower()[:128]
     existing = await db_session.scalar(select(GroupBlocklist).where(GroupBlocklist.group_id == message.chat.id, GroupBlocklist.value == value))
     if not existing:
-        db_session.add(GroupBlocklist(group_id=message.chat.id, value=value, added_by=message.from_user.id))
+        await _insert_or_get(
+            db_session,
+            GroupBlocklist(group_id=message.chat.id, value=value, added_by=message.from_user.id),
+            GroupBlocklist,
+            GroupBlocklist.group_id == message.chat.id,
+            GroupBlocklist.value == value,
+        )
     await message.reply("✅ Blocklist entry saved.")
 
 @router.message(Command("rmblocklist"))
