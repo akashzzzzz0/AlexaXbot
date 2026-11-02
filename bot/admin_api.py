@@ -1135,8 +1135,18 @@ async def owner_inbox_messages_handler(request):
     except (ValueError, TypeError):
         return web.json_response({"error": "Invalid conversation request."}, status=400)
     async with async_session_maker() as session:
-        user = await session.get(User, user_id)
-        if not user or not user.dm_started:
+        # Match the inbox-list eligibility rule: historical stored messages are
+        # proof of a started DM even on databases predating dm_started.
+        user = await session.scalar(
+            select(User).where(
+                User.id == user_id,
+                or_(
+                    User.dm_started.is_(True),
+                    User.id.in_(select(InboxMessage.user_id).where(InboxMessage.user_id == user_id))
+                )
+            )
+        )
+        if not user:
             return web.json_response({"error": "Conversation not found."}, status=404)
         query = select(InboxMessage).where(InboxMessage.user_id == user_id)
         if before_id:
@@ -1158,189 +1168,6 @@ async def owner_inbox_messages_handler(request):
                              headers={"Cache-Control": "no-store"})
 
 
-@require_admin
-async def owner_inbox_delete_message_handler(request):
-    bot = None
-    try:
-        user_id = int(request.match_info["user_id"])
-        record_id = int(request.match_info["message_id"])
-    except (ValueError, TypeError):
-        return web.json_response({"error": "Invalid message reference."}, status=400)
-    async with async_session_maker() as session:
-        item = await session.scalar(select(InboxMessage).where(
-            InboxMessage.id == record_id, InboxMessage.user_id == user_id
-        ))
-        if not item:
-            return web.json_response({"error": "Message not found in inbox history."}, status=404)
-        telegram_message_id = item.telegram_message_id
-    try:
-        from bot.config import settings
-        from aiogram import Bot
-        bot = Bot(token=settings.BOT_TOKEN)
-        await bot.delete_message(chat_id=user_id, message_id=telegram_message_id)
-        async with async_session_maker() as session:
-            item = await session.scalar(select(InboxMessage).where(
-                InboxMessage.id == record_id, InboxMessage.user_id == user_id
-            ))
-            if item:
-                await session.delete(item)
-                await session.commit()
-        return web.json_response({"success": True})
-    except Exception:
-        return web.json_response({"error": "Telegram could not delete this message. It may be too old or unavailable."}, status=502)
-    finally:
-        if bot is not None:
-            await bot.session.close()
-
-
-@require_admin
-async def owner_group_messages_handler(request):
-    try:
-        group_id = int(request.match_info["group_id"])
-        before_id = int(request.query.get("before", "0") or 0)
-        limit = min(100, max(1, int(request.query.get("limit", "50"))))
-    except (ValueError, TypeError):
-        return web.json_response({"error": "Invalid group history request."}, status=400)
-    async with async_session_maker() as session:
-        group = await session.get(Group, group_id)
-        if not group or not group.is_active:
-            return web.json_response({"error": "Active group not found."}, status=404)
-        query = select(GroupInboxMessage).where(GroupInboxMessage.chat_id == group_id)
-        sender_id_raw = request.query.get("sender_id")
-        if sender_id_raw:
-            try:
-                query = query.where(GroupInboxMessage.sender_id == int(sender_id_raw))
-            except (ValueError, TypeError):
-                return web.json_response({"error": "Invalid sender ID."}, status=400)
-        if before_id:
-            query = query.where(GroupInboxMessage.id < before_id)
-        rows = (await session.scalars(query.order_by(desc(GroupInboxMessage.id)).limit(limit))).all()
-        messages = [{
-            "id": item.id, "messageId": str(item.telegram_message_id),
-            "senderId": str(item.sender_id) if item.sender_id else None,
-            "senderName": item.sender_name or "Unknown",
-            "username": item.sender_username,
-            "text": (item.preview or "[" + item.content_type + "]") if not _decode_owner_media(item.preview) else (_decode_owner_media(item.preview).get("caption") or "[" + item.content_type + "]"),
-            "media": bool(_decode_owner_media(item.preview)),
-            "mediaUrl": f"/owner-api/groups/{group_id}/messages/{item.id}/media" if _decode_owner_media(item.preview) else None,
-            "contentType": item.content_type,
-            "createdAt": item.created_at.isoformat() if item.created_at else None
-        } for item in reversed(rows)]
-    return web.json_response({"group": _group_to_dict(group), "messages": messages,
-                              "hasMore": len(rows) == limit},
-                             headers={"Cache-Control": "no-store"})
-
-
-@require_admin
-async def owner_group_delete_message_handler(request):
-    bot = None
-    try:
-        group_id = int(request.match_info["group_id"])
-        record_id = int(request.match_info["message_id"])
-    except (ValueError, TypeError):
-        return web.json_response({"error": "Invalid message reference."}, status=400)
-    async with async_session_maker() as session:
-        group = await session.get(Group, group_id)
-        item = await session.scalar(select(GroupInboxMessage).where(
-            GroupInboxMessage.id == record_id, GroupInboxMessage.chat_id == group_id
-        ))
-        if not group or not group.is_active or not item:
-            return web.json_response({"error": "Active group message not found."}, status=404)
-        telegram_message_id = item.telegram_message_id
-    try:
-        from bot.config import settings
-        from aiogram import Bot
-        bot = Bot(token=settings.BOT_TOKEN)
-        me = await bot.get_me()
-        member = await bot.get_chat_member(group_id, me.id)
-        status = str(getattr(member.status, "value", member.status))
-        if status not in ("administrator", "creator") or (status != "creator" and not getattr(member, "can_delete_messages", False)):
-            return web.json_response({"error": "ALEXA does not currently have Delete Messages permission."}, status=403)
-        await bot.delete_message(chat_id=group_id, message_id=telegram_message_id)
-        async with async_session_maker() as session:
-            item = await session.scalar(select(GroupInboxMessage).where(
-                GroupInboxMessage.id == record_id, GroupInboxMessage.chat_id == group_id
-            ))
-            if item:
-                await session.delete(item)
-                await session.commit()
-        return web.json_response({"success": True})
-    except Exception:
-        return web.json_response({"error": "Telegram could not delete this group message."}, status=502)
-    finally:
-        if bot is not None:
-            await bot.session.close()
-
-
-@require_admin
-async def owner_statistics_handler(request):
-    async with async_session_maker() as session:
-        values = {
-            "users": await session.scalar(select(func.count()).select_from(User)) or 0,
-            "dmStarters": await session.scalar(select(func.count()).select_from(User).where(User.dm_started.is_(True))) or 0,
-            "groups": await session.scalar(select(func.count()).select_from(Group).where(Group.is_active.is_(True))) or 0,
-            "memberships": await session.scalar(select(func.count()).select_from(GroupMember)) or 0,
-            "referrals": await session.scalar(select(func.count()).select_from(Referral)) or 0,
-            "pendingPromotions": await session.scalar(select(func.count()).select_from(GroupPromotionRequest).where(GroupPromotionRequest.status == "pending")) or 0
-        }
-    return web.json_response(values, headers={"Cache-Control": "no-store"})
-
-
-
-@require_admin
-async def owner_health_handler(request):
-    try:
-        async with async_session_maker() as session:
-            await session.execute(select(1))
-            active_groups = await session.scalar(select(func.count()).select_from(Group).where(Group.is_active.is_(True))) or 0
-            dm_users = await session.scalar(select(func.count()).select_from(User).where(User.dm_started.is_(True))) or 0
-            pending_reviews = await session.scalar(select(func.count()).select_from(GroupPromotionRequest).where(GroupPromotionRequest.status == "pending")) or 0
-        return web.json_response({"process": "running", "database": "connected", "activeGroups": int(active_groups), "dmStarters": int(dm_users), "pendingPromotionRequests": int(pending_reviews)}, headers={"Cache-Control": "no-store"})
-    except Exception:
-        return web.json_response({"process": "running", "database": "check_failed"}, status=503, headers={"Cache-Control": "no-store"})
-
-
-@require_admin
-async def owner_group_message_handler(request):
-    bot = None
-    try:
-        body = await request.json()
-        message_text = str(body.get("message", "")).strip()
-        raw_ids = body.get("groupIds", [])
-        if not message_text or len(message_text) > 4000:
-            return web.json_response({"error": "Message must be 1–4000 characters."}, status=400)
-        if not isinstance(raw_ids, list) or not raw_ids or len(raw_ids) > 100:
-            return web.json_response({"error": "Select between 1 and 100 groups."}, status=400)
-        try:
-            group_ids = list(dict.fromkeys(int(value) for value in raw_ids))
-        except (ValueError, TypeError):
-            return web.json_response({"error": "Invalid group selection."}, status=400)
-        async with async_session_maker() as session:
-            groups = (await session.scalars(select(Group).where(Group.id.in_(group_ids), Group.is_active.is_(True)))).all()
-        if len(groups) != len(group_ids):
-            return web.json_response({"error": "One or more selected groups are not active registered groups."}, status=400)
-        from bot.config import settings
-        from aiogram import Bot
-        import asyncio
-        bot = Bot(token=settings.BOT_TOKEN)
-        sent = failed = 0
-        for group in groups:
-            try:
-                await bot.send_message(chat_id=group.id, text=message_text)
-                sent += 1
-            except Exception:
-                failed += 1
-            await asyncio.sleep(0.05)
-        return web.json_response({"sent": sent, "failed": failed, "total": len(groups)})
-    except Exception:
-        return web.json_response({"error": "Group message failed. Check bot connectivity and logs."}, status=500)
-    finally:
-        if bot is not None:
-            await bot.session.close()
-
-
-
-@require_admin
 async def owner_inbox_reply_handler(request):
     bot = None
     try:
@@ -1350,14 +1177,21 @@ async def owner_inbox_reply_handler(request):
         if not message_text or len(message_text) > 4000:
             return web.json_response({"error": "Reply must be 1–4000 characters."}, status=400)
         async with async_session_maker() as session:
-            user = await session.get(User, user_id)
-            if not user or not user.dm_started or user.is_banned:
+            user = await session.scalar(
+                select(User).where(
+                    User.id == user_id,
+                    or_(
+                        User.dm_started.is_(True),
+                        User.id.in_(select(InboxMessage.user_id).where(InboxMessage.user_id == user_id))
+                    )
+                )
+            )
+            if not user or user.is_banned:
                 return web.json_response({"error": "User is not an eligible DM starter."}, status=404)
         from bot.config import settings
         from aiogram import Bot
         bot = Bot(token=settings.BOT_TOKEN)
         sent_message = await bot.send_message(chat_id=user_id, text=message_text)
-        # Keep the owner's sent reply in the same conversation timeline.
         async with async_session_maker() as session:
             session.add(InboxMessage(
                 user_id=user_id,
