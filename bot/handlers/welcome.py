@@ -1109,7 +1109,12 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
             # rather than attempting warn/mute/ban actions that require a DB user.
             action = "delete"
         else:
-            action = (group_security.flood_action if "flood" in violations else group_security.spam_action) or "delete"
+            if "flood" in violations:
+                action = group_security.flood_action or "delete"
+            elif any(reason in violations for reason in ("link", "invite_link")):
+                action = group_security.link_action or "delete"
+            else:
+                action = group_security.spam_action or "delete"
         if action == "delete":
             try:
                 await message.delete()
