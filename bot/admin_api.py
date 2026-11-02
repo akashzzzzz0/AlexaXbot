@@ -1783,8 +1783,10 @@ async def owner_group_ban_all_handler(request):
             return web.json_response({"error": "Alexa needs Restrict Members permission."}, status=403)
 
         banned = skipped = failed = 0
+        owner_id = int(settings.effective_owner_id or 0)
+        newly_banned_ids = []
         for internal_id, target_id, is_bot in targets:
-            if target_id == int(settings.effective_owner_id) or is_bot:
+            if target_id == owner_id or is_bot:
                 skipped += 1
                 continue
             try:
@@ -1794,14 +1796,7 @@ async def owner_group_ban_all_handler(request):
                     skipped += 1
                     continue
                 await bot.ban_chat_member(chat_id=group_id, user_id=target_id, revoke_messages=True)
-                async with async_session_maker() as session:
-                    record = await session.scalar(select(GroupMember).where(
-                        GroupMember.group_id == group_id,
-                        GroupMember.user_id == internal_id,
-                    ))
-                    if record:
-                        record.is_banned = True
-                        await session.commit()
+                newly_banned_ids.append(internal_id)
                 banned += 1
             except Exception as exc:
                 failed += 1
@@ -1810,6 +1805,16 @@ async def owner_group_ban_all_handler(request):
                     "owner_miniapp_ban_all_member_failed",
                     group_id=group_id, user_id=target_id, error=str(exc),
                 )
+
+        if newly_banned_ids:
+            async with async_session_maker() as session:
+                records = (await session.scalars(select(GroupMember).where(
+                    GroupMember.group_id == group_id,
+                    GroupMember.user_id.in_(newly_banned_ids),
+                ))).all()
+                for record in records:
+                    record.is_banned = True
+                await session.commit()
 
         return web.json_response({
             "success": True, "groupId": str(group_id), "groupTitle": group_title,
