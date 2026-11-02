@@ -2,8 +2,11 @@
 from datetime import datetime, timezone
 import random
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from bot.database.models import EliteBadge, EliteProfile, EmpireContribution, EmpireGuild, VaultClaim, Wallet
+from bot.database.models import EliteBadge, EliteProfile, EmpireContribution, EmpireGuild, VaultClaim
+from bot.services.economy_service import add_coins
+from bot.services.user_service import get_or_create_wallet
 
 BADGES = {
     "rookie": ("🌟", "Rookie Star"),
@@ -25,9 +28,16 @@ def vip_tier(xp: int) -> tuple[str, str]:
 async def get_elite_profile(session: AsyncSession, user_id: int) -> EliteProfile:
     profile = await session.get(EliteProfile, user_id)
     if profile is None:
-        profile = EliteProfile(user_id=user_id, xp=0)
-        session.add(profile)
-        await session.flush()
+        candidate = EliteProfile(user_id=user_id, xp=0)
+        try:
+            async with session.begin_nested():
+                session.add(candidate)
+                await session.flush()
+            profile = candidate
+        except IntegrityError:
+            profile = await session.get(EliteProfile, user_id)
+            if profile is None:
+                raise
     return profile
 
 async def add_elite_xp(session: AsyncSession, user_id: int, amount: int) -> EliteProfile:
@@ -39,13 +49,20 @@ async def add_elite_xp(session: AsyncSession, user_id: int, amount: int) -> Elit
 async def create_empire(session: AsyncSession, *, group_id: int, title: str, admin_id: int) -> EmpireGuild:
     empire = await session.get(EmpireGuild, group_id)
     if empire is None:
-        empire = EmpireGuild(group_id=group_id, title=(title or "Telegram Group")[:256],
-                             level=1, xp=0, registered_by=admin_id, is_active=True)
-        session.add(empire)
-    else:
-        empire.title = (title or "Telegram Group")[:256]
-        empire.registered_by = admin_id
-        empire.is_active = True
+        candidate = EmpireGuild(group_id=group_id, title=(title or "Telegram Group")[:256],
+                                level=1, xp=0, registered_by=admin_id, is_active=True)
+        try:
+            async with session.begin_nested():
+                session.add(candidate)
+                await session.flush()
+            empire = candidate
+        except IntegrityError:
+            empire = await session.get(EmpireGuild, group_id)
+            if empire is None:
+                raise
+    empire.title = (title or "Telegram Group")[:256]
+    empire.registered_by = admin_id
+    empire.is_active = True
     await session.flush()
     return empire
 
@@ -60,8 +77,12 @@ async def contribute_to_empire(session: AsyncSession, *, group_id: int, user_id:
         EmpireContribution.day_key == today))
     if existing is not None:
         return {"status": "already_contributed", "level": empire.level, "xp": empire.xp}
-    session.add(EmpireContribution(group_id=group_id, user_id=user_id, day_key=today))
-    await session.flush()
+    try:
+        async with session.begin_nested():
+            session.add(EmpireContribution(group_id=group_id, user_id=user_id, day_key=today))
+            await session.flush()
+    except IntegrityError:
+        return {"status": "already_contributed", "level": empire.level, "xp": empire.xp}
     empire.xp = (empire.xp or 0) + 10
     while empire.xp >= empire.level * 100:
         empire.xp -= empire.level * 100
@@ -90,26 +111,37 @@ async def open_legendary_vault(session: AsyncSession, *, user_id: int,
     reward_type = random.choices(("coins", "badge"), weights=(85, 15), k=1)[0]
     amount = random.choice((50, 100, 150, 250, 500)) if reward_type == "coins" else 0
     badge_code = random.choice(tuple(BADGES)) if reward_type == "badge" else None
-    # The unique claim is flushed before balances change; conflicts roll back the whole transaction.
-    session.add(VaultClaim(user_id=user_id, day_key=today, reward_type=reward_type,
-                           reward_amount=amount, badge_code=badge_code))
-    await session.flush()
+    # Reserve the unique daily claim before granting any reward.
+    claim = VaultClaim(user_id=user_id, day_key=today, reward_type=reward_type,
+                       reward_amount=amount, badge_code=badge_code)
+    try:
+        async with session.begin_nested():
+            session.add(claim)
+            await session.flush()
+    except IntegrityError:
+        previous = await session.scalar(select(VaultClaim).where(
+            VaultClaim.user_id == user_id, VaultClaim.day_key == today))
+        if previous is None:
+            raise
+        return {"status": "already_opened", "reward_type": previous.reward_type,
+                "amount": previous.reward_amount, "badge_code": previous.badge_code}
     profile = await add_elite_xp(session, user_id, 10)
     balance = None
     if reward_type == "coins":
-        wallet = await session.scalar(select(Wallet).where(Wallet.user_id == user_id))
-        if wallet is None:
-            wallet = Wallet(user_id=user_id, balance=0, bank_balance=0, total_earned=0, total_spent=0)
-            session.add(wallet)
-            await session.flush()
-        wallet.balance = (wallet.balance or 0) + amount
-        wallet.total_earned = (wallet.total_earned or 0) + amount
-        balance = wallet.balance
+        wallet = await get_or_create_wallet(session, user_id)
+        balance = await add_coins(
+            session, user_id, amount, "legendary_vault", "Legendary Vault reward",
+        )
     else:
         exists = await session.scalar(select(EliteBadge.id).where(
             EliteBadge.user_id == user_id, EliteBadge.badge_code == badge_code))
         if exists is None:
-            session.add(EliteBadge(user_id=user_id, badge_code=badge_code))
+            try:
+                async with session.begin_nested():
+                    session.add(EliteBadge(user_id=user_id, badge_code=badge_code))
+                    await session.flush()
+            except IntegrityError:
+                pass
     await session.flush()
     return {"status": "opened", "reward_type": reward_type, "amount": amount,
             "badge_code": badge_code, "balance": balance, "vip_xp": profile.xp}
