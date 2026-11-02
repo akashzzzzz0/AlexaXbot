@@ -98,14 +98,28 @@ async def set_user_language(session: AsyncSession, user_id: int, lang: str) -> N
 async def add_xp(session: AsyncSession, user_id: int, amount: int) -> tuple[int, int, bool]:
     from bot.utils.helpers import calculate_level
     eco = await get_or_create_economy(session, user_id)
-    old_level = eco.level
-    eco.total_xp = (eco.total_xp or 0) + amount
-    eco.xp = (eco.xp or 0) + amount
-    new_level, current_xp, needed_xp = calculate_level(eco.total_xp)
-    leveled_up = new_level > old_level
+    if amount == 0:
+        new_level, current_xp, _ = calculate_level(eco.total_xp or 0)
+        return new_level, current_xp, False
+
+    # SQL-side increment prevents two simultaneous message/game rewards from
+    # overwriting each other's XP with stale ORM values.
+    result = await session.execute(
+        update(Economy)
+        .where(Economy.user_id == user_id)
+        .values(total_xp=func.coalesce(Economy.total_xp, 0) + amount)
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        raise RuntimeError(f"Economy row missing while adding XP for user {user_id}")
+    await session.refresh(eco, attribute_names=["total_xp"])
+
+    total_xp = eco.total_xp or 0
+    previous_level, _, _ = calculate_level(total_xp - amount)
+    new_level, current_xp, _ = calculate_level(total_xp)
     eco.level = new_level
     eco.xp = current_xp
-    return new_level, current_xp, leveled_up
+    return new_level, current_xp, new_level > previous_level
 
 
 async def get_top_users_by_level(session: AsyncSession, limit: int = 10) -> list:
