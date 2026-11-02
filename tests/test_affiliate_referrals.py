@@ -17,6 +17,7 @@ from bot.handlers.affiliate import (
     _tracked_count,
     _valid_count,
     _referral_link_users,
+    _actual_referrer_users,
     owner_approve,
     owner_mark_paid,
     owner_referrals,
@@ -62,6 +63,29 @@ class AffiliateRewardTierTests(unittest.IsolatedAsyncioTestCase):
                 await session.flush()
                 self.assertEqual(await _tracked_count(session, 100001), 3)
                 self.assertEqual(await _valid_count(session, 100001), 1)
+        finally:
+            await engine.dispose()
+
+    async def test_owner_referrer_list_includes_inviter_even_without_opening_referral_dashboard(self):
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with factory() as session:
+                session.add_all([
+                    User(id=210001, first_name="Inviter", dm_started=True, referral_link_requested=False),
+                    User(id=210002, first_name="Referred", dm_started=True, referral_link_requested=False),
+                    User(id=210003, first_name="Another", dm_started=False, referral_link_requested=False),
+                ])
+                await session.flush()
+                session.add_all([
+                    Referral(referrer_id=210001, referred_id=210002),
+                    Referral(referrer_id=210001, referred_id=210003),
+                ])
+                await session.flush()
+                users = await _actual_referrer_users(session)
+                self.assertEqual([user.id for user in users], [210001])
         finally:
             await engine.dispose()
 

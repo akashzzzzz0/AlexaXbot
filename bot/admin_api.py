@@ -923,7 +923,51 @@ async def owner_referrals_handler(request):
     async with async_session_maker() as session:
         total = await session.scalar(select(func.count()).select_from(Referral)) or 0
         rewarded = await session.scalar(select(func.count()).select_from(Referral).where(Referral.reward_given.is_(True))) or 0
+        valid_total = await session.scalar(
+            select(func.count(Referral.id))
+            .join(User, User.id == Referral.referred_id)
+            .where(User.is_bot.is_(False), User.dm_started.is_(True))
+        ) or 0
         pending = await session.scalar(select(func.count()).select_from(AffiliateRequest).where(AffiliateRequest.status == "pending")) or 0
+
+        # Aggregate by inviter, not only the latest 100 individual referral rows.
+        aggregates = (await session.execute(
+            select(User, func.count(Referral.id).label("tracked"))
+            .join(Referral, Referral.referrer_id == User.id)
+            .where(User.is_bot.is_(False))
+            .group_by(User.id)
+            .order_by(desc(func.count(Referral.id)), User.id.asc())
+        )).all()
+        referral_users = []
+        for inviter, tracked in aggregates:
+            valid = await session.scalar(
+                select(func.count(Referral.id))
+                .join(User, User.id == Referral.referred_id)
+                .where(
+                    Referral.referrer_id == inviter.id,
+                    User.is_bot.is_(False),
+                    User.dm_started.is_(True),
+                )
+            ) or 0
+            reserved = await session.scalar(
+                select(func.coalesce(func.sum(AffiliateRequest.requested_stars), 0))
+                .where(
+                    AffiliateRequest.user_id == inviter.id,
+                    AffiliateRequest.request_type.in_(("stars", "premium")),
+                    AffiliateRequest.status.in_(("pending", "approved", "paid")),
+                )
+            ) or 0
+            earned = int(valid)
+            referral_users.append({
+                "userId": str(inviter.id),
+                "name": inviter.first_name or inviter.username or str(inviter.id),
+                "username": inviter.username,
+                "tracked": int(tracked),
+                "valid": earned,
+                "earnedStars": earned,
+                "availableStars": max(0, earned - int(reserved)),
+            })
+
         rows = (await session.execute(
             select(Referral, User).join(User, User.id == Referral.referrer_id)
             .order_by(desc(Referral.created_at)).limit(100)
@@ -943,7 +987,11 @@ async def owner_referrals_handler(request):
             "type": x.request_type, "stars": x.requested_stars, "status": x.status,
             "createdAt": x.created_at.isoformat() if x.created_at else None
         } for x, u in requests]
-    return web.json_response({"total": int(total), "rewarded": int(rewarded), "pendingRequests": int(pending), "referrals": referrals, "requests": payouts}, headers={"Cache-Control": "no-store"})
+    return web.json_response({
+        "total": int(total), "rewarded": int(rewarded), "valid": int(valid_total),
+        "earnedStars": int(valid_total), "pendingRequests": int(pending),
+        "referralUsers": referral_users, "referrals": referrals, "requests": payouts,
+    }, headers={"Cache-Control": "no-store"})
 
 
 @require_admin
