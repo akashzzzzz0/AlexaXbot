@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timezone
 from typing import Optional, Tuple, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, update
 from bot.database.models import GameMatch, GameStats, DuelStats, Duel
 from bot.services.economy_service import add_coins, deduct_coins
 from bot.services.user_service import add_xp, get_or_create_game_stats, get_or_create_duel_stats
@@ -194,12 +194,31 @@ async def accept_duel(
     if not duel or duel.status != "pending":
         return None, {}
 
+    # Claim the pending duel atomically before touching either wallet. Only one
+    # concurrent Accept callback can change pending -> accepting.
+    previous_opponent_id = duel.opponent_id
+    claim = await session.execute(
+        update(Duel)
+        .where(Duel.id == duel_id, Duel.status == "pending")
+        .values(status="accepting", opponent_id=opponent_id)
+        .execution_options(synchronize_session=False)
+    )
+    if claim.rowcount != 1:
+        return None, {}
+
+    await session.refresh(duel)
     if duel.wager > 0:
         success, _ = await deduct_coins(session, opponent_id, duel.wager, "duel_bet", "Duel wager")
         if not success:
+            await session.execute(
+                update(Duel)
+                .where(Duel.id == duel_id, Duel.status == "accepting", Duel.opponent_id == opponent_id)
+                .values(status="pending", opponent_id=previous_opponent_id)
+                .execution_options(synchronize_session=False)
+            )
+            await session.refresh(duel)
             return duel, {"error": "insufficient_funds"}
 
-    duel.opponent_id = opponent_id
     duel.status = "active"
     result = await _play_duel(session, duel)
     return duel, result

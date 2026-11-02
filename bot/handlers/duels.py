@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
+from sqlalchemy.exc import IntegrityError
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.database.models import Duel, User
 from bot.keyboards.main_menu import back_button_kb
@@ -15,6 +16,20 @@ import structlog
 
 logger = structlog.get_logger()
 router = Router()
+
+async def _insert_or_get_user(session: AsyncSession, user: User) -> User:
+    try:
+        async with session.begin_nested():
+            session.add(user)
+            await session.flush()
+        return user
+    except IntegrityError:
+        existing = await session.get(User, user.id)
+        if existing is None:
+            raise
+        return existing
+
+
 
 
 class DuelStates(StatesGroup):
@@ -273,9 +288,17 @@ async def cmd_duel(message: Message, _: callable, db_session: AsyncSession, db_u
     opponent_tg = message.reply_to_message.from_user
     opponent = await db_session.get(User, opponent_tg.id)
     if not opponent:
-        opponent = User(id=opponent_tg.id, first_name=opponent_tg.first_name or "User", username=opponent_tg.username)
-        db_session.add(opponent)
-        await db_session.flush()
+        opponent = await _insert_or_get_user(
+            db_session,
+            User(
+                id=opponent_tg.id,
+                telegram_id=opponent_tg.id,
+                first_name=opponent_tg.first_name or "User",
+                last_name=opponent_tg.last_name,
+                username=opponent_tg.username,
+                is_bot=opponent_tg.is_bot,
+            ),
+        )
 
     duel = await create_duel(db_session, message.chat.id, db_user.id, opponent.id, wager, "dice", message.message_id)
     if not duel:
