@@ -139,6 +139,11 @@ async def create_tables() -> None:
         if conn.dialect.name == "postgresql":
             statements = [
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS dm_started BOOLEAN NOT NULL DEFAULT FALSE",
+                "ALTER TABLE inbox_messages ADD COLUMN IF NOT EXISTS telegram_message_id BIGINT NOT NULL DEFAULT 0",
+                "ALTER TABLE inbox_messages ADD COLUMN IF NOT EXISTS content_type VARCHAR(32) NOT NULL DEFAULT 'text'",
+                "ALTER TABLE inbox_messages ADD COLUMN IF NOT EXISTS preview TEXT",
+                "ALTER TABLE inbox_messages ADD COLUMN IF NOT EXISTS is_read BOOLEAN NOT NULL DEFAULT FALSE",
+                "ALTER TABLE inbox_messages ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP",
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_link_requested BOOLEAN NOT NULL DEFAULT FALSE",
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS has_added_bot_to_group BOOLEAN NOT NULL DEFAULT FALSE",
                 "ALTER TABLE groups ADD COLUMN IF NOT EXISTS invite_link VARCHAR(512)",
@@ -154,6 +159,11 @@ async def create_tables() -> None:
         elif conn.dialect.name == "sqlite":
             for table, column, definition in [
                 ("users", "dm_started", "BOOLEAN NOT NULL DEFAULT 0"),
+                ("inbox_messages", "telegram_message_id", "BIGINT NOT NULL DEFAULT 0"),
+                ("inbox_messages", "content_type", "VARCHAR(32) NOT NULL DEFAULT 'text'"),
+                ("inbox_messages", "preview", "TEXT"),
+                ("inbox_messages", "is_read", "BOOLEAN NOT NULL DEFAULT 0"),
+                ("inbox_messages", "created_at", "DATETIME"),
                 ("users", "referral_link_requested", "BOOLEAN NOT NULL DEFAULT 0"),
                 ("users", "has_added_bot_to_group", "BOOLEAN NOT NULL DEFAULT 0"),
                 ("groups", "invite_link", "VARCHAR(512)"),
