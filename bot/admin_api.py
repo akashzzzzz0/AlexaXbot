@@ -1675,7 +1675,7 @@ async def owner_group_action_handler(request):
                 if record:
                     if action == "mute":
                         record.is_muted = True
-                        record.mute_until = datetime.utcnow() + timedelta(seconds=seconds)
+                        record.mute_until = datetime.now(timezone.utc) + timedelta(seconds=seconds)
                     elif action == "unmute":
                         record.is_muted = False
                         record.mute_until = None
