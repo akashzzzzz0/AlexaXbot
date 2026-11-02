@@ -198,6 +198,76 @@ async def unban_user_handler(request):
 
 
 @require_admin
+async def owner_groups_sync_handler(request):
+    """Reconcile stored group records with the bot's current Telegram membership."""
+    import asyncio
+    from aiogram import Bot
+    from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+    from bot.config import settings
+    from bot.database.connection import async_session_maker
+
+    async with async_session_maker() as session:
+        known_groups = (await session.scalars(select(Group).order_by(Group.title.asc()))).all()
+        group_refs = [(int(group.id), group.is_active) for group in known_groups]
+
+    if not group_refs:
+        return web.json_response({
+            "success": True, "knownGroups": 0, "checked": 0,
+            "active": 0, "inactive": 0, "unverified": 0,
+            "note": "No groups are recorded yet. Telegram sends group records when Alexa receives a membership update or a message in that group.",
+        }, headers={"Cache-Control": "no-store"})
+
+    bot = Bot(token=settings.BOT_TOKEN)
+    try:
+        me = await bot.get_me()
+        semaphore = asyncio.Semaphore(6)
+
+        async def verify_group(group_id):
+            async with semaphore:
+                try:
+                    member = await bot.get_chat_member(chat_id=group_id, user_id=me.id)
+                    status = str(getattr(member.status, "value", member.status))
+                    return group_id, status in {"member", "administrator", "creator"}, status
+                except TelegramForbiddenError:
+                    return group_id, False, "inaccessible"
+                except TelegramBadRequest as exc:
+                    message = str(exc).lower()
+                    if "chat not found" in message or "user not found" in message or "kicked" in message:
+                        return group_id, False, "not_in_group"
+                    return group_id, None, "unverified"
+                except Exception:
+                    return group_id, None, "unverified"
+
+        results = await asyncio.gather(*(verify_group(group_id) for group_id, _ in group_refs))
+        async with async_session_maker() as session:
+            for group_id, active, _status in results:
+                if active is not None:
+                    group = await session.get(Group, group_id)
+                    if group is not None:
+                        group.is_active = active
+            await session.commit()
+
+        active_count = sum(1 for _, active, _ in results if active is True)
+        inactive_count = sum(1 for _, active, _ in results if active is False)
+        unverified_count = sum(1 for _, active, _ in results if active is None)
+        return web.json_response({
+            "success": True,
+            "knownGroups": len(group_refs),
+            "checked": len(results) - unverified_count,
+            "active": active_count,
+            "inactive": inactive_count,
+            "unverified": unverified_count,
+            "note": "Telegram does not provide bots with a complete list of every chat. Sync verifies only groups Alexa has already recorded from Telegram updates or messages.",
+        }, headers={"Cache-Control": "no-store"})
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Owner group membership sync failed")
+        return web.json_response({"error": "Could not sync group membership with Telegram."}, status=502)
+    finally:
+        await bot.session.close()
+
+
+@require_admin
 async def groups_handler(request):
     try:
         # Resolve the lazy database accessor explicitly; a bare global name
@@ -1951,6 +2021,7 @@ def setup_admin_routes(app):
     app.router.add_get('/owner-api/users', users_handler)
     app.router.add_post('/owner-api/users/{user_id}/ban', ban_user_handler)
     app.router.add_post('/owner-api/users/{user_id}/unban', unban_user_handler)
+    app.router.add_post('/owner-api/groups/sync', owner_groups_sync_handler)
     app.router.add_get('/owner-api/groups', groups_handler)
     app.router.add_get('/owner-api/group-links', owner_group_links_handler)
     app.router.add_post('/owner-api/groups/{group_id}/invite-link', owner_group_invite_link_handler)
