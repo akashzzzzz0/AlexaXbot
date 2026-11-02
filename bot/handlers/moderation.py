@@ -3,6 +3,7 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 from aiogram.filters import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, delete, func
+from sqlalchemy.exc import IntegrityError
 from bot.database.models import User, GroupMember, GroupSettings, Warning, SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig
 from bot.keyboards.moderation import moderation_menu_kb, bio_link_protection_kb, bio_link_action_kb, mute_duration_kb, warn_actions_kb
 from bot.keyboards.main_menu import back_button_kb
@@ -18,6 +19,21 @@ from bot.middlewares.admin_actions import AdminActionMiddleware
 
 logger = structlog.get_logger()
 router = Router()
+
+async def _insert_or_get(session: AsyncSession, candidate, model, *conditions):
+    """Insert inside a savepoint and recover the row if a concurrent update wins."""
+    try:
+        async with session.begin_nested():
+            session.add(candidate)
+            await session.flush()
+        return candidate
+    except IntegrityError:
+        existing = await session.scalar(select(model).where(*conditions))
+        if existing is None:
+            raise
+        return existing
+
+
 
 
 async def _delete_moderation_command(message: Message) -> bool:
@@ -155,14 +171,16 @@ async def get_target_user(message: Message, session: AsyncSession) -> tuple:
         reason = " ".join(text.split()[1:])
         target = await session.get(User, tg_user.id)
         if target is None:
-            target = User(
-                id=tg_user.id, telegram_id=tg_user.id,
-                first_name=tg_user.first_name or "User",
-                last_name=tg_user.last_name, username=tg_user.username,
-                is_bot=tg_user.is_bot,
+            target = await _insert_or_get(
+                session,
+                User(
+                    id=tg_user.id, telegram_id=tg_user.id,
+                    first_name=tg_user.first_name or "User",
+                    last_name=tg_user.last_name, username=tg_user.username,
+                    is_bot=tg_user.is_bot,
+                ),
+                User, User.id == tg_user.id,
             )
-            session.add(target)
-            await session.flush()
         return target, reason
 
     # Telegram clickable text mentions contain the actual user ID.
@@ -171,14 +189,16 @@ async def get_target_user(message: Message, session: AsyncSession) -> tuple:
             mentioned = entity.user
             target = await session.get(User, mentioned.id)
             if target is None:
-                target = User(
-                    id=mentioned.id, telegram_id=mentioned.id,
-                    first_name=mentioned.first_name or "User",
-                    last_name=mentioned.last_name, username=mentioned.username,
-                    is_bot=mentioned.is_bot,
+                target = await _insert_or_get(
+                    session,
+                    User(
+                        id=mentioned.id, telegram_id=mentioned.id,
+                        first_name=mentioned.first_name or "User",
+                        last_name=mentioned.last_name, username=mentioned.username,
+                        is_bot=mentioned.is_bot,
+                    ),
+                    User, User.id == mentioned.id,
                 )
-                session.add(target)
-                await session.flush()
             return target, reason
 
     if not identifier:
@@ -206,9 +226,10 @@ async def get_target_user(message: Message, session: AsyncSession) -> tuple:
             if uid > 0:
                 target = await session.get(User, uid)
                 if target is None:
-                    target = User(id=uid, telegram_id=uid, first_name=f"User {uid}", is_bot=False)
-                    session.add(target)
-                    await session.flush()
+                    target = await _insert_or_get(
+                        session, User(id=uid, telegram_id=uid, first_name=f"User {uid}", is_bot=False),
+                        User, User.id == uid,
+                    )
     return target, reason
 
 
@@ -350,11 +371,13 @@ async def save_bio_link_settings(callback: CallbackQuery, db_session: AsyncSessi
     draft = _bio_link_settings_drafts.get(key, {"action": "warn_mute", "duration": 3600})
     config = await db_session.scalar(select(BioLinkProtectionConfig).where(BioLinkProtectionConfig.group_id == chat.id))
     if config is None:
-        config = BioLinkProtectionConfig(group_id=chat.id, action=draft["action"], mute_duration=draft["duration"])
-        db_session.add(config)
-    else:
-        config.action = draft["action"]
-        config.mute_duration = draft["duration"]
+        config = await _insert_or_get(
+            db_session,
+            BioLinkProtectionConfig(group_id=chat.id, action=draft["action"], mute_duration=draft["duration"]),
+            BioLinkProtectionConfig, BioLinkProtectionConfig.group_id == chat.id,
+        )
+    config.action = draft["action"]
+    config.mute_duration = draft["duration"]
     try:
         await db_session.commit()
     except Exception as exc:
@@ -398,10 +421,11 @@ async def _set_bio_link_protection(callback: CallbackQuery, db_session: AsyncSes
         select(BioLinkProtectionSetting).where(BioLinkProtectionSetting.group_id == chat.id)
     )
     if setting is None:
-        setting = BioLinkProtectionSetting(group_id=chat.id, enabled=enabled)
-        db_session.add(setting)
-    else:
-        setting.enabled = enabled
+        setting = await _insert_or_get(
+            db_session, BioLinkProtectionSetting(group_id=chat.id, enabled=enabled),
+            BioLinkProtectionSetting, BioLinkProtectionSetting.group_id == chat.id,
+        )
+    setting.enabled = enabled
     try:
         await db_session.commit()
     except Exception as exc:
@@ -448,10 +472,14 @@ async def cmd_approvebio(message: Message, db_session: AsyncSession, **kwargs):
         )
     )
     if member is None:
-        member = GroupMember(group_id=message.chat.id, user_id=target.id, is_whitelisted=True)
-        db_session.add(member)
-    else:
-        member.is_whitelisted = True
+        member = await _insert_or_get(
+            db_session,
+            GroupMember(group_id=message.chat.id, user_id=target.id, is_whitelisted=True),
+            GroupMember,
+            GroupMember.group_id == message.chat.id,
+            GroupMember.user_id == target.id,
+        )
+    member.is_whitelisted = True
     try:
         await db_session.commit()
     except Exception as exc:
@@ -984,13 +1012,17 @@ async def cmd_setrole(message: Message, _: callable, db_session: AsyncSession, *
     target_tg = message.reply_to_message.from_user
     target = await db_session.get(User, target_tg.id)
     if not target:
-        target = User(id=target_tg.id, telegram_id=target_tg.id, username=target_tg.username, first_name=target_tg.first_name or "User", last_name=target_tg.last_name, is_bot=target_tg.is_bot)
-        db_session.add(target)
-        await db_session.flush()
+        target = await _insert_or_get(
+            db_session,
+            User(id=target_tg.id, telegram_id=target_tg.id, username=target_tg.username, first_name=target_tg.first_name or "User", last_name=target_tg.last_name, is_bot=target_tg.is_bot),
+            User, User.id == target_tg.id,
+        )
     member = await db_session.scalar(select(GroupMember).where(GroupMember.group_id == message.chat.id, GroupMember.user_id == target_tg.id))
     if not member:
-        member = GroupMember(group_id=message.chat.id, user_id=target_tg.id)
-        db_session.add(member)
+        member = await _insert_or_get(
+            db_session, GroupMember(group_id=message.chat.id, user_id=target_tg.id),
+            GroupMember, GroupMember.group_id == message.chat.id, GroupMember.user_id == target_tg.id,
+        )
     member.custom_role = parts[1].strip()[:64]
     await db_session.flush()
     await message.reply(f"✅ Custom label set for {safe_username(target)}: <b>{escape(member.custom_role)}</b>", parse_mode="HTML")
