@@ -59,7 +59,7 @@ async def deduct_coins(
         return False, wallet.balance or 0
     result = await session.execute(
         update(Wallet)
-        .where(Wallet.id == wallet.id, Wallet.balance >= amount)
+        .where(Wallet.id == wallet.id, func.coalesce(Wallet.balance, 0) >= amount)
         .values(
             balance=Wallet.balance - amount,
             total_spent=func.coalesce(Wallet.total_spent, 0) + amount,
@@ -103,7 +103,7 @@ async def withdraw_from_bank(session: AsyncSession, user_id: int, amount: int) -
         return False, wallet.balance or 0, wallet.bank_balance or 0
     result = await session.execute(
         update(Wallet)
-        .where(Wallet.id == wallet.id, Wallet.bank_balance >= amount)
+        .where(Wallet.id == wallet.id, func.coalesce(Wallet.bank_balance, 0) >= amount)
         .values(
             bank_balance=Wallet.bank_balance - amount,
             balance=func.coalesce(Wallet.balance, 0) + amount,
