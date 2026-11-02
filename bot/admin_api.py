@@ -209,9 +209,26 @@ async def groups_handler(request):
         offset = (page - 1) * limit
 
         async with async_session_maker() as session:
-            # Match the native Owner Panel's connected-groups list and
-            # keep removed chats out of group actions/broadcast selection.
-            query = select(Group).where(Group.is_active.is_(True))
+            # Count observed members from the actual group_members rows.
+            # Group.member_count is a legacy snapshot and is not maintained by
+            # every update path, so presenting it as a live Telegram count is
+            # misleading. This count is explicitly the members Alexa has tracked.
+            tracked_counts = (
+                select(
+                    GroupMember.group_id.label("group_id"),
+                    func.count(GroupMember.id).label("tracked_member_count"),
+                )
+                .group_by(GroupMember.group_id)
+                .subquery()
+            )
+            query = (
+                select(
+                    Group,
+                    func.coalesce(tracked_counts.c.tracked_member_count, 0).label("tracked_member_count"),
+                )
+                .outerjoin(tracked_counts, tracked_counts.c.group_id == Group.id)
+                .where(Group.is_active.is_(True))
+            )
             count_query = select(func.count()).select_from(Group).where(Group.is_active.is_(True))
             if search:
                 like = f"%{search}%"
@@ -223,9 +240,15 @@ async def groups_handler(request):
             result = await session.execute(
                 query.order_by(desc(Group.created_at)).offset(offset).limit(limit)
             )
-            groups = result.scalars().all()
+            groups = result.all()
+            group_items = []
+            for group, tracked_member_count in groups:
+                item = _group_to_dict(group)
+                item["memberCount"] = int(tracked_member_count or 0)
+                item["memberCountType"] = "tracked"
+                group_items.append(item)
             return web.json_response({
-                "groups": [_group_to_dict(g) for g in groups],
+                "groups": group_items,
                 "total": total or 0,
                 "page": page,
                 "limit": limit,
