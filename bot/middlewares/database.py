@@ -194,26 +194,30 @@ class DatabaseMiddleware(BaseMiddleware):
                 # Store only group messages that Telegram actually delivers to ALEXA.
                 # Bot API privacy mode still determines which messages are visible.
                 if isinstance(event, Update) and event.message and event.message.chat.type in ("group", "supergroup") and user and not user.is_bot:
+                    incoming = event.message
                     try:
-                        incoming = event.message
-                        sender = incoming.from_user
-                        already_saved = await session.scalar(select(GroupInboxMessage.id).where(
-                            GroupInboxMessage.chat_id == incoming.chat.id,
-                            GroupInboxMessage.telegram_message_id == incoming.message_id,
-                        ))
-                        if not already_saved:
-                            preview = _owner_inbox_preview(incoming)
-                            session.add(GroupInboxMessage(
-                                chat_id=incoming.chat.id,
-                                telegram_message_id=incoming.message_id,
-                                sender_id=sender.id if sender else None,
-                                sender_name=((sender.full_name if sender else None) or "Unknown")[:256],
-                                sender_username=(sender.username[:64] if sender and sender.username else None),
-                                content_type=str(incoming.content_type),
-                                preview=preview[:1000],
+                        # Isolate duplicate/racing message inserts so an inbox conflict
+                        # cannot poison the main update transaction or moderation handlers.
+                        async with session.begin_nested():
+                            sender = incoming.from_user
+                            already_saved = await session.scalar(select(GroupInboxMessage.id).where(
+                                GroupInboxMessage.chat_id == incoming.chat.id,
+                                GroupInboxMessage.telegram_message_id == incoming.message_id,
                             ))
+                            if not already_saved:
+                                preview = _owner_inbox_preview(incoming)
+                                session.add(GroupInboxMessage(
+                                    chat_id=incoming.chat.id,
+                                    telegram_message_id=incoming.message_id,
+                                    sender_id=sender.id if sender else None,
+                                    sender_name=((sender.full_name if sender else None) or "Unknown")[:256],
+                                    sender_username=(sender.username[:64] if sender and sender.username else None),
+                                    content_type=str(incoming.content_type),
+                                    preview=preview[:1000],
+                                ))
+                                await session.flush()
                     except Exception as group_inbox_error:
-                        logger.warning("Could not save group message to owner inbox", chat_id=chat.id if chat else None, error=str(group_inbox_error))
+                        logger.warning("Could not save group message to owner inbox", chat_id=incoming.chat.id, error=str(group_inbox_error))
 
                 # Emergency lockdown must run before command routers, not only in the catch-all handler.
                 if isinstance(event, Update) and chat and chat.type in ("group", "supergroup") and data.get("group_security") and data["group_security"].emergency_mode and user and not user.is_bot:
