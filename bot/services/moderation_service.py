@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func, delete
+from sqlalchemy.exc import IntegrityError
 from aiogram import Bot
 from aiogram.types import ChatPermissions
 from bot.database.models import (
@@ -11,6 +12,34 @@ import structlog
 from html import escape as html_escape
 
 logger = structlog.get_logger()
+
+async def _get_or_create_group_member(session: AsyncSession, group_id: int, user_id: int) -> GroupMember:
+    member = await session.scalar(
+        select(GroupMember).where(
+            GroupMember.group_id == group_id,
+            GroupMember.user_id == user_id,
+        )
+    )
+    if member is not None:
+        return member
+    candidate = GroupMember(group_id=group_id, user_id=user_id)
+    try:
+        async with session.begin_nested():
+            session.add(candidate)
+            await session.flush()
+        return candidate
+    except IntegrityError:
+        member = await session.scalar(
+            select(GroupMember).where(
+                GroupMember.group_id == group_id,
+                GroupMember.user_id == user_id,
+            )
+        )
+        if member is None:
+            raise
+        return member
+
+
 
 FULL_PERMISSIONS = ChatPermissions(
     can_send_messages=True,
@@ -212,14 +241,7 @@ async def mute_user(
             permissions=MUTED_PERMISSIONS,
             until_date=until,
         )
-        member = await session.scalar(
-            select(GroupMember).where(
-                and_(GroupMember.group_id == group_id, GroupMember.user_id == user_id)
-            )
-        )
-        if not member:
-            member = GroupMember(group_id=group_id, user_id=user_id)
-            session.add(member)
+        member = await _get_or_create_group_member(session, group_id, user_id)
         member.is_muted = True
         member.mute_until = until_dt
         await log_action(session, group_id, "mute", user_id, admin_id, {"duration": duration, "reason": reason})
