@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update
+from sqlalchemy.exc import IntegrityError
 from bot.database.models import User, Wallet, Economy, Reputation, DuelStats, GameStats
 import structlog
 
@@ -11,45 +12,80 @@ logger = structlog.get_logger()
 async def get_or_create_wallet(session: AsyncSession, user_id: int) -> Wallet:
     wallet = await session.scalar(select(Wallet).where(Wallet.user_id == user_id))
     if not wallet:
-        wallet = Wallet(user_id=user_id, balance=0, bank_balance=0)
-        session.add(wallet)
-        await session.flush()
+        candidate = Wallet(user_id=user_id, balance=0, bank_balance=0)
+        try:
+            async with session.begin_nested():
+                session.add(candidate)
+                await session.flush()
+            wallet = candidate
+        except IntegrityError:
+            wallet = await session.scalar(select(Wallet).where(Wallet.user_id == user_id))
+            if wallet is None:
+                raise
     return wallet
 
 
 async def get_or_create_economy(session: AsyncSession, user_id: int) -> Economy:
     eco = await session.scalar(select(Economy).where(Economy.user_id == user_id))
     if not eco:
-        eco = Economy(user_id=user_id, xp=0, level=1)
-        session.add(eco)
-        await session.flush()
+        candidate = Economy(user_id=user_id, xp=0, level=1)
+        try:
+            async with session.begin_nested():
+                session.add(candidate)
+                await session.flush()
+            eco = candidate
+        except IntegrityError:
+            eco = await session.scalar(select(Economy).where(Economy.user_id == user_id))
+            if eco is None:
+                raise
     return eco
 
 
 async def get_or_create_reputation(session: AsyncSession, user_id: int) -> Reputation:
     rep = await session.scalar(select(Reputation).where(Reputation.user_id == user_id))
     if not rep:
-        rep = Reputation(user_id=user_id, positive=0, negative=0)
-        session.add(rep)
-        await session.flush()
+        candidate = Reputation(user_id=user_id, positive=0, negative=0)
+        try:
+            async with session.begin_nested():
+                session.add(candidate)
+                await session.flush()
+            rep = candidate
+        except IntegrityError:
+            rep = await session.scalar(select(Reputation).where(Reputation.user_id == user_id))
+            if rep is None:
+                raise
     return rep
 
 
 async def get_or_create_duel_stats(session: AsyncSession, user_id: int) -> DuelStats:
     stats = await session.scalar(select(DuelStats).where(DuelStats.user_id == user_id))
     if not stats:
-        stats = DuelStats(user_id=user_id)
-        session.add(stats)
-        await session.flush()
+        candidate = DuelStats(user_id=user_id)
+        try:
+            async with session.begin_nested():
+                session.add(candidate)
+                await session.flush()
+            stats = candidate
+        except IntegrityError:
+            stats = await session.scalar(select(DuelStats).where(DuelStats.user_id == user_id))
+            if stats is None:
+                raise
     return stats
 
 
 async def get_or_create_game_stats(session: AsyncSession, user_id: int) -> GameStats:
     stats = await session.scalar(select(GameStats).where(GameStats.user_id == user_id))
     if not stats:
-        stats = GameStats(user_id=user_id)
-        session.add(stats)
-        await session.flush()
+        candidate = GameStats(user_id=user_id)
+        try:
+            async with session.begin_nested():
+                session.add(candidate)
+                await session.flush()
+            stats = candidate
+        except IntegrityError:
+            stats = await session.scalar(select(GameStats).where(GameStats.user_id == user_id))
+            if stats is None:
+                raise
     return stats
 
 

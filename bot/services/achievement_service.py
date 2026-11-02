@@ -1,6 +1,7 @@
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
+from sqlalchemy.exc import IntegrityError
 from bot.database.models import Achievement, UserAchievement
 from bot.services.economy_service import add_coins
 from bot.services.user_service import add_xp
@@ -124,7 +125,13 @@ async def check_and_award_achievements(
         )
         if not existing:
             ua = UserAchievement(user_id=user_id, achievement_id=ach.id, progress=metric_value)
-            session.add(ua)
+            try:
+                async with session.begin_nested():
+                    session.add(ua)
+                    await session.flush()
+            except IntegrityError:
+                # Another update already awarded this achievement to the user.
+                continue
             if ach.reward_coins > 0:
                 await add_coins(session, user_id, ach.reward_coins, "achievement", f"Achievement: {ach.code}")
             if ach.reward_xp > 0:
