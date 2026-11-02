@@ -19,6 +19,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import func, select, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import settings
@@ -29,6 +30,20 @@ from bot.services.moderation_service import ban_user, unban_user, kick_user, mut
 
 router = Router(name="owner_ai_control")
 logger = logging.getLogger(__name__)
+
+async def _insert_or_get(session: AsyncSession, candidate, model, *conditions):
+    try:
+        async with session.begin_nested():
+            session.add(candidate)
+            await session.flush()
+        return candidate
+    except IntegrityError:
+        existing = await session.scalar(select(model).where(*conditions))
+        if existing is None:
+            raise
+        return existing
+
+
 _OWNER_PREFIX = re.compile(r"^\s*(?:alexa\b|@alexasuper_bot\b)[\s,!:.-]*(.*)$", re.I)
 _BOT_USERNAME = None
 _PK = ZoneInfo("Asia/Kolkata")
@@ -51,9 +66,12 @@ async def _global_ai_enabled(session: AsyncSession) -> bool:
 async def _set_global_ai_enabled(session: AsyncSession, enabled: bool) -> None:
     row = await session.get(GlobalSetting, "owner_ai_enabled")
     if row is None:
-        session.add(GlobalSetting(key="owner_ai_enabled", value="1" if enabled else "0"))
-    else:
-        row.value = "1" if enabled else "0"
+        row = await _insert_or_get(
+            session,
+            GlobalSetting(key="owner_ai_enabled", value="1" if enabled else "0"),
+            GlobalSetting, GlobalSetting.key == "owner_ai_enabled",
+        )
+    row.value = "1" if enabled else "0"
     await session.commit()
 
 
@@ -78,8 +96,11 @@ async def _find_target_group(message: Message, session: AsyncSession, prompt: st
             chat = await message.bot.get_chat(group_id)
             chat_type = str(getattr(chat.type, "value", chat.type))
             if chat_type in {"group", "supergroup"}:
-                group = Group(id=group_id, title=chat.title or "Telegram group", type=chat_type, is_active=True)
-                session.add(group)
+                group = await _insert_or_get(
+                    session,
+                    Group(id=group_id, title=chat.title or "Telegram group", type=chat_type, is_active=True),
+                    Group, Group.id == group_id,
+                )
                 await session.commit()
                 return group
         except Exception:
@@ -88,13 +109,16 @@ async def _find_target_group(message: Message, session: AsyncSession, prompt: st
         current = await session.get(Group, message.chat.id)
         if current and current.is_active:
             return current
-        current = Group(
-            id=message.chat.id,
-            title=message.chat.title or "Current group",
-            type=str(getattr(message.chat.type, "value", message.chat.type)),
-            is_active=True,
+        current = await _insert_or_get(
+            session,
+            Group(
+                id=message.chat.id,
+                title=message.chat.title or "Current group",
+                type=str(getattr(message.chat.type, "value", message.chat.type)),
+                is_active=True,
+            ),
+            Group, Group.id == message.chat.id,
         )
-        session.add(current)
         await session.commit()
         return current
     return None
@@ -467,9 +491,10 @@ async def _set_content_lock(message: Message, session: AsyncSession, action: str
                   "lock_contacts", "lock_locations", "lock_stickers", "lock_inline", "lock_mentions", "lock_hashtags"]
     security = await session.scalar(select(SecuritySettings).where(SecuritySettings.group_id == group_id))
     if security is None:
-        security = SecuritySettings(group_id=group_id)
-        session.add(security)
-        await session.flush()
+        security = await _insert_or_get(
+            session, SecuritySettings(group_id=group_id),
+            SecuritySettings, SecuritySettings.group_id == group_id,
+        )
     enabled = action == "lock_content"
     targets = all_fields if lock_type == "all" else fields.get(lock_type, [])
     if not targets:
@@ -491,18 +516,22 @@ async def _resolve_target(message: Message, session: AsyncSession, prompt: str, 
         tg = message.from_user
         target = await session.get(User, tg.id)
         if target is None:
-            target = User(id=tg.id, telegram_id=tg.id, username=tg.username, first_name=tg.first_name or "User", last_name=tg.last_name, is_bot=tg.is_bot)
-            session.add(target)
-            await session.flush()
+            target = await _insert_or_get(
+                session,
+                User(id=tg.id, telegram_id=tg.id, username=tg.username, first_name=tg.first_name or "User", last_name=tg.last_name, is_bot=tg.is_bot),
+                User, User.id == tg.id,
+            )
         return target
     if message.reply_to_message and message.reply_to_message.from_user:
         tg = message.reply_to_message.from_user
         target = await session.get(User, tg.id)
         if target is None:
-            target = User(id=tg.id, telegram_id=tg.id, username=tg.username, first_name=tg.first_name or "User",
-                          last_name=tg.last_name, is_bot=tg.is_bot)
-            session.add(target)
-            await session.flush()
+            target = await _insert_or_get(
+                session,
+                User(id=tg.id, telegram_id=tg.id, username=tg.username, first_name=tg.first_name or "User",
+                     last_name=tg.last_name, is_bot=tg.is_bot),
+                User, User.id == tg.id,
+            )
         return target
     for entity in (message.entities or []):
         if getattr(entity.type, "value", entity.type) == "text_mention" and entity.user:
