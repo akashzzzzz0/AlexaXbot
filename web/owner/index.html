@@ -416,7 +416,31 @@ async function purgeGroupMessages(groupId,mode){
 }
 async function loadGroupMessageGroups(){try{const d=await api('/owner-api/groups?page=1&limit=100');$('groupMessageList').innerHTML=(d.groups||[]).map(g=>'<label class="item" style="display:block"><input type="checkbox" data-group-check value="'+esc(g.id)+'"> <b>'+esc(g.title)+'</b><div class="meta">ID '+esc(g.id)+' · '+esc(g.memberCount||0)+' members</div></label>').join('')||'<p>No active groups.</p>'}catch(e){showError(e.message)}}
 async function sendSelectedGroups(){const message=$('groupMessageText').value.trim(),ids=[...document.querySelectorAll('[data-group-check]:checked')].map(x=>x.value);if(!message)return showError('Write a message first.');if(!ids.length)return showError('Select at least one group.');if(!confirm('Send this message to '+ids.length+' selected groups?'))return;try{const d=await api('/owner-api/group-message',{method:'POST',body:JSON.stringify({message,groupIds:ids})});note('Group message complete · Sent '+d.sent+' · Failed '+d.failed+' · Total '+d.total)}catch(e){showError(e.message)}}
-async function loadHealth(){try{const d=await api('/owner-api/health');$('healthRows').innerHTML=Object.entries(d).map(([k,v])=>'<div class="item"><b>'+esc(k)+'</b><div class="meta">'+esc(v)+'</div></div>').join('')}catch(e){showError(e.message);$('healthRows').textContent='Health check unavailable.'}}
+async function loadHealth(){
+  const box=$('healthRows');
+  if(!box)return;
+  clearError();
+  box.innerHTML='<p class="muted">Checking Alexa process and database…</p>';
+  const started=performance.now();
+  try{
+    const d=await api('/owner-api/health');
+    const elapsed=Math.max(0,Math.round(performance.now()-started));
+    const checks=[
+      {label:'Bot process',value:d.process==='running'?'Operational':'Unavailable',ok:d.process==='running',detail:'Owner API is responding'},
+      {label:'Database',value:d.database==='connected'?'Connected':'Unavailable',ok:d.database==='connected',detail:'Database connectivity check'},
+      {label:'Active groups',value:Number(d.activeGroups??0).toLocaleString(),ok:true,detail:'Groups marked active'},
+      {label:'DM starters',value:Number(d.dmStarters??0).toLocaleString(),ok:true,detail:'Users who started Alexa in private chat'},
+      {label:'Pending promotions',value:Number(d.pendingPromotionRequests??0).toLocaleString(),ok:true,detail:'Requests awaiting owner review'}
+    ];
+    const allHealthy=checks.slice(0,2).every(x=>x.ok);
+    box.innerHTML='<div class="row" style="margin:4px 0 13px"><span class="pill">'+(allHealthy?'SYSTEM OPERATIONAL':'CHECK REQUIRED')+'</span><span class="muted">Response '+elapsed+' ms</span></div><div class="stats">'+checks.map(c=>'<article class="stat"><div class="row"><span class="pill" style="'+(c.ok?'':'border-color:#b86b53;color:#ffb8a5;background:#3d1d18')+'">'+(c.ok?'OK':'ISSUE')+'</span></div><strong style="font-size:20px">'+esc(c.value)+'</strong><b>'+esc(c.label)+'</b><small>'+esc(c.detail)+'</small></article>').join('')+'</div><div class="item"><div class="meta">Last checked '+new Date().toLocaleTimeString()+' · Values returned by Alexa health endpoint</div></div><div class="actions"><button id="healthRetry" class="primary">↻ Run health check again</button></div>';
+    $('healthRetry').onclick=loadHealth;
+  }catch(e){
+    box.innerHTML='<div class="item"><span class="pill" style="border-color:#b86b53;color:#ffb8a5;background:#3d1d18">HEALTH CHECK FAILED</span><p class="muted">Alexa could not complete the health check. The database may be unavailable or the request may have failed.</p><div class="meta">The check does not change bot settings or group controls.</div></div><div class="actions"><button id="healthRetry" class="primary">Retry health check</button></div>';
+    $('healthRetry').onclick=loadHealth;
+    showError(e.message);
+  }
+}
 
 async function loadReferrals(){try{const d=await api('/owner-api/referrals');$('referralSummary').innerHTML='<p><b>Total referrals:</b> '+d.total+' · <b>Rewarded:</b> '+d.rewarded+' · <b>Pending reward requests:</b> '+d.pendingRequests+'</p><h3>Pending Stars / Premium requests</h3>'+(d.requests||[]).map(x=>'<div class="item"><b>'+esc(x.name)+' · '+esc(x.type)+'</b><div class="meta">Request #'+x.id+' · User '+esc(x.userId)+' · '+esc(x.stars??'—')+' Stars</div><div class="actions"><button class="primary" data-affiliate="'+x.id+'" data-status="approved">Approve</button><button class="danger" data-affiliate="'+x.id+'" data-status="rejected">Reject</button></div></div>').join('')||'<p>No pending requests.</p>'; $('referralRows').innerHTML='<h3>Recent referrals</h3>'+(d.referrals||[]).map(x=>'<div class="item"><b>'+esc(x.referrer)+'</b><div class="meta">Referrer '+esc(x.referrerId)+' → '+esc(x.referredId)+' · '+(x.rewardGiven?'Rewarded':'Not rewarded')+'</div></div>').join('');document.querySelectorAll('[data-affiliate]').forEach(b=>b.onclick=()=>reviewAffiliate(b.dataset.affiliate,b.dataset.status))}catch(e){showError(e.message)}}
 async function reviewAffiliate(id,status){if(!confirm(status.toUpperCase()+' affiliate request #'+id+'?'))return;try{await api('/owner-api/referrals/requests/'+id,{method:'POST',body:JSON.stringify({status})});note('Request '+status+'.');loadReferrals()}catch(e){showError(e.message)}}
