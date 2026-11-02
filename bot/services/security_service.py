@@ -7,9 +7,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, update
+from sqlalchemy.exc import IntegrityError
 from aiogram import Bot
 from aiogram.types import Message, ChatPermissions
-from bot.database.models import SecuritySettings, CaptchaChallenge, GroupMember
+from bot.database.models import SecuritySettings, CaptchaChallenge, GroupMember, Group
 import structlog
 
 logger = structlog.get_logger()
@@ -231,8 +232,12 @@ async def create_captcha_challenge(
     captcha_type: str,
     timeout: int = 60,
 ) -> Tuple[CaptchaChallenge, bool]:
-    # Invalidate any previous challenge before creating a fresh one. A partial
-    # unique index below guarantees at most one unsolved challenge per member/group.
+    # Serialize challenge creation within a group. The group row already exists
+    # before welcome handlers run, and PostgreSQL honors this row lock.
+    await session.scalar(
+        select(Group.id).where(Group.id == group_id).with_for_update()
+    )
+    # Invalidate any previous challenge before creating a fresh one.
     await session.execute(
         update(CaptchaChallenge)
         .where(
@@ -260,10 +265,7 @@ async def create_captcha_challenge(
             session.add(challenge)
             await session.flush()
         return challenge, True
-    except Exception as exc:
-        from sqlalchemy.exc import IntegrityError
-        if not isinstance(exc, IntegrityError):
-            raise
+    except IntegrityError:
         # A concurrent join already created the one active challenge.
         existing = await session.scalar(
             select(CaptchaChallenge).where(
