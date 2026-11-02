@@ -76,25 +76,50 @@ ACHIEVEMENTS = [
 
 
 async def seed_achievements(session: AsyncSession) -> None:
-    for ach_data in ACHIEVEMENTS:
-        existing = await session.scalar(
-            select(Achievement).where(Achievement.code == ach_data["code"])
+    rows = [
+        {
+            "code": item["code"],
+            "category": item["category"],
+            "name_key": f"ach_{item['code']}_name",
+            "description_key": f"ach_{item['code']}_desc",
+            "icon": item["icon"],
+            "points": item["points"],
+            "reward_coins": item["reward_coins"],
+            "reward_xp": item["reward_xp"],
+            "requirement_type": item["req_type"],
+            "requirement_value": item["req_value"],
+        }
+        for item in ACHIEVEMENTS
+    ]
+    dialect = session.get_bind().dialect.name
+    if dialect == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert
+        statement = insert(Achievement).values(rows).on_conflict_do_nothing(
+            index_elements=[Achievement.code]
         )
-        if not existing:
-            ach = Achievement(
-                code=ach_data["code"],
-                category=ach_data["category"],
-                name_key=f"ach_{ach_data['code']}_name",
-                description_key=f"ach_{ach_data['code']}_desc",
-                icon=ach_data["icon"],
-                points=ach_data["points"],
-                reward_coins=ach_data["reward_coins"],
-                reward_xp=ach_data["reward_xp"],
-                requirement_type=ach_data["req_type"],
-                requirement_value=ach_data["req_value"],
+        await session.execute(statement)
+    elif dialect == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert
+        statement = insert(Achievement).values(rows).on_conflict_do_nothing(
+            index_elements=[Achievement.code]
+        )
+        await session.execute(statement)
+    else:
+        for row in rows:
+            existing = await session.scalar(
+                select(Achievement.id).where(Achievement.code == row["code"])
             )
-            session.add(ach)
-    await session.commit()
+            if existing is None:
+                try:
+                    async with session.begin_nested():
+                        session.add(Achievement(**row))
+                        await session.flush()
+                except IntegrityError:
+                    # A parallel startup process inserted the same achievement.
+                    continue
+    # Leave commit ownership to the caller/middleware; seeding must not commit
+    # unrelated pending work in the caller's session.
+    await session.flush()
     logger.info("Achievements seeded", count=len(ACHIEVEMENTS))
 
 
