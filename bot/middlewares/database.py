@@ -184,13 +184,17 @@ class DatabaseMiddleware(BaseMiddleware):
                             ))
                             if not already_saved:
                                 preview = _owner_inbox_preview(incoming)
-                                session.add(InboxMessage(
-                                    user_id=user.id,
-                                    telegram_message_id=incoming.message_id,
-                                    content_type=str(incoming.content_type),
-                                    preview=preview[:1000],
-                                    is_read=False,
-                                ))
+                                # Flush inside a savepoint so inbox persistence
+                                # errors cannot poison the main update transaction.
+                                async with session.begin_nested():
+                                    session.add(InboxMessage(
+                                        user_id=user.id,
+                                        telegram_message_id=incoming.message_id,
+                                        content_type=str(incoming.content_type),
+                                        preview=preview[:1000],
+                                        is_read=False,
+                                    ))
+                                    await session.flush()
                     except Exception as inbox_error:
                         logger.warning("Could not save private message to owner inbox", user_id=user.id, error=str(inbox_error))
 
@@ -206,15 +210,21 @@ class DatabaseMiddleware(BaseMiddleware):
                         ))
                         if not already_saved:
                             preview = _owner_inbox_preview(incoming)
-                            session.add(GroupInboxMessage(
-                                chat_id=incoming.chat.id,
-                                telegram_message_id=incoming.message_id,
-                                sender_id=sender.id if sender else None,
-                                sender_name=((sender.full_name if sender else None) or "Unknown")[:256],
-                                sender_username=(sender.username[:64] if sender and sender.username else None),
-                                content_type=str(incoming.content_type),
-                                preview=preview[:1000],
-                            ))
+                            # The unique chat/message constraint is the final
+                            # guard against concurrent Telegram redeliveries.
+                            # Isolate its possible IntegrityError from the main
+                            # handler transaction with a nested savepoint.
+                            async with session.begin_nested():
+                                session.add(GroupInboxMessage(
+                                    chat_id=incoming.chat.id,
+                                    telegram_message_id=incoming.message_id,
+                                    sender_id=sender.id if sender else None,
+                                    sender_name=((sender.full_name if sender else None) or "Unknown")[:256],
+                                    sender_username=(sender.username[:64] if sender and sender.username else None),
+                                    content_type=str(incoming.content_type),
+                                    preview=preview[:1000],
+                                ))
+                                await session.flush()
                     except Exception as group_inbox_error:
                         logger.warning("Could not save group message to owner inbox", chat_id=chat.id if chat else None, error=str(group_inbox_error))
 
