@@ -158,9 +158,8 @@ async def set_welcome_command(message: Message, db_session: AsyncSession, db_gro
         return
     welcome_text = raw_html[1].strip()
     ws = await _get_or_create_group_setting(db_session, WelcomeSettings, db_group.id, enabled=True, message=welcome_text)
-    else:
-        ws.enabled = True
-        ws.message = welcome_text
+    ws.enabled = True
+    ws.message = welcome_text
     await db_session.flush()
     if state:
         await state.clear()
