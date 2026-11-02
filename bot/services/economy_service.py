@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update, or_
+from sqlalchemy.exc import IntegrityError
 from bot.database.models import Wallet, Transaction, Referral
 from bot.services.user_service import get_or_create_wallet
 from bot.config import settings
@@ -96,55 +97,65 @@ async def transfer_coins(
     return True, remaining, recipient_balance
 
 
-async def claim_daily_reward(session: AsyncSession, user_id: int) -> Tuple[bool, int, Optional[datetime]]:
+async def _claim_periodic_reward(
+    session: AsyncSession,
+    user_id: int,
+    *,
+    field: str,
+    cooldown: timedelta,
+    amount: int,
+    tx_type: str,
+    description: str,
+) -> Tuple[bool, int, Optional[datetime]]:
+    """Atomically claim a cooldown reward so concurrent updates cannot double-pay."""
     wallet = await get_or_create_wallet(session, user_id)
     now = datetime.now(timezone.utc)
-    if wallet.last_daily:
-        last = wallet.last_daily.replace(tzinfo=timezone.utc) if wallet.last_daily.tzinfo is None else wallet.last_daily
-        next_claim = last + timedelta(hours=24)
-        if now < next_claim:
-            return False, 0, next_claim
-    amount = settings.DAILY_REWARD
-    wallet.balance = (wallet.balance or 0) + amount
-    wallet.total_earned = (wallet.total_earned or 0) + amount
-    wallet.last_daily = now
-    tx = Transaction(wallet_id=wallet.id, amount=amount, type="daily_reward", description="Daily reward")
-    session.add(tx)
+    last_column = getattr(Wallet, field)
+    result = await session.execute(
+        update(Wallet)
+        .where(
+            Wallet.id == wallet.id,
+            or_(last_column.is_(None), last_column <= now - cooldown),
+        )
+        .values(
+            **{
+                field: now,
+                "balance": Wallet.balance + amount,
+                "total_earned": Wallet.total_earned + amount,
+            }
+        )
+        .execution_options(synchronize_session=False)
+    )
+    await session.refresh(wallet)
+    if not result.rowcount:
+        last = getattr(wallet, field)
+        if last is not None and last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        next_claim = (last + cooldown) if last is not None else now + cooldown
+        return False, 0, next_claim
+    session.add(Transaction(wallet_id=wallet.id, amount=amount, type=tx_type, description=description))
     return True, amount, None
+
+
+async def claim_daily_reward(session: AsyncSession, user_id: int) -> Tuple[bool, int, Optional[datetime]]:
+    return await _claim_periodic_reward(
+        session, user_id, field="last_daily", cooldown=timedelta(hours=24),
+        amount=settings.DAILY_REWARD, tx_type="daily_reward", description="Daily reward",
+    )
 
 
 async def claim_weekly_reward(session: AsyncSession, user_id: int) -> Tuple[bool, int, Optional[datetime]]:
-    wallet = await get_or_create_wallet(session, user_id)
-    now = datetime.now(timezone.utc)
-    if wallet.last_weekly:
-        last = wallet.last_weekly.replace(tzinfo=timezone.utc) if wallet.last_weekly.tzinfo is None else wallet.last_weekly
-        next_claim = last + timedelta(days=7)
-        if now < next_claim:
-            return False, 0, next_claim
-    amount = settings.WEEKLY_REWARD
-    wallet.balance = (wallet.balance or 0) + amount
-    wallet.total_earned = (wallet.total_earned or 0) + amount
-    wallet.last_weekly = now
-    tx = Transaction(wallet_id=wallet.id, amount=amount, type="weekly_reward", description="Weekly reward")
-    session.add(tx)
-    return True, amount, None
+    return await _claim_periodic_reward(
+        session, user_id, field="last_weekly", cooldown=timedelta(days=7),
+        amount=settings.WEEKLY_REWARD, tx_type="weekly_reward", description="Weekly reward",
+    )
 
 
 async def claim_monthly_reward(session: AsyncSession, user_id: int) -> Tuple[bool, int, Optional[datetime]]:
-    wallet = await get_or_create_wallet(session, user_id)
-    now = datetime.now(timezone.utc)
-    if wallet.last_monthly:
-        last = wallet.last_monthly.replace(tzinfo=timezone.utc) if wallet.last_monthly.tzinfo is None else wallet.last_monthly
-        next_claim = last + timedelta(days=30)
-        if now < next_claim:
-            return False, 0, next_claim
-    amount = settings.MONTHLY_REWARD
-    wallet.balance = (wallet.balance or 0) + amount
-    wallet.total_earned = (wallet.total_earned or 0) + amount
-    wallet.last_monthly = now
-    tx = Transaction(wallet_id=wallet.id, amount=amount, type="monthly_reward", description="Monthly reward")
-    session.add(tx)
-    return True, amount, None
+    return await _claim_periodic_reward(
+        session, user_id, field="last_monthly", cooldown=timedelta(days=30),
+        amount=settings.MONTHLY_REWARD, tx_type="monthly_reward", description="Monthly reward",
+    )
 
 
 async def get_transactions(session: AsyncSession, user_id: int, limit: int = 10) -> list:
@@ -174,8 +185,13 @@ async def process_referral(
         referred_id=new_user_id,
         reward_given=False,
     )
-    session.add(referral)
-    await session.flush()
+    try:
+        async with session.begin_nested():
+            session.add(referral)
+            await session.flush()
+    except IntegrityError:
+        # A concurrent update already claimed this referred user.
+        return False
 
     referrer_wallet = await get_or_create_wallet(session, referrer_id)
     referrer_wallet.balance = (referrer_wallet.balance or 0) + settings.REFERRAL_REWARD
