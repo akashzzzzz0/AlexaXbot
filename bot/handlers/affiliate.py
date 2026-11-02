@@ -117,6 +117,18 @@ async def _referral_link_users(session: AsyncSession, offset: int = 0, limit: in
         .limit(max(1, limit))
     )).scalars().all()
 
+async def _actual_referrer_users(session: AsyncSession, offset: int = 0, limit: int = USER_PAGE_SIZE):
+    """Return every user who actually has referral records, regardless of dashboard visits."""
+    return (await session.execute(
+        select(User)
+        .join(Referral, Referral.referrer_id == User.id)
+        .where(User.is_bot.is_(False))
+        .group_by(User.id)
+        .order_by(func.count(Referral.id).desc(), User.id.asc())
+        .offset(max(0, offset))
+        .limit(max(1, limit))
+    )).scalars().all()
+
 
 def _earned_stars(valid_count: int) -> int:
     # One eligible unique referral earns exactly one Star.
@@ -640,36 +652,39 @@ async def owner_referrals(callback: CallbackQuery, db_session: AsyncSession, **k
     except ValueError:
         page = 0
     page = max(0, page)
-    referral_filter = (
-        User.is_bot.is_(False),
-        User.dm_started.is_(True),
-        User.referral_link_requested.is_(True),
-    )
     total_users = int(await db_session.scalar(
-        select(func.count(User.id)).where(*referral_filter)
+        select(func.count(func.distinct(Referral.referrer_id)))
+    ) or 0)
+    total_tracked = int(await db_session.scalar(select(func.count(Referral.id))) or 0)
+    total_valid = int(await db_session.scalar(
+        select(func.count(Referral.id))
+        .join(User, User.id == Referral.referred_id)
+        .where(User.is_bot.is_(False), User.dm_started.is_(True))
     ) or 0)
     total_pages = max(1, (total_users + USER_PAGE_SIZE - 1) // USER_PAGE_SIZE)
     page = min(page, total_pages - 1)
-    users = await _referral_link_users(
+    users = await _actual_referrer_users(
         db_session, offset=page * USER_PAGE_SIZE, limit=USER_PAGE_SIZE
     )
     pending_count = int(await db_session.scalar(select(func.count(AffiliateRequest.id)).where(AffiliateRequest.status == "pending")) or 0)
     lines = [
         "🎁 <b>Affiliate / Referral — Owner Only</b>",
         f"Pending requests: <b>{pending_count}</b>",
-        f"Referral-link users: <b>{total_users}</b>",
+        f"Inviters: <b>{total_users}</b> · Tracked invites: <b>{total_tracked}</b>",
+        f"Valid referrals: <b>{total_valid}</b> · Earned Stars: <b>{total_valid}</b>",
         f"Page: <b>{page + 1}/{total_pages}</b>",
         "",
-        "<b>Users who opened their referral link</b>",
+        "<b>All users who invited at least one account</b>",
     ]
     rows = []
     for user in users:
         tracked = await _tracked_count(db_session, user.id)
         valid = await _valid_count(db_session, user.id)
+        balance = await _stars_balance(db_session, user.id, valid)
         label = f"@{user.username}" if user.username else user.first_name
-        lines.append(f"• {escape(label)} · ID <code>{user.id}</code> · <b>{tracked}/{valid}</b>")
+        lines.append(f"• {escape(label)} · ID <code>{user.id}</code> · Invites <b>{tracked}</b> · Valid <b>{valid}</b> · Stars <b>{balance}</b>")
         rows.append([InlineKeyboardButton(
-            text=f"👤 {label[:20]} · {tracked}/{valid}",
+            text=f"👤 {label[:16]} · {tracked} invites · {balance}⭐",
             callback_data=f"owner:affiliate:member:{user.id}:0",
         )])
     rows.append([InlineKeyboardButton(
