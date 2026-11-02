@@ -216,7 +216,13 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
         group_link=group_link,
         status="pending",
     )
-    db_session.add(request)
+    try:
+        async with db_session.begin_nested():
+            db_session.add(request)
+            await db_session.flush()
+    except IntegrityError:
+        await message.answer(_PROMOTION_NOTICE, parse_mode="HTML")
+        return
     await db_session.commit()
     await db_session.refresh(request)
 
