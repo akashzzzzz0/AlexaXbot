@@ -1179,7 +1179,12 @@ async def owner_inbox_messages_handler(request):
         return web.json_response({"error": "Invalid conversation request."}, status=400)
     async with async_session_maker() as session:
         user = await session.get(User, user_id)
-        if not user or not user.dm_started:
+        # Older deployments may have saved inbox messages before dm_started
+        # was added. A stored message is also proof that this private chat exists.
+        has_history = await session.scalar(
+            select(InboxMessage.id).where(InboxMessage.user_id == user_id).limit(1)
+        )
+        if not user or not (user.dm_started or has_history):
             return web.json_response({"error": "Conversation not found."}, status=404)
         query = select(InboxMessage).where(InboxMessage.user_id == user_id)
         if before_id:
@@ -1460,7 +1465,12 @@ async def owner_inbox_reply_handler(request):
             return web.json_response({"error": "Reply must be 1–4000 characters."}, status=400)
         async with async_session_maker() as session:
             user = await session.get(User, user_id)
-            if not user or not user.dm_started or user.is_banned:
+            # Legacy inbox records prove that the user previously opened a DM,
+            # even if the newer dm_started flag was never backfilled.
+            has_history = await session.scalar(
+                select(InboxMessage.id).where(InboxMessage.user_id == user_id).limit(1)
+            )
+            if not user or not (user.dm_started or has_history) or user.is_banned:
                 return web.json_response({"error": "User is not an eligible DM starter."}, status=404)
         from bot.config import settings
         from aiogram import Bot
