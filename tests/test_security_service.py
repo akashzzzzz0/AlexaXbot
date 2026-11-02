@@ -77,6 +77,44 @@ class ContentLockTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("link", violations)
         self.assertIn("locked_bot", violations)
 
+    async def test_anti_link_toggle_detects_regular_urls_only_when_enabled(self):
+        message = fake_message("https://example.com")
+        self.security.anti_link = False
+        self.assertNotIn("link", await check_message_violations(message, self.security))
+        self.security.anti_link = True
+        self.assertIn("link", await check_message_violations(message, self.security))
+
+    async def test_anti_invite_toggle_detects_telegram_invites_only_when_enabled(self):
+        message = fake_message("Join https://t.me/+AbCdEf123")
+        self.security.anti_invite = False
+        self.assertNotIn("invite_link", await check_message_violations(message, self.security))
+        self.security.anti_invite = True
+        self.assertIn("invite_link", await check_message_violations(message, self.security))
+
+    async def test_anti_scam_toggle(self):
+        message = fake_message("Claim your reward now")
+        self.security.anti_scam = False
+        self.assertNotIn("scam", await check_message_violations(message, self.security))
+        self.security.anti_scam = True
+        self.assertIn("scam", await check_message_violations(message, self.security))
+
+    async def test_anti_advertisement_toggle(self):
+        message = fake_message("Subscribe to my channel")
+        self.security.anti_advertisement = False
+        self.assertNotIn("advertisement", await check_message_violations(message, self.security))
+        self.security.anti_advertisement = True
+        self.assertIn("advertisement", await check_message_violations(message, self.security))
+
+    async def test_anti_spam_toggle(self):
+        message1 = fake_message("Repeated message text")
+        message2 = fake_message("Repeated message text")
+        self.security.anti_spam = True
+        await check_message_violations(message1, self.security)
+        self.assertIn("duplicate_spam", await check_message_violations(message2, self.security))
+        self.security.anti_spam = False
+        message3 = fake_message("Repeated message text")
+        self.assertNotIn("duplicate_spam", await check_message_violations(message3, self.security))
+
 
 if __name__ == "__main__":
     unittest.main()
