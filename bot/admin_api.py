@@ -270,41 +270,59 @@ async def owner_groups_sync_handler(request):
 @require_admin
 async def groups_handler(request):
     try:
-        # Resolve the lazy database accessor explicitly; a bare global name
-        # cannot be supplied by this module's __getattr__.
         from bot.database.connection import async_session_maker
-        page = int(request.rel_url.query.get("page", 1))
-        limit = min(int(request.rel_url.query.get("limit", 20)), 100)
-        search = request.rel_url.query.get("search", "")
+        page = max(1, int(request.rel_url.query.get("page", 1)))
+        limit = max(1, min(int(request.rel_url.query.get("limit", 20)), 100))
+        search = (request.rel_url.query.get("search", "") or "").strip()
         offset = (page - 1) * limit
 
         async with async_session_maker() as session:
-            # Group Activity must show every known chat, including inactive
-            # records, so owners can inspect stale registrations and re-verify
-            # them. Other callers keep the safe active-only default.
             include_inactive = request.rel_url.query.get("include_inactive", "").lower() in {"1", "true", "yes"}
-            query = select(Group)
+            tracked_counts = (
+                select(
+                    GroupMember.group_id.label("group_id"),
+                    func.count(GroupMember.id).label("tracked_member_count"),
+                )
+                .group_by(GroupMember.group_id)
+                .subquery()
+            )
+            query = (
+                select(
+                    Group,
+                    func.coalesce(tracked_counts.c.tracked_member_count, 0).label("tracked_member_count"),
+                )
+                .outerjoin(tracked_counts, tracked_counts.c.group_id == Group.id)
+            )
             count_query = select(func.count()).select_from(Group)
             if not include_inactive:
                 query = query.where(Group.is_active.is_(True))
                 count_query = count_query.where(Group.is_active.is_(True))
             if search:
                 like = f"%{search}%"
-                cond = or_(Group.title.ilike(like), Group.username.ilike(like))
-                query = query.where(cond)
-                count_query = count_query.where(cond)
+                condition = or_(
+                    Group.title.ilike(like),
+                    Group.username.ilike(like),
+                    cast(Group.id, String).contains(search),
+                )
+                query = query.where(condition)
+                count_query = count_query.where(condition)
 
             total = await session.scalar(count_query)
             result = await session.execute(
                 query.order_by(desc(Group.created_at)).offset(offset).limit(limit)
             )
-            groups = result.scalars().all()
+            group_items = []
+            for group, tracked_member_count in result.all():
+                item = _group_to_dict(group)
+                item["memberCount"] = int(tracked_member_count or 0)
+                item["memberCountType"] = "tracked"
+                group_items.append(item)
             return web.json_response({
-                "groups": [_group_to_dict(g) for g in groups],
-                "total": total or 0,
-                "page": page,
-                "limit": limit,
-            })
+                "groups": group_items, "total": total or 0,
+                "page": page, "limit": limit,
+            }, headers={"Cache-Control": "no-store"})
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid group list query."}, status=400)
     except Exception as e:
         import structlog
         structlog.get_logger().exception("Owner groups API failed", error=str(e))
