@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timezone
 from typing import Optional, Tuple, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, update
+from sqlalchemy import select, and_, update, func, case
 from bot.database.models import GameMatch, GameStats, DuelStats, Duel
 from bot.services.economy_service import add_coins, deduct_coins
 from bot.services.user_service import add_xp, get_or_create_game_stats, get_or_create_duel_stats
@@ -13,6 +13,63 @@ logger = structlog.get_logger()
 
 XP_PER_WIN = 25
 XP_PER_GAME = 5
+
+async def _increment_game_stats(session: AsyncSession, user_id: int, **deltas: int) -> None:
+    """Apply game counters in SQL so concurrent games cannot lose increments."""
+    await get_or_create_game_stats(session, user_id)
+    allowed = {
+        "total_games", "total_wins", "total_losses", "total_coins_bet",
+        "total_coins_won", "dice_wins", "wheel_wins", "rps_wins",
+        "quiz_wins", "mines_wins", "card_wins",
+    }
+    values = {}
+    for field, amount in deltas.items():
+        if field not in allowed:
+            raise ValueError(f"Unsupported game stat: {field}")
+        if amount:
+            column = getattr(GameStats, field)
+            values[field] = func.coalesce(column, 0) + amount
+    if values:
+        await session.execute(
+            update(GameStats)
+            .where(GameStats.user_id == user_id)
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        )
+
+
+async def _record_duel_result(
+    session: AsyncSession, winner_id: int, loser_id: int, wager: int
+) -> None:
+    """Atomically update both players' duel counters and streaks."""
+    winner = await get_or_create_duel_stats(session, winner_id)
+    loser = await get_or_create_duel_stats(session, loser_id)
+    next_streak = func.coalesce(DuelStats.win_streak, 0) + 1
+    await session.execute(
+        update(DuelStats)
+        .where(DuelStats.user_id == winner_id)
+        .values(
+            wins=func.coalesce(DuelStats.wins, 0) + 1,
+            win_streak=next_streak,
+            best_streak=case(
+                (next_streak > func.coalesce(DuelStats.best_streak, 0), next_streak),
+                else_=func.coalesce(DuelStats.best_streak, 0),
+            ),
+            coins_won=func.coalesce(DuelStats.coins_won, 0) + wager,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    await session.execute(
+        update(DuelStats)
+        .where(DuelStats.user_id == loser_id)
+        .values(
+            losses=func.coalesce(DuelStats.losses, 0) + 1,
+            win_streak=0,
+            coins_lost=func.coalesce(DuelStats.coins_lost, 0) + wager,
+        )
+        .execution_options(synchronize_session=False)
+    )
+
 
 WHEEL_SEGMENTS = [
     (2, "2x", 0.25),
@@ -55,16 +112,13 @@ async def play_classic_dice(
         elif result == "draw":
             await add_coins(session, user_id, wager, "game_draw", "Dice draw refund")
 
-    stats = await get_or_create_game_stats(session, user_id)
-    stats.total_games = (stats.total_games or 0) + 1
-    stats.total_coins_bet = (stats.total_coins_bet or 0) + wager
+    deltas = {"total_games": 1, "total_coins_bet": wager}
     if result == "win":
-        stats.total_wins = (stats.total_wins or 0) + 1
-        stats.dice_wins = (stats.dice_wins or 0) + 1
-        stats.total_coins_won = (stats.total_coins_won or 0) + max(0, winnings)
+        deltas.update(total_wins=1, dice_wins=1, total_coins_won=max(0, winnings))
         await add_xp(session, user_id, XP_PER_WIN)
     elif result == "lose":
-        stats.total_losses = (stats.total_losses or 0) + 1
+        deltas["total_losses"] = 1
+    await _increment_game_stats(session, user_id, **deltas)
     await add_xp(session, user_id, XP_PER_GAME)
 
     return {
@@ -102,9 +156,10 @@ async def spin_wheel(
         await add_coins(session, user_id, win_amount, "game_win", "Wheel win")
         winnings = win_amount - wager
 
-    stats = await get_or_create_game_stats(session, user_id)
-    stats.total_games = (stats.total_games or 0) + 1
-    stats.wheel_wins = (stats.wheel_wins or 0) + (1 if chosen_multiplier > 1 else 0)
+    await _increment_game_stats(
+        session, user_id, total_games=1,
+        wheel_wins=1 if chosen_multiplier > 1 else 0,
+    )
     await add_xp(session, user_id, XP_PER_GAME)
 
     return {"multiplier": chosen_multiplier, "label": chosen_label, "winnings": winnings}
@@ -139,14 +194,13 @@ async def play_rps(
         elif result == "draw":
             await add_coins(session, user_id, wager, "game_draw", "RPS draw refund")
 
-    stats = await get_or_create_game_stats(session, user_id)
-    stats.total_games = (stats.total_games or 0) + 1
-    stats.rps_wins = (stats.rps_wins or 0) + (1 if result == "win" else 0)
+    deltas = {"total_games": 1, "rps_wins": 1 if result == "win" else 0}
     if result == "win":
-        stats.total_wins = (stats.total_wins or 0) + 1
+        deltas["total_wins"] = 1
         await add_xp(session, user_id, XP_PER_WIN)
     elif result == "lose":
-        stats.total_losses = (stats.total_losses or 0) + 1
+        deltas["total_losses"] = 1
+    await _increment_game_stats(session, user_id, **deltas)
     await add_xp(session, user_id, XP_PER_GAME)
 
     return {
@@ -264,25 +318,7 @@ async def _play_duel(session: AsyncSession, duel: Duel) -> dict:
         prize = duel.wager * 2
         await add_coins(session, winner_id, prize, "duel_win", "Duel prize")
 
-    c_stats = await get_or_create_duel_stats(session, duel.challenger_id)
-    o_stats = await get_or_create_duel_stats(session, duel.opponent_id)
-
-    if winner_id == duel.challenger_id:
-        c_stats.wins = (c_stats.wins or 0) + 1
-        c_stats.win_streak = (c_stats.win_streak or 0) + 1
-        c_stats.best_streak = max(c_stats.best_streak or 0, c_stats.win_streak)
-        c_stats.coins_won = (c_stats.coins_won or 0) + duel.wager
-        o_stats.losses = (o_stats.losses or 0) + 1
-        o_stats.win_streak = 0
-        o_stats.coins_lost = (o_stats.coins_lost or 0) + duel.wager
-    else:
-        o_stats.wins = (o_stats.wins or 0) + 1
-        o_stats.win_streak = (o_stats.win_streak or 0) + 1
-        o_stats.best_streak = max(o_stats.best_streak or 0, o_stats.win_streak)
-        o_stats.coins_won = (o_stats.coins_won or 0) + duel.wager
-        c_stats.losses = (c_stats.losses or 0) + 1
-        c_stats.win_streak = 0
-        c_stats.coins_lost = (c_stats.coins_lost or 0) + duel.wager
+    await _record_duel_result(session, winner_id, loser_id, duel.wager)
 
     await add_xp(session, winner_id, XP_PER_WIN * 2)
     await add_xp(session, loser_id, XP_PER_GAME)
