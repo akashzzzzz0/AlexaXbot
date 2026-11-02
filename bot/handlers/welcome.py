@@ -4,7 +4,8 @@ from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.types import Message, ChatMemberUpdated, ChatPermissions, CallbackQuery
 from aiogram.filters import ChatMemberUpdatedFilter, JOIN_TRANSITION, LEAVE_TRANSITION
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, update, func
+from sqlalchemy.exc import IntegrityError
 from bot.database.models import (
     Group, GroupMember, GroupSettings, WelcomeSettings, GoodbyeSettings,
     SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig, CaptchaChallenge, GroupStats, User, GroupFilter, GroupBlocklist, ActionLog, DailyGroupMessageStat
@@ -23,6 +24,20 @@ import structlog
 
 logger = structlog.get_logger()
 router = Router()
+
+async def _insert_or_get(session: AsyncSession, candidate, model, *conditions):
+    try:
+        async with session.begin_nested():
+            session.add(candidate)
+            await session.flush()
+        return candidate, True
+    except IntegrityError:
+        existing = await session.scalar(select(model).where(*conditions))
+        if existing is None:
+            raise
+        return existing, False
+
+
 
 
 @router.message(
@@ -103,12 +118,14 @@ async def on_bot_membership_changed(event: ChatMemberUpdated, db_session: AsyncS
                 return
             if new_status in ("member", "administrator"):
                 if not group:
-                    group = Group(id=chat.id, title=chat.title or "Unknown", username=chat.username, type=chat.type, is_active=True)
-                    db_session.add(group)
-                else:
-                    group.title = chat.title or group.title
-                    group.username = chat.username
-                    group.is_active = True
+                    group, _created = await _insert_or_get(
+                        db_session,
+                        Group(id=chat.id, title=chat.title or "Unknown", username=chat.username, type=chat.type, is_active=True),
+                        Group, Group.id == chat.id,
+                    )
+                group.title = chat.title or group.title
+                group.username = chat.username
+                group.is_active = True
                 if new_status in ("member", "administrator"):
                     actor = await db_session.get(User, event.from_user.id)
                     if actor:
@@ -653,10 +670,11 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
             select(SecuritySettings).where(SecuritySettings.group_id == message.chat.id)
         )
     if not group_security:
-        group_security = SecuritySettings(group_id=message.chat.id)
-        db_session.add(group_security)
         try:
-            await db_session.flush()
+            group_security, _created = await _insert_or_get(
+                db_session, SecuritySettings(group_id=message.chat.id),
+                SecuritySettings, SecuritySettings.group_id == message.chat.id,
+            )
         except Exception:
             await db_session.rollback()
             logger.exception("Could not initialize group security settings", group_id=message.chat.id)
@@ -698,16 +716,18 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
         try:
             db_user = await db_session.get(User, message.from_user.id)
             if db_user is None:
-                db_user = User(
-                    id=message.from_user.id,
-                    telegram_id=message.from_user.id,
-                    first_name=message.from_user.first_name or "User",
-                    last_name=message.from_user.last_name,
-                    username=message.from_user.username,
-                    is_bot=False,
+                db_user, _created = await _insert_or_get(
+                    db_session,
+                    User(
+                        id=message.from_user.id,
+                        telegram_id=message.from_user.id,
+                        first_name=message.from_user.first_name or "User",
+                        last_name=message.from_user.last_name,
+                        username=message.from_user.username,
+                        is_bot=False,
+                    ),
+                    User, User.id == message.from_user.id,
                 )
-                db_session.add(db_user)
-                await db_session.flush()
         except Exception as exc:
             logger.warning("Could not ensure message sender database user", chat_id=message.chat.id, user_id=message.from_user.id, error=str(exc))
             db_user = None
@@ -1154,8 +1174,15 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
         )
     )
     if member:
-        member.message_count = (member.message_count or 0) + 1
-        member.last_activity = datetime.now(timezone.utc)
+        await db_session.execute(
+            update(GroupMember)
+            .where(GroupMember.id == member.id)
+            .values(
+                message_count=func.coalesce(GroupMember.message_count, 0) + 1,
+                last_activity=datetime.now(timezone.utc),
+            )
+            .execution_options(synchronize_session=False)
+        )
 
     # Track per-group daily totals using India-local calendar dates so the
     # owner AI activity report reflects actual messages received today.
@@ -1168,13 +1195,27 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
         )
     )
     if daily_stats is None:
-        db_session.add(DailyGroupMessageStat(
-            group_id=db_group.id,
-            day_key=day_key,
-            message_count=1,
-        ))
+        daily_stats, created = await _insert_or_get(
+            db_session,
+            DailyGroupMessageStat(group_id=db_group.id, day_key=day_key, message_count=1),
+            DailyGroupMessageStat,
+            DailyGroupMessageStat.group_id == db_group.id,
+            DailyGroupMessageStat.day_key == day_key,
+        )
+        if not created:
+            await db_session.execute(
+                update(DailyGroupMessageStat)
+                .where(DailyGroupMessageStat.id == daily_stats.id)
+                .values(message_count=func.coalesce(DailyGroupMessageStat.message_count, 0) + 1)
+                .execution_options(synchronize_session=False)
+            )
     else:
-        daily_stats.message_count = (daily_stats.message_count or 0) + 1
+        await db_session.execute(
+            update(DailyGroupMessageStat)
+            .where(DailyGroupMessageStat.id == daily_stats.id)
+            .values(message_count=func.coalesce(DailyGroupMessageStat.message_count, 0) + 1)
+            .execution_options(synchronize_session=False)
+        )
 
     gs_settings = await db_session.scalar(select(GroupSettings).where(GroupSettings.group_id == db_group.id))
     if gs_settings and gs_settings.xp_enabled:
@@ -1194,7 +1235,21 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
 
     gs_stats = await db_session.scalar(select(GroupStats).where(GroupStats.group_id == db_group.id))
     if not gs_stats:
-        gs_stats = GroupStats(group_id=db_group.id, total_messages=1)
-        db_session.add(gs_stats)
+        gs_stats, created = await _insert_or_get(
+            db_session, GroupStats(group_id=db_group.id, total_messages=1),
+            GroupStats, GroupStats.group_id == db_group.id,
+        )
+        if not created:
+            await db_session.execute(
+                update(GroupStats)
+                .where(GroupStats.id == gs_stats.id)
+                .values(total_messages=func.coalesce(GroupStats.total_messages, 0) + 1)
+                .execution_options(synchronize_session=False)
+            )
     else:
-        gs_stats.total_messages = (gs_stats.total_messages or 0) + 1
+        await db_session.execute(
+            update(GroupStats)
+            .where(GroupStats.id == gs_stats.id)
+            .values(total_messages=func.coalesce(GroupStats.total_messages, 0) + 1)
+            .execution_options(synchronize_session=False)
+        )
