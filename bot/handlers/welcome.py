@@ -382,9 +382,12 @@ async def _handle_captcha(event, db_session, security, user, chat, _):
     # Only expose captcha types with an implemented verification path. Older
     # saved "text" values are normalized to the button challenge.
     captcha_type = security.captcha_type if security.captcha_type in {"math", "button"} else "button"
-    challenge = await create_captcha_challenge(
+    challenge, created = await create_captcha_challenge(
         db_session, chat.id, user.id, captcha_type, security.captcha_timeout or 60
     )
+    if not created:
+        # A concurrent join update already created the active challenge.
+        return
     try:
         await mute_user(event.bot, db_session, chat.id, user.id, event.bot.id, 300, "Pending captcha verification")
     except Exception:
@@ -406,7 +409,7 @@ async def _handle_captcha(event, db_session, security, user, chat, _):
                 options.append(candidate)
         random.shuffle(options)
         for opt in options:
-            builder.button(text=str(opt), callback_data=f"captcha_verify:{chat.id}:{user.id}:{opt}")
+            builder.button(text=str(opt), callback_data=f"captcha_verify:{chat.id}:{user.id}:{challenge.id}:{opt}")
         builder.adjust(2)
         try:
             msg = await event.bot.send_message(chat.id, text, parse_mode="HTML", reply_markup=builder.as_markup())
@@ -415,7 +418,7 @@ async def _handle_captcha(event, db_session, security, user, chat, _):
             logger.error("Captcha message failed", error=str(e))
     else:
         builder = InlineKeyboardBuilder()
-        builder.button(text=_("btn_verify"), callback_data=f"captcha_verify:{chat.id}:{user.id}:button")
+        builder.button(text=_("btn_verify"), callback_data=f"captcha_verify:{chat.id}:{user.id}:{challenge.id}:button")
         try:
             name = mention_user(user.id, safe_username(user))
             text = f"{name}, {_('verification_required')}"
@@ -513,22 +516,34 @@ async def bio_unmute_after_profile_fix(callback: CallbackQuery, db_session: Asyn
 @router.callback_query(F.data.startswith("captcha_verify:"))
 async def captcha_verify(callback, db_session: AsyncSession, **kwargs):
     parts = callback.data.split(":")
-    if len(parts) < 4:
+    if len(parts) != 5:
+        await callback.answer("This captcha button is outdated. Please use the latest challenge.", show_alert=True)
         return
-    group_id = int(parts[1])
-    user_id = int(parts[2])
-    answer = parts[3]
+    try:
+        group_id = int(parts[1])
+        user_id = int(parts[2])
+        challenge_id = int(parts[3])
+        answer = parts[4]
+    except (TypeError, ValueError):
+        await callback.answer("This captcha button is invalid.", show_alert=True)
+        return
 
     if callback.from_user.id != user_id:
         await callback.answer("This captcha is not for you!", show_alert=True)
         return
 
     from bot.services.security_service import verify_captcha
-    success = await verify_captcha(db_session, group_id, user_id, answer)
+    success = await verify_captcha(db_session, group_id, user_id, challenge_id, answer)
 
     group = await db_session.get(Group, group_id)
     lang = group.language if group else "en"
     _ = lambda key, **kw: get_text(lang, key, **kw)
+
+    if success is None:
+        # Expired, superseded, or already-consumed buttons are harmless and must
+        # never trigger the wrong-answer punishment path.
+        await callback.answer("This captcha has expired or was already used. Please use the latest challenge.", show_alert=True)
+        return
 
     if success:
         try:
