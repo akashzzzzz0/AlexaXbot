@@ -84,7 +84,9 @@ def _init_engine():
                 cursor.execute("PRAGMA temp_store=MEMORY")
                 cursor.execute("PRAGMA cache_size=-20000")
                 cursor.execute("PRAGMA foreign_keys=ON")
-                cursor.execute("PRAGMA journal_mode=WAL")
+                # journal_mode is configured once during startup below. Re-running
+                # this write-mode pragma on every pooled connection can contend
+                # with active SQLite writers.
             finally:
                 cursor.close()
     _session_maker = async_sessionmaker(
@@ -124,6 +126,12 @@ async def create_tables() -> None:
     # Register Force Join model before create_all creates the schema.
     from bot.database import force_join as _force_join_models  # noqa: F401
     _init_engine()
+    if settings.DATABASE_URL.startswith("sqlite+"):
+        # WAL is a database-level setting: set it once before schema work,
+        # not on every newly opened pooled connection.
+        async with _engine.connect() as setup_conn:
+            await setup_conn.exec_driver_sql("PRAGMA journal_mode=WAL")
+            await setup_conn.commit()
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         # create_all creates new tables but does not add columns to an existing deployment.
