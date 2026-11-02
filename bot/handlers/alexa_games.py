@@ -6,6 +6,7 @@ from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import Command
 from sqlalchemy import select, desc
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from bot.config import settings
 from bot.database.models import User, Wallet, Economy, GameProfile, UserShopItem, ShopItem
@@ -15,12 +16,27 @@ from bot.utils.helpers import parse_duration, format_number, format_duration
 
 router = Router()
 
+async def _insert_or_get(session: AsyncSession, candidate, model, *conditions):
+    try:
+        async with session.begin_nested():
+            session.add(candidate)
+            await session.flush()
+        return candidate
+    except IntegrityError:
+        existing = await session.scalar(select(model).where(*conditions))
+        if existing is None:
+            raise
+        return existing
+
+
+
 async def profile(session: AsyncSession, user_id: int) -> GameProfile:
     row = await session.get(GameProfile, user_id)
     if row is None:
-        row = GameProfile(user_id=user_id)
-        session.add(row)
-        await session.flush()
+        row = await _insert_or_get(
+            session, GameProfile(user_id=user_id),
+            GameProfile, GameProfile.user_id == user_id,
+        )
     return row
 
 async def target_from_reply(message: Message, session: AsyncSession):
@@ -29,9 +45,11 @@ async def target_from_reply(message: Message, session: AsyncSession):
     tg = message.reply_to_message.from_user
     row = await session.get(User, tg.id)
     if row is None:
-        row = User(id=tg.id, telegram_id=tg.id, username=tg.username, first_name=tg.first_name or "User", last_name=tg.last_name, is_bot=tg.is_bot)
-        session.add(row)
-        await session.flush()
+        row = await _insert_or_get(
+            session,
+            User(id=tg.id, telegram_id=tg.id, username=tg.username, first_name=tg.first_name or "User", last_name=tg.last_name, is_bot=tg.is_bot),
+            User, User.id == tg.id,
+        )
     return row
 
 @router.message(Command("bal"))
