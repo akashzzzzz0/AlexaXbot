@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
 from sqlalchemy.exc import IntegrityError
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from bot.database.models import User, Group, GroupMember, GroupSettings, ActionLog, SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig, ScamReview, InboxMessage, GlobalSetting
+from bot.database.models import User, Group, GroupMember, GroupSettings, ActionLog, SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig, ScamReview, InboxMessage, GlobalSetting, GroupPromotionOptIn
 from bot.keyboards.main_menu import back_button_kb
 from bot.config import settings
 from bot.utils.helpers import format_number
@@ -1829,8 +1829,9 @@ async def start_group_promotion(callback: CallbackQuery, _: callable, state: FSM
     await state.set_state(OwnerStates.waiting_group_promotion)
     await callback.message.answer(
         "📣 <b>GLOBAL GROUP MESSAGE</b>\n\n"
-        "Send one message and ALEXA will copy it to every active group connected to the bot. "
+        "Send one message and ALEXA will copy it to groups whose admins have opted in. "
         "This is a direct owner broadcast — not random group promotion.\n\n"
+        "Group admins enable delivery with /promotions on and can opt out using /promotions off. "
         "Text, photos, videos and supported Telegram media can be copied.\n"
         "Send /cancel to stop.",
         parse_mode="HTML",
@@ -1849,10 +1850,15 @@ async def process_group_promotion(message: Message, _: callable, db_session: Asy
         await message.answer("📣 Global group message cancelled.")
         return
 
-    groups = await _active_groups(db_session)
+    groups = (await db_session.scalars(
+        select(Group)
+        .join(GroupPromotionOptIn, GroupPromotionOptIn.group_id == Group.id)
+        .where(Group.is_active.is_(True), GroupPromotionOptIn.enabled.is_(True))
+        .order_by(Group.title.asc())
+    )).all()
     if not groups:
         await state.clear()
-        await message.answer("No active registered groups found.")
+        await message.answer("No groups have opted in yet. Ask group admins to send /promotions on in their groups.")
         return
 
     sent = 0
@@ -1909,7 +1915,7 @@ async def process_group_promotion(message: Message, _: callable, db_session: Asy
     )
     summary = (
         "📣 <b>GLOBAL GROUP MESSAGE REPORT</b>\n\n"
-        f"📨 Total groups: <b>{total}</b>\n"
+        f"📨 Opted-in groups: <b>{total}</b>\n"
         f"🟢 Delivered: <b>{sent}</b>\n"
         f"🔴 Failed: <b>{len(failed)}</b>"
     )
