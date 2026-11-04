@@ -51,7 +51,7 @@ ABUSE_WORDS = {
     "मादरचोद", "बहनचोद", "भोसड़ी", "चूतिया", "गांडू", "हरामी",
 }
 def _moderation_text(text: str) -> str:
-    return re.sub(r"[^\\w]+", " ", (text or "").casefold(), flags=re.UNICODE).strip()
+    return re.sub(r"[^\w]+", " ", (text or "").casefold(), flags=re.UNICODE).strip()
 
 def _contains_word_set(text: str, words: set[str]) -> bool:
     normalized = _moderation_text(text)
