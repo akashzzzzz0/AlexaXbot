@@ -4,7 +4,7 @@ from aiogram.types import Message
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from html import escape
@@ -385,26 +385,44 @@ async def add_filter(message: Message, db_session: AsyncSession, **kwargs):
     response_type = "text"
     if replied:
         # Copy the original replied-to Telegram message at trigger time. This
-        # preserves text entities/links and supports animations, stickers,
-        # photos, videos, documents, audio, voice notes and other media.
+        # preserves text entities/links and supports all Telegram media.
         response = json.dumps({
             "chat_id": message.chat.id,
             "message_id": replied.message_id,
         })
         response_type = "copy"
+
+        # A reply is an explicit target: scope this filter to the author of
+        # the replied-to message without asking admins to retype their ID.
+        replied_user = getattr(replied, "from_user", None)
+        if replied_user is not None:
+            target_user_id = replied_user.id
+            target_username = (replied_user.username or "").lower() or None
+
+        # An explicit third argument may override the reply target.
         if len(parts) > 2:
             token = parts[2].strip()
             if token.startswith("@"):
-                target_username = token[1:].lower()[:64]
-                target = await db_session.scalar(select(User).where(User.username.ilike(token[1:])))
-                target_user_id = target.id if target else None
+                requested_username = token[1:].lower()[:64]
+                target = await db_session.scalar(
+                    select(User).where(func.lower(func.replace(User.username, "@", "")) == requested_username)
+                )
+                if target is None:
+                    await message.reply("ALEXA doesn't know that username yet. Reply directly to the user's message or use their numeric ID.")
+                    return
+                target_user_id = target.id
+                target_username = (target.username or requested_username).lstrip("@").lower()
             else:
                 try:
                     target_user_id = int(token)
                 except ValueError:
-                    await message.reply("Use a numeric user ID or a username already known to ALEXA."); return
-            if target_user_id is None and not target_username:
-                await message.reply("Use a numeric user ID or @username."); return
+                    await message.reply("Use a numeric user ID or reply directly to the user's message.")
+                    return
+                if target_user_id <= 0:
+                    await message.reply("Enter a valid numeric user ID.")
+                    return
+                target = await db_session.get(User, target_user_id)
+                target_username = (target.username or "").lstrip("@").lower() or None if target else None
     else:
         response = parts[2] if len(parts) > 2 else None
         if not response:
