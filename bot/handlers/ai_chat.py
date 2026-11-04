@@ -51,7 +51,7 @@ def _detect_user_gender_style(history, current_text: str) -> str:
 
 
 def _reaction_for_text(text: str) -> str | None:
-    """Choose a varied, context-appropriate reaction occasionally."""
+    """React only to clear, high-signal emotional or celebratory messages."""
     value = re.sub(r"\s+", " ", text.casefold()).strip()
     if not value:
         return None
@@ -59,7 +59,7 @@ def _reaction_for_text(text: str) -> str | None:
     options = [
         (r"\b(haha+|hehe+|lol|lmao|rofl|mazaak|mazak|funny)\b|😂|🤣|😹",
          ("😂", "🤣", "😹", "😆")),
-        (r"\b(congrats?|congratulations|mubarak|well done|shabash|proud of you| jeet|won)\b|🎉|🏆",
+        (r"\b(congrats?|congratulations|mubarak|well done|shabash|proud of you|jeet|won)\b|🎉|🏆",
          ("🎉", "🥳", "🏆", "👏")),
         (r"\b(thanks?|thank you|shukriya|meherbani|jazakallah)\b",
          ("❤️", "🥰", "🙏", "💖")),
@@ -71,22 +71,14 @@ def _reaction_for_text(text: str) -> str | None:
          ("😮", "😳", "🤯", "🙀")),
         (r"\b(angry|gussa|ghussa|naraz|irritated)\b|😡|🤬|😤",
          ("😤", "😠", "🤨")),
-        (r"\b(hi+|hello+|hey+|salam|aoa|assalamualaikum|good morning|good night)\b",
-         ("👋", "😊", "🙌")),
-        (r"\b(boss|yes boss|owner|chief)\b|👑|🫡",
-         ("🫡", "👑", "🔥")),
-        (r"\b(agree|exactly|bilkul|sahi kaha|true|facts)\b|💯",
-         ("💯", "🤝", "👍")),
-        (r"\b(please help|help me|need help|madad|stuck|problem)\b|❓",
-         ("🤔", "🫡", "💡")),
         (r"\b(love|cute|beautiful|awesome|amazing|zabardast|kamal)\b|😍|🥰|❤️",
          ("🥰", "❤️", "✨", "🔥")),
     ]
     for pattern, emojis in options:
         if re.search(pattern, value, re.IGNORECASE):
             return random.choice(emojis)
-    # Neutral messages still receive a light reaction, so no ordinary message is skipped.
-    return random.choice(("🙂", "✨", "💯", "🤝", "🔥"))
+    # No generic/neutral reaction: ordinary conversation stays reaction-free.
+    return None
 
 
 @router.message(
