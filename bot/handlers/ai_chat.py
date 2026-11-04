@@ -21,6 +21,8 @@ from aiogram.types import Message, ReactionTypeEmoji
 
 from bot.config import settings
 from bot.services.ollama_ai import ollama_chat
+from bot.database.models import GlobalSetting
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = Router(name="alexa_ai_chat")
 logger = logging.getLogger(__name__)
@@ -547,7 +549,19 @@ async def alexa_owner_boss_reply(message: Message) -> None:
     F.text,
     is_alexa_trigger,
 )
-async def alexa_ai_chat(message: Message) -> None:
+async def alexa_ai_chat(message: Message, db_session: AsyncSession = None) -> None:
+    # All AI chat, including untagged smart group replies, obeys the owner-only
+    # Global AI switch. Fail closed if the database/session is unavailable.
+    if db_session is None:
+        return
+    try:
+        ai_setting = await db_session.get(GlobalSetting, "owner_ai_enabled")
+    except Exception as exc:
+        logger.warning("Could not read Global AI setting; keeping AI silent: %s", type(exc).__name__)
+        return
+    if not ai_setting or ai_setting.value != "1":
+        return
+
     text = (message.text or "").strip()
     prefix_match = _ALEXA_PREFIX_RE.match(text)
     if prefix_match:
