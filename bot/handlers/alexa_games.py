@@ -50,6 +50,12 @@ async def target_from_reply(message: Message, session: AsyncSession):
             User(id=tg.id, telegram_id=tg.id, username=tg.username, first_name=tg.first_name or "User", last_name=tg.last_name, is_bot=tg.is_bot),
             User, User.id == tg.id,
         )
+        # A user first discovered through a replied-to group message also
+        # receives the same one-time 200-coin starter wallet.
+        await _insert_or_get(
+            session, Wallet(user_id=tg.id, balance=200, bank_balance=0),
+            Wallet, Wallet.user_id == tg.id,
+        )
     return row
 
 @router.message(Command("bal"))
