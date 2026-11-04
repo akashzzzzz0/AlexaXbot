@@ -29,6 +29,27 @@ _conversations = defaultdict(lambda: deque(maxlen=12))
 _HISTORY_DB = Path("alexa_chat_history.db")
 _HISTORY_LIMIT = 30
 _history_loaded = set()
+def _detect_user_gender_style(history, current_text: str) -> str:
+    """Use only clear first-person self-identification; never guess from a name or ID."""
+    girl_patterns = (
+        r"\\b(?:main|mai|mein|me)\\s+(?:ek\\s+)?(?:larki|ladki|girl|female)\\s+(?:hoon|hun|hu|houn)\\b",
+        r"\\b(?:i am|i'm)\\s+(?:a\\s+)?(?:girl|female|woman)\\b",
+    )
+    boy_patterns = (
+        r"\\b(?:main|mai|mein|me)\\s+(?:ek\\s+)?(?:larka|ladka|boy|male)\\s+(?:hoon|hun|hu|houn)\\b",
+        r"\\b(?:i am|i'm)\\s+(?:a\\s+)?(?:boy|male|man)\\b",
+    )
+    user_messages = [str(item_text) for role, item_text in history if role == "user"]
+    user_messages.append(current_text)
+    for value in reversed(user_messages[-30:]):
+        normalized = value.casefold().strip()
+        if any(re.search(pattern, normalized, re.IGNORECASE) for pattern in girl_patterns):
+            return "girl"
+        if any(re.search(pattern, normalized, re.IGNORECASE) for pattern in boy_patterns):
+            return "boy"
+    return "neutral"
+
+
 def _reaction_for_text(text: str) -> str | None:
     """Return an occasional context-based reaction, not one on every message."""
     value = text.casefold()
@@ -366,7 +387,8 @@ async def is_alexa_trigger(message: Message) -> bool:
 
 
 async def _ask_ollama_with_typing(
-    message: Message, user_text: str, history: deque, *, smart_mode: bool = False
+    message: Message, user_text: str, history: deque, *, smart_mode: bool = False,
+    gender_style: str = "neutral"
 ) -> str:
     """Keep Telegram's typing indicator active while Alexa prepares an AI reply."""
     # Keep the typing indicator alive while the model is working.
@@ -386,13 +408,16 @@ async def _ask_ollama_with_typing(
 
     typing_task = asyncio.create_task(_typing_hint())
     try:
-        return await _ask_ollama(user_text, history, smart_mode=smart_mode)
+        return await _ask_ollama(
+            user_text, history, smart_mode=smart_mode, gender_style=gender_style
+        )
     finally:
         typing_task.cancel()
 
 
 async def _ask_ollama(
-    user_text: str, history: deque, *, smart_mode: bool = False
+    user_text: str, history: deque, *, smart_mode: bool = False,
+    gender_style: str = "neutral"
 ) -> str:
     """Generate a casual reply through the shared Ollama provider."""
     system_instruction = (
@@ -416,6 +441,18 @@ async def _ask_ollama(
             "Do not mention or tag everyone, do not invent missing context, and do not write long explanations. "
             "Use Pakistani Roman Urdu/Hinglish when appropriate, usually in one short sentence."
         )
+    system_instruction += (
+        "Keep Alexa's own persona feminine in every conversation. Adapt only the friendliness style to the user's clearly self-stated gender: "
+        "for a girl, be extra caring, considerate, and warmly friendly; for a boy, stay normally friendly and casual. "
+        "This is never romantic, flirtatious, possessive, or intimate. Do not use romantic pet names. "
+        "Never infer gender from a name, username, profile photo, or writing style; if it is not clearly self-stated, use a neutral friendly tone. "
+    )
+    if gender_style == "girl":
+        system_instruction += "The sender has clearly identified herself as a girl. Use a caring, considerate, warmly friendly tone, without romance or flirting. "
+    elif gender_style == "boy":
+        system_instruction += "The sender has clearly identified himself as a boy. Use a normal friendly, casual tone. "
+    else:
+        system_instruction += "The sender's gender is not clearly known. Keep the tone neutral and friendly; do not guess. "
     messages = [
         {"role": role, "content": old_text}
         for role, old_text in history
@@ -495,7 +532,10 @@ async def alexa_ai_chat(message: Message) -> None:
             )
             history.extend(persisted_history)
             _history_loaded.add(key)
-        answer = await _ask_ollama_with_typing(message, text, history, smart_mode=smart_mode)
+        gender_style = _detect_user_gender_style(history, original_text or text)
+        answer = await _ask_ollama_with_typing(
+            message, text, history, smart_mode=smart_mode, gender_style=gender_style
+        )
     except (httpx.HTTPError, ValueError, TypeError) as exc:
         logger.warning("Alexa AI reply failed for chat_id=%s: %s", message.chat.id, type(exc).__name__)
         return
