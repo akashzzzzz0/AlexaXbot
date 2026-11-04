@@ -52,34 +52,34 @@ def _detect_user_gender_style(history, current_text: str) -> str:
 
 def _reaction_for_text(text: str) -> str | None:
     """Choose a varied, context-appropriate reaction occasionally."""
-    value = re.sub(r"\\s+", " ", text.casefold()).strip()
+    value = re.sub(r"\s+", " ", text.casefold()).strip()
     if not value or len(value) > 1500:
         return None
 
     options = [
-        (r"\\b(haha+|hehe+|lol|lmao|rofl|mazaak|mazak|funny)\\b|😂|🤣|😹",
+        (r"\b(haha+|hehe+|lol|lmao|rofl|mazaak|mazak|funny)\b|😂|🤣|😹",
          ("😂", "🤣", "😹", "😆")),
-        (r"\\b(congrats?|congratulations|mubarak|well done|shabash|proud of you| jeet|won)\\b|🎉|🏆",
+        (r"\b(congrats?|congratulations|mubarak|well done|shabash|proud of you| jeet|won)\b|🎉|🏆",
          ("🎉", "🥳", "🏆", "👏")),
-        (r"\\b(thanks?|thank you|shukriya|meherbani|jazakallah)\\b",
+        (r"\b(thanks?|thank you|shukriya|meherbani|jazakallah)\b",
          ("❤️", "🥰", "🙏", "💖")),
-        (r"\\b(sorry|maaf|forgive|my mistake|galti ho|afsos)\\b",
+        (r"\b(sorry|maaf|forgive|my mistake|galti ho|afsos)\b",
          ("🤝", "❤️", "🙏")),
-        (r"\\b(sad|upset|cry|miss you|bura lag|mood off|dukhi|udaas|udas)\\b|😢|😭|🥺|💔",
+        (r"\b(sad|upset|cry|miss you|bura lag|mood off|dukhi|udaas|udas)\b|😢|😭|🥺|💔",
          ("🥺", "🫂", "❤️", "😔")),
-        (r"\\b(wow|seriously|really|no way|omg|shocked|hairan)\\b|😮|😱|🤯",
+        (r"\b(wow|seriously|really|no way|omg|shocked|hairan)\b|😮|😱|🤯",
          ("😮", "😳", "🤯", "🙀")),
-        (r"\\b(angry|gussa|ghussa|naraz|irritated)\\b|😡|🤬|😤",
+        (r"\b(angry|gussa|ghussa|naraz|irritated)\b|😡|🤬|😤",
          ("😤", "😠", "🤨")),
-        (r"\\b(hi+|hello+|hey+|salam|aoa|assalamualaikum|good morning|good night)\\b",
+        (r"\b(hi+|hello+|hey+|salam|aoa|assalamualaikum|good morning|good night)\b",
          ("👋", "😊", "🙌")),
-        (r"\\b(boss|yes boss|owner|chief)\\b|👑|🫡",
+        (r"\b(boss|yes boss|owner|chief)\b|👑|🫡",
          ("🫡", "👑", "🔥")),
-        (r"\\b(agree|exactly|bilkul|sahi kaha|true|facts)\\b|💯",
+        (r"\b(agree|exactly|bilkul|sahi kaha|true|facts)\b|💯",
          ("💯", "🤝", "👍")),
-        (r"\\b(please help|help me|need help|madad|stuck|problem)\\b|❓",
+        (r"\b(please help|help me|need help|madad|stuck|problem)\b|❓",
          ("🤔", "🫡", "💡")),
-        (r"\\b(love|cute|beautiful|awesome|amazing|zabardast|kamal)\\b|😍|🥰|❤️",
+        (r"\b(love|cute|beautiful|awesome|amazing|zabardast|kamal)\b|😍|🥰|❤️",
          ("🥰", "❤️", "✨", "🔥")),
     ]
     for pattern, emojis in options:
