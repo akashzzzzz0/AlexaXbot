@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from html import escape
 import re
+import json
 from bot.database.models import GroupRule, GroupFilter, SavedMessage, GroupBlocklist, GroupDisabledCommand, GroupMember, User, SecuritySettings, GroupSettings
 from bot.middlewares.admin_actions import AdminActionMiddleware
 
@@ -381,9 +382,15 @@ async def add_filter(message: Message, db_session: AsyncSession, **kwargs):
     target_user_id = None
     target_username = None
     response_type = "text"
-    if replied and replied.sticker:
-        response = replied.sticker.file_id
-        response_type = "sticker"
+    if replied:
+        # Copy the original replied-to Telegram message at trigger time. This
+        # preserves text entities/links and supports animations, stickers,
+        # photos, videos, documents, audio, voice notes and other media.
+        response = json.dumps({
+            "chat_id": message.chat.id,
+            "message_id": replied.message_id,
+        })
+        response_type = "copy"
         if len(parts) > 2:
             token = parts[2].strip()
             if token.startswith("@"):
@@ -398,12 +405,9 @@ async def add_filter(message: Message, db_session: AsyncSession, **kwargs):
             if target_user_id is None and not target_username:
                 await message.reply("Use a numeric user ID or @username."); return
     else:
-        response = (replied.text or replied.caption) if replied else (parts[2] if len(parts) > 2 else None)
+        response = parts[2] if len(parts) > 2 else None
         if not response:
-            await message.reply("Provide reply text or reply to a text/sticker message."); return
-        if len(parts) > 2 and replied:
-            token = parts[2].strip()
-            # A target argument is supported when setting sticker filters; text filters keep their legacy response syntax.
+            await message.reply("Provide reply text or reply to a message containing text, a link, or media."); return
     row = await db_session.scalar(select(GroupFilter).where(GroupFilter.group_id == message.chat.id, GroupFilter.keyword == keyword))
     if row:
         row.response = response
@@ -424,7 +428,7 @@ async def add_filter(message: Message, db_session: AsyncSession, **kwargs):
         row.target_username = target_username
     await db_session.flush()
     target_text = (f" for @{escape(target_username)}" if target_username else (f" for user <code>{target_user_id}</code>" if target_user_id else " for everyone"))
-    kind = "sticker" if response_type == "sticker" else "reply"
+    kind = "saved message" if response_type == "copy" else "reply"
     await message.reply(f"✅ {kind.title()} filter saved for <code>{escape(keyword)}</code>{target_text}.", parse_mode="HTML")
 
 
@@ -436,6 +440,57 @@ async def remove_filter(message: Message, db_session: AsyncSession, **kwargs):
     keyword = parts[1].strip().lower()
     await db_session.execute(delete(GroupFilter).where(GroupFilter.group_id == message.chat.id, GroupFilter.keyword == keyword))
     await message.reply("✅ Filter removed (if it existed).")
+
+
+@router.message(
+    F.chat.type.in_({"group", "supergroup"}),
+    F.text,
+)
+async def trigger_group_filters(message: Message, db_session: AsyncSession, **kwargs):
+    """Replay the saved reply/media when a member uses a configured keyword."""
+    if not message.from_user or message.from_user.is_bot:
+        return
+    text = (message.text or "").strip()
+    if not text or text.startswith("/"):
+        return
+
+    rows = (await db_session.scalars(
+        select(GroupFilter).where(GroupFilter.group_id == message.chat.id)
+    )).all()
+    normalized = text.casefold()
+    for row in rows:
+        keyword = (row.keyword or "").strip().casefold()
+        if not keyword or not re.search(
+            rf"(?<![\\w]){re.escape(keyword)}(?![\\w])",
+            normalized,
+            re.IGNORECASE,
+        ):
+            continue
+        if row.target_user_id and message.from_user.id != row.target_user_id:
+            continue
+        if row.target_username and (message.from_user.username or "").casefold() != row.target_username.casefold():
+            continue
+        try:
+            if row.response_type == "copy":
+                source = json.loads(row.response)
+                await message.bot.copy_message(
+                    chat_id=message.chat.id,
+                    from_chat_id=int(source["chat_id"]),
+                    message_id=int(source["message_id"]),
+                )
+            elif row.response_type == "sticker":
+                await message.answer_sticker(row.response)
+            else:
+                await message.answer(row.response, disable_web_page_preview=False)
+        except Exception as exc:
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning(
+                "Group filter replay failed chat_id=%s keyword=%s error=%s",
+                message.chat.id,
+                keyword,
+                type(exc).__name__,
+            )
+        return
 
 async def _resolve_member_target(message: Message, db_session: AsyncSession, token: str | None = None):
     """Resolve a target from a replied-to user or an explicit ID/known username."""
