@@ -1,4 +1,5 @@
 from aiogram import Router, F
+from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.types import Message
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -491,6 +492,9 @@ async def trigger_group_filters(message: Message, db_session: AsyncSession, **kw
                 type(exc).__name__,
             )
         return
+
+    # No filter matched: let later routers, including Alexa chat, process it.
+    raise SkipHandler
 
 async def _resolve_member_target(message: Message, db_session: AsyncSession, token: str | None = None):
     """Resolve a target from a replied-to user or an explicit ID/known username."""
