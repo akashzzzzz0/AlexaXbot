@@ -32,12 +32,12 @@ _history_loaded = set()
 def _detect_user_gender_style(history, current_text: str) -> str:
     """Use only clear first-person self-identification; never guess from a name or ID."""
     girl_patterns = (
-        r"\\b(?:main|mai|mein|me)\\s+(?:ek\\s+)?(?:larki|ladki|girl|female)\\s+(?:hoon|hun|hu|houn)\\b",
-        r"\\b(?:i am|i'm)\\s+(?:a\\s+)?(?:girl|female|woman)\\b",
+        r"\b(?:main|mai|mein|me)\s+(?:ek\s+)?(?:larki|ladki|girl|female)\s+(?:hoon|hun|hu|houn)\b",
+        r"\b(?:i am|i'm)\s+(?:a\s+)?(?:girl|female|woman)\b",
     )
     boy_patterns = (
-        r"\\b(?:main|mai|mein|me)\\s+(?:ek\\s+)?(?:larka|ladka|boy|male)\\s+(?:hoon|hun|hu|houn)\\b",
-        r"\\b(?:i am|i'm)\\s+(?:a\\s+)?(?:boy|male|man)\\b",
+        r"\b(?:main|mai|mein|me)\s+(?:ek\s+)?(?:larka|ladka|boy|male)\s+(?:hoon|hun|hu|houn)\b",
+        r"\b(?:i am|i'm)\s+(?:a\s+)?(?:boy|male|man)\b",
     )
     user_messages = [str(item_text) for role, item_text in history if role == "user"]
     user_messages.append(current_text)
