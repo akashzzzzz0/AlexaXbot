@@ -5,7 +5,7 @@ from html import escape
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import Command
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from bot.config import settings
@@ -55,7 +55,23 @@ async def target_from_reply(message: Message, session: AsyncSession):
 @router.message(Command("bal"))
 async def legacy_balance(message: Message, _: callable, db_session: AsyncSession, db_user, **kwargs):
     wallet = await get_or_create_wallet(db_session, db_user.id)
-    await message.reply(f"👛 <b>Balance</b>\nPocket: {format_number(wallet.balance or 0)} coins\nBank: {format_number(wallet.bank_balance or 0)} coins", parse_mode="HTML")
+    game_profile = await profile(db_session, db_user.id)
+    higher_kill_scores = await db_session.scalar(
+        select(func.count()).select_from(GameProfile).where(
+            GameProfile.kills > (game_profile.kills or 0)
+        )
+    )
+    rank_position = int(higher_kill_scores or 0) + 1
+    status = "Dead 💀" if (game_profile.deaths or 0) > 0 else "Alive 💚"
+    name = escape(db_user.first_name or "User")
+    await message.reply(
+        f"👤 <b>Name:</b> {name}\n"
+        f"💰 <b>Balance:</b> ${format_number(wallet.balance or 0)}\n"
+        f"🏆 <b>Rank:</b> {rank_position}\n"
+        f"⚔️ <b>Kills:</b> {game_profile.kills or 0}\n"
+        f"💜 <b>Status:</b> {status}",
+        parse_mode="HTML",
+    )
 
 @router.message(Command("protect"))
 async def protect(message: Message, _: callable, db_session: AsyncSession, db_user, **kwargs):
