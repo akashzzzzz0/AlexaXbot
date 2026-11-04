@@ -225,6 +225,24 @@ async def _send_welcome_message(bot, db_session, chat, user):
     except Exception as exc:
         logger.warning("Welcome message failed", chat_id=chat.id, user_id=user.id, error=str(exc))
 
+    # Send a private welcome only to members who have already started ALEXA.
+    # Telegram does not allow bots to initiate private chats with arbitrary users.
+    try:
+        dm_user = await db_session.get(User, user.id)
+        if dm_user and dm_user.dm_started:
+            private_text = (
+                f"👋 Hello {escape(user.first_name or 'there')}!\\n\\n"
+                f"Welcome to <b>{escape(chat.title or 'the group')}</b>! 🎉\\n"
+                "I’m ALEXA, the group’s assistant. I can help with group safety, "
+                "moderation and fun features.\\n\\n"
+                "Have a great time in the community! 💜"
+            )
+            await bot.send_message(user.id, private_text, parse_mode="HTML")
+            logger.info("Private join welcome sent", chat_id=chat.id, user_id=user.id)
+    except Exception as exc:
+        # A private-message failure must never block the group welcome or join flow.
+        logger.debug("Private join welcome unavailable", chat_id=chat.id, user_id=user.id, error=str(exc))
+
 
 @router.chat_member(ChatMemberUpdatedFilter(JOIN_TRANSITION))
 async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kwargs):
