@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import settings
-from bot.database.models import Group, GroupPromotionRequest
+from bot.database.models import Group, GroupPromotionRequest, GroupPromotionOptIn
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +121,12 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
             logger.info(
                 "Group promotion verification: private invite link is not mapped to a known group"
             )
-            await message.answer(_PROMOTION_NOTICE, parse_mode="HTML")
+            await message.answer(
+                "⚠️ <b>Group link could not be verified.</b>\n\n"
+                "Please send a public group link and add Alexa as an administrator first. "
+                "Private invite links can only be verified if Alexa already knows that group.",
+                parse_mode="HTML",
+            )
             return
         try:
             chat = await message.bot.get_chat(group.id)
@@ -130,23 +135,43 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
                 "Group promotion verification: get_chat failed for known private group id=%s",
                 group.id,
             )
-            await message.answer(_PROMOTION_NOTICE, parse_mode="HTML")
+            await message.answer(
+                "⚠️ <b>Group link could not be verified.</b>\n\n"
+                "Please send a public group link and add Alexa as an administrator first. "
+                "Private invite links can only be verified if Alexa already knows that group.",
+                parse_mode="HTML",
+            )
             return
     else:
         slug = group_link.split("t.me/", 1)[1].split("?", 1)[0].strip("/")
         if not slug or "/" in slug:
-            await message.answer(_PROMOTION_NOTICE, parse_mode="HTML")
+            await message.answer(
+                "⚠️ <b>Group link could not be verified.</b>\n\n"
+                "Please send a public group link and add Alexa as an administrator first. "
+                "Private invite links can only be verified if Alexa already knows that group.",
+                parse_mode="HTML",
+            )
             return
         try:
             chat = await message.bot.get_chat("@" + slug)
         except Exception:
             logger.exception("Group promotion verification: get_chat failed for public group link %s", group_link)
-            await message.answer(_PROMOTION_NOTICE, parse_mode="HTML")
+            await message.answer(
+                "⚠️ <b>Group link could not be verified.</b>\n\n"
+                "Please send a public group link and add Alexa as an administrator first. "
+                "Private invite links can only be verified if Alexa already knows that group.",
+                parse_mode="HTML",
+            )
             return
 
     chat_type = getattr(chat.type, "value", chat.type)
     if chat_type not in {"group", "supergroup"}:
-        await message.answer(_PROMOTION_NOTICE, parse_mode="HTML")
+        await message.answer(
+                "⚠️ <b>Group link could not be verified.</b>\n\n"
+                "Please send a public group link and add Alexa as an administrator first. "
+                "Private invite links can only be verified if Alexa already knows that group.",
+                parse_mode="HTML",
+            )
         return
 
     try:
@@ -161,14 +186,24 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
         )
     except Exception:
         logger.exception("Group promotion verification: get_chat_member failed for chat_id=%s", chat.id)
-        await message.answer(_PROMOTION_NOTICE, parse_mode="HTML")
+        await message.answer(
+                "⚠️ <b>Group link could not be verified.</b>\n\n"
+                "Please send a public group link and add Alexa as an administrator first. "
+                "Private invite links can only be verified if Alexa already knows that group.",
+                parse_mode="HTML",
+            )
         return
     if bot_status not in {"administrator", "creator"}:
         logger.warning(
             "Group promotion verification denied: bot is not an admin; chat_id=%s status=%s",
             chat.id, bot_status,
         )
-        await message.answer(_PROMOTION_NOTICE, parse_mode="HTML")
+        await message.answer(
+                "⚠️ <b>Group link could not be verified.</b>\n\n"
+                "Please send a public group link and add Alexa as an administrator first. "
+                "Private invite links can only be verified if Alexa already knows that group.",
+                parse_mode="HTML",
+            )
         return
 
     group = await db_session.get(Group, chat.id)
@@ -231,6 +266,62 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
 
 
 @router.message(
+    F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}),
+    F.text.regexp(re.compile(r"(?i)^/promotions(?:@\w+)?\s+(on|off)\s*$")),
+)
+async def set_group_promotion_opt_in(message: Message, db_session: AsyncSession, **kwargs):
+    """Let a group administrator explicitly opt the group in or out."""
+    if not message.from_user or message.from_user.is_bot:
+        return
+    try:
+        member = await message.bot.get_chat_member(message.chat.id, message.from_user.id)
+        status = str(getattr(member.status, "value", member.status)).lower()
+    except Exception:
+        await message.answer("I couldn't verify your admin permissions. Please try again.")
+        return
+    if status not in {"administrator", "creator"}:
+        await message.answer("Only group admins can change promotion consent.")
+        return
+
+    enabled = (message.text or "").strip().lower().split()[-1] == "on"
+    group = await db_session.get(Group, message.chat.id)
+    if group is None:
+        group = await _insert_or_get_group(
+            db_session,
+            Group(
+                id=message.chat.id,
+                title=message.chat.title or "Telegram Group",
+                username=message.chat.username,
+                type=getattr(message.chat.type, "value", message.chat.type),
+                is_active=True,
+            ),
+        )
+    else:
+        group.title = message.chat.title or group.title
+        group.username = message.chat.username
+        group.is_active = True
+    row = await db_session.get(GroupPromotionOptIn, message.chat.id)
+    if row is None:
+        if not enabled:
+            await message.answer("This group is already opted out of cross-group promotions.")
+            return
+        row = GroupPromotionOptIn(
+            group_id=message.chat.id,
+            enabled=True,
+            enabled_by=message.from_user.id,
+        )
+        db_session.add(row)
+    else:
+        row.enabled = enabled
+        row.enabled_by = message.from_user.id
+    await db_session.commit()
+    if enabled:
+        await message.answer("✅ This group has opted in to Alexa cross-group promotions. Admins can use /promotions off anytime.")
+    else:
+        await message.answer("🔕 This group has opted out. Alexa will no longer send cross-group promotion posts here.")
+
+
+@router.message(
     F.chat.type == ChatType.PRIVATE,
     F.text.regexp(_PROMOTION_STATUS_RE),
 )
@@ -283,7 +374,13 @@ async def answer_promotion_status(message: Message, db_session: AsyncSession, **
 
 async def _run_promotion(request: GroupPromotionRequest, bot, session: AsyncSession):
     targets = (await session.scalars(
-        select(Group).where(Group.is_active.is_(True), Group.id != request.group_id)
+        select(Group)
+        .join(GroupPromotionOptIn, GroupPromotionOptIn.group_id == Group.id)
+        .where(
+            Group.is_active.is_(True),
+            GroupPromotionOptIn.enabled.is_(True),
+            Group.id != request.group_id,
+        )
     )).all()
     if not targets:
         return 0, 0

@@ -1025,6 +1025,16 @@ class GroupInboxMessage(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class GroupPromotionOptIn(Base):
+    """Per-group consent for receiving cross-group promotion posts."""
+    __tablename__ = "group_promotion_opt_ins"
+
+    group_id = Column(BigInteger, ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True)
+    enabled = Column(Boolean, default=True, nullable=False)
+    enabled_by = Column(BigInteger, nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class GroupPromotionRequest(Base):
     """A verified group waiting for owner approval and promotion."""
     __tablename__ = "group_promotion_requests"
