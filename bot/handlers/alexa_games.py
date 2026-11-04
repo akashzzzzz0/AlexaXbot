@@ -170,8 +170,8 @@ async def rob(message: Message, db_session: AsyncSession, db_user, **kwargs):
         await message.reply("Rob failed; target balance changed. Try again.")
         return
 
-    gained = amount * 90 // 100
-    tax = amount - gained
+    tax = amount // 10
+    gained = amount - tax
     await add_coins(
         db_session, db_user.id, gained, "rob_success",
         f"Robbed user {target.id}; {tax} coins deducted (10% game fee)",
