@@ -84,9 +84,9 @@ def _reaction_for_text(text: str) -> str | None:
     ]
     for pattern, emojis in options:
         if re.search(pattern, value, re.IGNORECASE):
-            # Keep reactions occasional so Alexa doesn't clutter the group.
-            return random.choice(emojis) if random.random() < 0.38 else None
-    return None
+            return random.choice(emojis)
+    # Neutral messages still receive a light reaction, so no ordinary message is skipped.
+    return random.choice(("🙂", "✨", "💯", "🤝", "🔥"))
 
 
 @router.message(
@@ -374,11 +374,7 @@ async def is_alexa_trigger(message: Message) -> bool:
         return True
 
     replied = message.reply_to_message
-    # If the user is replying to anyone except Alexa, never join that thread,
-    # even when this user recently chatted with Alexa or the text says "hi".
-    if replied:
-        if not replied.from_user or replied.from_user.id != message.bot.id:
-            return False
+    if replied and replied.from_user and replied.from_user.id == message.bot.id:
         return True
 
     if _bot_username is None:
@@ -414,13 +410,10 @@ async def is_alexa_trigger(message: Message) -> bool:
     if _ALEXA_PREFIX_RE.match(text):
         return True
 
-    # In groups, don't respond to generic greetings on their own. Require
-    # an explicit Alexa address, a reply to Alexa, or a short follow-up in an
-    # already active one-to-one conversation with Alexa.
-    session_key = (message.chat.id, message.from_user.id)
-    if time.monotonic() < _active_until.get(session_key, 0.0):
-        return True
-    return _should_smart_reply(message, text)
+    # Owner-requested open group chat: reply to every ordinary human text
+    # message, even when Alexa is not tagged. Slash commands and messages
+    # explicitly addressed to another tagged member were filtered above.
+    return True
 
 
 async def _ask_ollama_with_typing(
@@ -474,7 +467,7 @@ async def _ask_ollama(
         system_instruction += (
             "This is a SMART GROUP REPLY to an unaddressed message that has already passed relevance filters. "
             "Give a short, useful, natural reply to the message. Answer clear questions, join a joke naturally, or offer a brief empathetic reaction. "
-            "Do not output __IGNORE__ for a clear question, a direct greeting (including good morning, good afternoon, good evening, good night, GM, or GN), or a message that invites a normal response. "
+            "Do not output __IGNORE__ for any ordinary human group message. Respond naturally even if it is a short statement, joke, greeting, or casual comment. "
             "Do not mention or tag everyone, do not invent missing context, and do not write long explanations. "
             "Use Pakistani Roman Urdu/Hinglish when appropriate, usually in one short sentence."
         )
@@ -512,34 +505,6 @@ async def _ask_ollama(
         logger.warning("Alexa Ollama response was rejected by the existing vocabulary filter")
         return ""
     return answer
-
-
-async def _is_owner_group_message(message: Message) -> bool:
-    """Match ordinary group messages sent by the configured bot owner only."""
-    owner_id = settings.effective_owner_id
-    if not owner_id or not message.from_user or message.from_user.is_bot:
-        return False
-    if message.from_user.id != owner_id:
-        return False
-    # Keep existing slash-command handlers working as before.
-    return not (message.text or "").lstrip().startswith("/")
-
-
-@router.message(
-    F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}),
-    F.text,
-    _is_owner_group_message,
-)
-async def alexa_owner_boss_reply(message: Message) -> None:
-    """Acknowledge every ordinary text message from the owner in any group."""
-    try:
-        await message.reply("Yes Boss 👑")
-    except Exception as exc:
-        logger.warning(
-            "Alexa owner acknowledgement failed for chat_id=%s: %s",
-            message.chat.id,
-            type(exc).__name__,
-        )
 
 
 @router.message(
