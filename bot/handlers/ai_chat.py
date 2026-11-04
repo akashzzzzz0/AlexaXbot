@@ -89,6 +89,19 @@ def _reaction_for_text(text: str) -> str | None:
     return None
 
 
+@router.message(
+    F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}),
+    F.text,
+)
+async def alexa_group_message_reactions(message: Message) -> None:
+    """React to suitable group messages even when Alexa does not reply."""
+    if not message.from_user or message.from_user.is_bot:
+        return
+    if (message.text or "").lstrip().startswith("/"):
+        return
+    asyncio.create_task(_maybe_react(message))
+
+
 async def _maybe_react(message: Message) -> None:
     if not message.from_user or message.from_user.is_bot:
         return
@@ -608,8 +621,7 @@ async def alexa_ai_chat(message: Message) -> None:
     except Exception:
         # Chat should still work if the history file is temporarily unavailable.
         pass
-    # Social touches run in the background so they don't delay the AI reply.
-    asyncio.create_task(_maybe_react(message))
+    # Group reactions are handled independently for all suitable messages.
     try:
         mood_emoji = await _chat_mood_emoji(message.bot, original_text or text)
         await message.reply(f"{html.escape(answer)} {mood_emoji}", parse_mode="HTML")
