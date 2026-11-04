@@ -1,5 +1,5 @@
 from aiogram import Router
-from bot.handlers import start, security, moderation, economy, games, duels, statistics, settings, help, affiliate, owner, owner_group_message, owner_group_activity, force_join, welcome, tournaments, alexa_games, group_tools, community_shield, scam_review, ultra_vip, ai, ai_chat, owner_ai_control, missing_games, group_promotion, sticker_id, world_events
+from bot.handlers import start, security, moderation, economy, games, duels, statistics, settings, help, affiliate, owner, owner_group_message, owner_group_activity, force_join, welcome, tournaments, alexa_games, group_tools, community_shield, scam_review, ultra_vip, ai, ai_chat, owner_ai_control, missing_games, group_promotion, sticker_id, world_events, join_requests
 from bot.handlers.auto_delete_middleware import StartMenuAutoDeleteMessageMiddleware, StartMenuAutoDeleteCallbackMiddleware
 
 class DailyGroupMessageCounterMiddleware:
@@ -101,6 +101,9 @@ def get_main_router() -> Router:
     router.include_router(sticker_id.router)
     # General casual AI chat runs after owner action handling.
     router.include_router(ai_chat.router)
+    # Join-request DM handler is separate from the actual-member welcome flow.
+    router.include_router(join_requests.router)
     # Keep welcome/join-leave/captcha processing, but after feature handlers.
+    # The welcome handler fires only on Telegram's JOIN_TRANSITION (actual join).
     router.include_router(welcome.router)
     return router
