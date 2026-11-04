@@ -524,18 +524,17 @@ async function openInboxChat(id,silent=false){
 async function loadPromotionWorkspace(){
   try{
     const d=await api('/owner-api/promotion');
-    $('promotionGroups').innerHTML=(d.groups||[]).map(g=>'<label class="item" style="display:block"><input type="checkbox" data-promotion-group value="'+esc(g.id)+'"> <b>'+esc(g.title||'Telegram group')+'</b><div class="meta">ID '+esc(g.id)+' · '+esc(g.memberCount||0)+' members</div></label>').join('')||'<p>No active groups are registered.</p>';
-  }catch(e){showError(e.message);$('promotionGroups').textContent='Could not load active groups.'}
+    const groups=d.groups||[];
+    $('promotionGroups').innerHTML='<div class="item"><b>👑 Direct Owner Promotion</b><p>Alexa will verify its current Telegram membership and send your promotion to every recorded group where it is still present.</p><div class="meta">Known groups in Alexa database: '+groups.length+'</div><div class="meta">This direct owner action does not require /promotions on.</div></div>'+(groups.map(g=>'<div class="item"><b>'+esc(g.title||'Telegram group')+'</b><div class="meta">ID '+esc(g.id)+' · '+(g.isActive?'Last known active':'Needs live verification')+'</div></div>').join('')||'<p>No groups have been recorded yet.</p>');
+  }catch(e){showError(e.message);$('promotionGroups').textContent='Could not load connected groups.'}
 }
 async function sendPromotion(){
   const message=$('promotionText')?.value.trim();
-  const ids=[...document.querySelectorAll('[data-promotion-group]:checked')].map(x=>x.value);
-  if(!message)return showError('Write the promotion text first.');
-  if(!ids.length)return showError('Select at least one active group.');
-  if(!confirm('Send this promotion to '+ids.length+' selected groups?'))return;
+  if(!message)return showError('Write the promotion text or group link first.');
+  if(!confirm('Send this direct owner promotion to EVERY group where Alexa is currently a member?'))return;
   try{
-    const d=await api('/owner-api/promotion',{method:'POST',body:JSON.stringify({message,groupIds:ids})});
-    note('Promotion finished · Sent '+d.sent+' · Failed '+d.failed+' · Total '+d.total);
+    const d=await api('/owner-api/promotion',{method:'POST',body:JSON.stringify({message,allGroups:true})});
+    note('Owner promotion finished · Sent '+d.sent+' · Failed '+d.failed+' · Live groups '+d.verifiedGroups+' · Unavailable '+d.inactiveOrUnavailable);
     $('promotionText').value='';
   }catch(e){showError(e.message)}
 }

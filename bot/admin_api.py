@@ -2254,46 +2254,71 @@ async def owner_group_communication_settings_handler(request):
 
 @require_admin
 async def owner_promotion_handler(request):
+    """Owner-only direct promotion to every group where Alexa is currently a member."""
     from bot.database.connection import async_session_maker
-    """Send a confirmed text promotion to a selected set of active groups."""
     if request.method == "GET":
         async with async_session_maker() as session:
             groups = (await session.scalars(
-                select(Group).where(Group.is_active.is_(True)).order_by(Group.title.asc())
+                select(Group).order_by(Group.title.asc())
             )).all()
         return web.json_response({"groups": [_group_to_dict(group) for group in groups]},
+                                 headers={"Cache-Control": "no-store"})
+
+    # A direct all-groups send must be authenticated by the actual Telegram owner,
+    # not merely by the optional shared ADMIN_KEY.
+    init_data = request.headers.get("X-Telegram-Init-Data", "")
+    if not init_data or not _verify_owner_telegram_init_data(init_data):
+        return web.json_response({"error": "Only the verified Telegram owner can send a direct all-groups promotion."}, status=403,
                                  headers={"Cache-Control": "no-store"})
     bot = None
     try:
         body = await request.json()
         message = str(body.get("message", "")).strip()
-        raw_ids = body.get("groupIds")
+        if body.get("allGroups") is not True:
+            return web.json_response({"error": "Direct owner promotion must target all connected groups."}, status=400)
         if not message or len(message) > 4000:
-            return web.json_response({"error": "Message must be 1–4000 characters."}, status=400)
-        if not isinstance(raw_ids, list) or not raw_ids or len(raw_ids) > 200:
-            return web.json_response({"error": "Select between 1 and 200 active groups."}, status=400)
-        try:
-            group_ids = list(dict.fromkeys(int(value) for value in raw_ids))
-        except (ValueError, TypeError):
-            return web.json_response({"error": "Invalid group selection."}, status=400)
-        if any(group_id == 0 for group_id in group_ids):
-            return web.json_response({"error": "Invalid group selection."}, status=400)
-        async with async_session_maker() as session:
-            groups = (await session.scalars(
-                select(Group).where(Group.id.in_(group_ids), Group.is_active.is_(True))
-            )).all()
-        groups_by_id = {int(group.id): group for group in groups}
-        if len(groups_by_id) != len(group_ids):
-            return web.json_response({"error": "One or more selected groups are no longer active."}, status=409)
+            return web.json_response({"error": "Promotion text must be 1–4000 characters."}, status=400)
 
         from bot.config import settings
         from aiogram import Bot
         from aiogram.exceptions import TelegramRetryAfter
         import asyncio
         bot = Bot(token=settings.BOT_TOKEN)
+        me = await bot.get_me()
+
+        # Telegram does not expose a bot's complete chat directory. Verify every
+        # group Alexa has previously recorded against live Telegram membership.
+        async with async_session_maker() as session:
+            known_groups = (await session.scalars(
+                select(Group).order_by(Group.title.asc())
+            )).all()
+            groups_by_id = {int(group.id): group for group in known_groups}
+
+        semaphore = asyncio.Semaphore(5)
+        async def verify_membership(group_id):
+            async with semaphore:
+                try:
+                    member = await bot.get_chat_member(chat_id=group_id, user_id=me.id)
+                    status = str(getattr(member.status, "value", member.status)).lower()
+                    return group_id, status in {"member", "administrator", "creator"}
+                except Exception:
+                    return group_id, False
+
+        membership = await asyncio.gather(
+            *(verify_membership(group_id) for group_id in groups_by_id)
+        )
+        target_ids = [group_id for group_id, present in membership if present]
+        inactive_ids = [group_id for group_id, present in membership if not present]
+        async with async_session_maker() as session:
+            for group_id, present in membership:
+                group = await session.get(Group, group_id)
+                if group is not None:
+                    group.is_active = present
+            await session.commit()
+
         sent = failed = 0
         failures = []
-        for group_id in group_ids:
+        for group_id in target_ids:
             group = groups_by_id[group_id]
             try:
                 for attempt in range(5):
@@ -2310,12 +2335,16 @@ async def owner_promotion_handler(request):
                 failed += 1
                 failures.append({"groupId": str(group_id), "title": group.title or str(group_id),
                                  "error": str(exc)[:160]})
-        return web.json_response({"success": True, "sent": sent, "failed": failed,
-                                  "total": len(group_ids), "failures": failures[:30]},
-                                 headers={"Cache-Control": "no-store"})
+        return web.json_response({
+            "success": True, "sent": sent, "failed": failed,
+            "total": len(target_ids), "verifiedGroups": len(target_ids),
+            "inactiveOrUnavailable": len(inactive_ids),
+            "note": "Alexa can verify only groups already recorded in its database; Telegram does not provide bots a complete chat directory.",
+            "failures": failures[:30],
+        }, headers={"Cache-Control": "no-store"})
     except Exception:
         import structlog
-        structlog.get_logger().exception("Selected group promotion failed")
+        structlog.get_logger().exception("Owner all-groups promotion failed")
         return web.json_response({"error": "Promotion delivery failed. Check Alexa's Telegram connectivity and permissions."}, status=502)
     finally:
         if bot is not None:
