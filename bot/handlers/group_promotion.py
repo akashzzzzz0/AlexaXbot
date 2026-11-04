@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import settings
-from bot.database.models import Group, GroupPromotionRequest
+from bot.database.models import Group, GroupPromotionRequest, GroupPromotionOptIn
 
 logger = logging.getLogger(__name__)
 
@@ -231,6 +231,46 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
 
 
 @router.message(
+    F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}),
+    F.text.regexp(re.compile(r"(?i)^/promotions(?:@\w+)?\s+(on|off)\s*$")),
+)
+async def set_group_promotion_opt_in(message: Message, db_session: AsyncSession, **kwargs):
+    """Let a group administrator explicitly opt the group in or out."""
+    if not message.from_user or message.from_user.is_bot:
+        return
+    try:
+        member = await message.bot.get_chat_member(message.chat.id, message.from_user.id)
+        status = str(getattr(member.status, "value", member.status)).lower()
+    except Exception:
+        await message.answer("I couldn't verify your admin permissions. Please try again.")
+        return
+    if status not in {"administrator", "creator"}:
+        await message.answer("Only group admins can change promotion consent.")
+        return
+
+    enabled = (message.text or "").strip().lower().split()[-1] == "on"
+    row = await db_session.get(GroupPromotionOptIn, message.chat.id)
+    if row is None:
+        if not enabled:
+            await message.answer("This group is already opted out of cross-group promotions.")
+            return
+        row = GroupPromotionOptIn(
+            group_id=message.chat.id,
+            enabled=True,
+            enabled_by=message.from_user.id,
+        )
+        db_session.add(row)
+    else:
+        row.enabled = enabled
+        row.enabled_by = message.from_user.id
+    await db_session.commit()
+    if enabled:
+        await message.answer("✅ This group has opted in to Alexa cross-group promotions. Admins can use /promotions off anytime.")
+    else:
+        await message.answer("🔕 This group has opted out. Alexa will no longer send cross-group promotion posts here.")
+
+
+@router.message(
     F.chat.type == ChatType.PRIVATE,
     F.text.regexp(_PROMOTION_STATUS_RE),
 )
@@ -283,7 +323,13 @@ async def answer_promotion_status(message: Message, db_session: AsyncSession, **
 
 async def _run_promotion(request: GroupPromotionRequest, bot, session: AsyncSession):
     targets = (await session.scalars(
-        select(Group).where(Group.is_active.is_(True), Group.id != request.group_id)
+        select(Group)
+        .join(GroupPromotionOptIn, GroupPromotionOptIn.group_id == Group.id)
+        .where(
+            Group.is_active.is_(True),
+            GroupPromotionOptIn.enabled.is_(True),
+            Group.id != request.group_id,
+        )
     )).all()
     if not targets:
         return 0, 0
