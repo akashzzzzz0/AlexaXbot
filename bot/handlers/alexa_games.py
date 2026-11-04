@@ -50,12 +50,31 @@ async def target_from_reply(message: Message, session: AsyncSession):
             User(id=tg.id, telegram_id=tg.id, username=tg.username, first_name=tg.first_name or "User", last_name=tg.last_name, is_bot=tg.is_bot),
             User, User.id == tg.id,
         )
+        # A user first discovered through a replied-to group message also
+        # receives the same one-time 200-coin starter wallet.
+        await _insert_or_get(
+            session, Wallet(user_id=tg.id, balance=200, bank_balance=0),
+            Wallet, Wallet.user_id == tg.id,
+        )
     return row
 
 @router.message(Command("bal"))
 async def legacy_balance(message: Message, _: callable, db_session: AsyncSession, db_user, **kwargs):
-    wallet = await get_or_create_wallet(db_session, db_user.id)
-    await message.reply(f"👛 <b>Balance</b>\nPocket: {format_number(wallet.balance or 0)} coins\nBank: {format_number(wallet.bank_balance or 0)} coins", parse_mode="HTML")
+    target = await target_from_reply(message, db_session) if message.reply_to_message else None
+    if message.reply_to_message and not target:
+        await message.reply("I couldn't identify that player. Reply to a human user's message with /bal.")
+        return
+    account = target or db_user
+    wallet = await get_or_create_wallet(db_session, account.id)
+    if target:
+        label = escape(target.first_name or "Player")
+        heading = f"👛 <b>{label}'s Balance</b>"
+    else:
+        heading = "👛 <b>Your Balance</b>"
+    await message.reply(
+        f"{heading}\nPocket: {format_number(wallet.balance or 0)} coins\nBank: {format_number(wallet.bank_balance or 0)} coins",
+        parse_mode="HTML",
+    )
 
 @router.message(Command("protect"))
 async def protect(message: Message, _: callable, db_session: AsyncSession, db_user, **kwargs):
@@ -113,30 +132,57 @@ async def rob(message: Message, db_session: AsyncSession, db_user, **kwargs):
     if target.id == db_user.id or target.is_bot:
         await message.reply("Choose another human player.")
         return
+
     victim_profile = await profile(db_session, target.id)
     now = datetime.now(timezone.utc)
-    if victim_profile.protection_until and victim_profile.protection_until.replace(tzinfo=timezone.utc) > now:
-        await message.reply("🛡 That player is protected.")
-        return
+    protected_until = victim_profile.protection_until
+    if protected_until:
+        if protected_until.tzinfo is None:
+            protected_until = protected_until.replace(tzinfo=timezone.utc)
+        if protected_until > now:
+            await message.reply("🛡 That player is protected.")
+            return
+
     robber = await profile(db_session, db_user.id)
-    if robber.last_rob_at and (now - robber.last_rob_at.replace(tzinfo=timezone.utc)).total_seconds() < 3600:
-        await message.reply("Rob cooldown: try again in an hour.")
-        return
-    robber.last_rob_at = now
-    # A valid rob attempt succeeds when the target is unprotected and has coins.
-    # The one-hour cooldown limits repeated stealing.
+    if robber.last_rob_at:
+        last_rob = robber.last_rob_at
+        if last_rob.tzinfo is None:
+            last_rob = last_rob.replace(tzinfo=timezone.utc)
+        remaining = 3600 - int((now - last_rob).total_seconds())
+        if remaining > 0:
+            await message.reply(f"⏳ Rob cooldown: try again in {format_duration(remaining)}.")
+            return
+
+    # Check the target before starting cooldown. A successful attempt takes
+    # up to 150 pocket coins; 10% is deducted and the robber receives 90%.
     victim_wallet = await get_or_create_wallet(db_session, target.id)
-    amount = min(max(0, victim_wallet.balance or 0), settings.MAX_ROB_AMOUNT, max(1, (victim_wallet.balance or 0) // 5))
-    if amount <= 0:
-        await message.reply("That player has no pocket coins to rob.")
+    target_balance = max(0, victim_wallet.balance or 0)
+    if target_balance <= 0:
+        await message.reply(f"That player has no pocket coins. Current balance: {format_number(target_balance)}.")
         return
-    ok, _ = await deduct_coins(db_session, target.id, amount, "robbed", f"Robbed by {db_user.id}")
-    if ok:
-        await add_coins(db_session, db_user.id, amount, "rob_success", f"Robbed user {target.id}")
-        robber.successful_robs = (robber.successful_robs or 0) + 1
-        await message.reply(f"💰 You stole {amount} virtual coins from {escape(target.first_name)}.")
-    else:
+
+    amount = min(150, settings.MAX_ROB_AMOUNT, target_balance)
+    ok, _ = await deduct_coins(
+        db_session, target.id, amount, "robbed",
+        f"Robbed by {db_user.id}; 10% game deduction",
+    )
+    if not ok:
         await message.reply("Rob failed; target balance changed. Try again.")
+        return
+
+    tax = amount // 10
+    gained = amount - tax
+    await add_coins(
+        db_session, db_user.id, gained, "rob_success",
+        f"Robbed user {target.id}; {tax} coins deducted (10% game fee)",
+    )
+    robber.last_rob_at = now
+    robber.successful_robs = (robber.successful_robs or 0) + 1
+    await message.reply(
+        f"👤 <b>{escape(db_user.first_name or 'Player')} robbed {amount} coins from {escape(target.first_name or 'Player')}.</b>\n"
+        f"💰 Gained {gained} coins, +0 XP after 10% deduction.",
+        parse_mode="HTML",
+    )
 
 @router.message(Command("revive"))
 async def revive(message: Message, db_session: AsyncSession, db_user, **kwargs):
