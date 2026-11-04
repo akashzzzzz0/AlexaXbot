@@ -477,6 +477,34 @@ async def _ask_ollama(
     return answer
 
 
+async def _is_owner_group_message(message: Message) -> bool:
+    """Match ordinary group messages sent by the configured bot owner only."""
+    owner_id = settings.effective_owner_id
+    if not owner_id or not message.from_user or message.from_user.is_bot:
+        return False
+    if message.from_user.id != owner_id:
+        return False
+    # Keep existing slash-command handlers working as before.
+    return not (message.text or "").lstrip().startswith("/")
+
+
+@router.message(
+    F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}),
+    F.text,
+    _is_owner_group_message,
+)
+async def alexa_owner_boss_reply(message: Message) -> None:
+    """Acknowledge every ordinary text message from the owner in any group."""
+    try:
+        await message.reply("Yes Boss 👑")
+    except Exception as exc:
+        logger.warning(
+            "Alexa owner acknowledgement failed for chat_id=%s: %s",
+            message.chat.id,
+            type(exc).__name__,
+        )
+
+
 @router.message(
     F.chat.type.in_({ChatType.PRIVATE, ChatType.GROUP, ChatType.SUPERGROUP}),
     F.text,
