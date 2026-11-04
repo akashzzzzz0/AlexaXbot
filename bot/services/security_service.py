@@ -29,7 +29,40 @@ LINK_PATTERN = re.compile(
     re.IGNORECASE,
 )
 PHONE_PATTERN = re.compile(r"(?:\+?\d[\d\s\-]{7,}\d)")
-NSFW_WORDS = {"nsfw", "porn", "xxx", "sex", "nude", "naked"}
+# Text/caption keyword screening. Keep word boundaries so ordinary words such as
+# "classic" do not trigger on fragments like "ass".
+NSFW_WORDS = {
+    "nsfw", "porn", "porno", "xxx", "sex", "nude", "nudes", "naked",
+    "hentai", "erotic", "onlyfans", "sexual content",
+}
+# Common English, Hindi, and Roman Urdu abuse terms. This is a practical
+# moderation list, not an exhaustive dictionary; group admins can still use
+# Telegram permissions and custom blocklists for local slang.
+ABUSE_WORDS = {
+    "fuck", "fucking", "fucked", "motherfucker", "mf", "shit", "bullshit",
+    "bitch", "bastard", "asshole", " asshole", "dickhead", "dick", "piss off",
+    "son of a bitch", "cunt", "slut", "whore", "idiot", "moron",
+    "madarchod", "mc", "behenchod", "bc", "bhenchod", "bhosdike", "bhosdi",
+    "chutiya", "chutiye", " chut", "gaand", "gandu", "lodu", "lund",
+    "randi", "harami", "kamina", "kaminey", " kutte", "saala", "saali",
+    "bsdk", "bkl", "mkc", "lawde", "lavde", "jhatu", "bakchod",
+    "gadha", "ullu", "kam**na",
+    "حرامی", "بکواس", "کمینہ", "کمینی", "بےوقوف", "چوتیا",
+    "मादरचोद", "बहनचोद", "भोसड़ी", "चूतिया", "गांडू", "हरामी",
+}
+def _moderation_text(text: str) -> str:
+    return re.sub(r"[^\\w]+", " ", (text or "").casefold(), flags=re.UNICODE).strip()
+
+def _contains_word_set(text: str, words: set[str]) -> bool:
+    normalized = _moderation_text(text)
+    if not normalized:
+        return False
+    padded = f" {normalized} "
+    for word in words:
+        candidate = _moderation_text(word)
+        if candidate and f" {candidate} " in padded:
+            return True
+    return False
 AD_WORDS = {"subscribe", "follow my channel", "join my channel", "promo", "promotion", "advertisement", "buy now", "limited offer", "dm me", "earn money fast"}
 CRYPTO_WORDS = {"crypto", "bitcoin", "ethereum", "usdt", "airdrop", "wallet connect", "seed phrase", "private key"}
 _recent_texts = defaultdict(deque)
@@ -72,8 +105,11 @@ def contains_scam(text: str) -> bool:
 
 
 def contains_nsfw(text: str) -> bool:
-    lower = text.lower()
-    return any(word in lower for word in NSFW_WORDS)
+    return _contains_word_set(text, NSFW_WORDS)
+
+
+def contains_abuse(text: str) -> bool:
+    return _contains_word_set(text, ABUSE_WORDS)
 
 
 def count_emojis(text: str) -> int:
@@ -148,8 +184,11 @@ async def check_message_violations(
         violations.append("suspicious_username")
     if security.anti_fake and not message.from_user.username and re.search(r"https?://|t\.me/|\+\d{7,}", text.lower()):
         violations.append("suspicious_account")
-    if security.anti_nsfw and contains_nsfw(text):
-        violations.append("nsfw")
+    if security.anti_nsfw:
+        if contains_nsfw(text):
+            violations.append("nsfw")
+        elif contains_abuse(text):
+            violations.append("abuse")
     if security.anti_emoji_spam and count_emojis(text) > (security.anti_emoji_limit or 10):
         violations.append("emoji_spam")
     if security.anti_mention_spam and count_mentions(text) > (security.anti_mention_limit or 5):
