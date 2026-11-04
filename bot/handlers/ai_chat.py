@@ -1,4 +1,4 @@
-"""Mention/reply/greeting-based Ollama-backed chat for ALEXA groups.
+"""Open, all-member Ollama-backed chat and message reactions for ALEXA groups.
 
 ALEXA stays silent on missing configuration, API errors, or network failures.
 """
@@ -53,7 +53,7 @@ def _detect_user_gender_style(history, current_text: str) -> str:
 def _reaction_for_text(text: str) -> str | None:
     """Choose a varied, context-appropriate reaction occasionally."""
     value = re.sub(r"\s+", " ", text.casefold()).strip()
-    if not value or len(value) > 1500:
+    if not value:
         return None
 
     options = [
@@ -114,9 +114,13 @@ async def _maybe_react(message: Message) -> None:
             message_id=message.message_id,
             reaction=[ReactionTypeEmoji(emoji=emoji)],
         )
-    except Exception:
-        # Reactions are optional; unsupported chat permissions must not affect chat.
-        pass
+    except Exception as exc:
+        # Keep chat flowing, but leave a useful diagnostic when Telegram rejects reactions.
+        logger.debug(
+            "Alexa message reaction unavailable for chat_id=%s: %s",
+            message.chat.id,
+            type(exc).__name__,
+        )
 
 
 # Emotion-aware sticker selection from the public pack configured below.
@@ -359,7 +363,7 @@ def _should_smart_reply(message: Message, text: str) -> bool:
 
 
 async def is_alexa_trigger(message: Message) -> bool:
-    """Trigger direct chat normally and selectively sample group messages for smart replies."""
+    """Trigger every ordinary human text message in groups and private chats."""
     global _bot_username
     text = (message.text or "").strip()
     if not text or not message.from_user or message.from_user.is_bot:
