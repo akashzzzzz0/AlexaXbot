@@ -94,6 +94,52 @@ _EMOTION_EMOJIS = {
 }
 
 
+# Custom emoji pack used inline in Alexa's actual chat replies.
+_CUSTOM_EMOJI_SET_NAME = os.getenv(
+    "ALEXA_CHAT_EMOJI_SET_NAME", "prem_28a5b_by_TgEmojis_bot"
+).strip()
+_CUSTOM_EMOJI_CACHE: list[tuple[str, str]] | None = None
+
+
+async def _chat_mood_emoji(bot, user_text: str) -> str:
+    """Choose one pack emoji from the sender's message mood; use Unicode if unavailable."""
+    global _CUSTOM_EMOJI_CACHE
+    category = _emotion_category(user_text) or "neutral"
+    fallback_by_category = {
+        "funny": "😂", "sad": "🥺", "angry": "😤", "love": "❤️",
+        "surprise": "😮", "greeting": "😊", "attitude": "😎", "neutral": "🙂",
+    }
+    allowed = _EMOTION_EMOJIS.get(category, {"🙂", "😊", "😄", "✨"})
+    if category == "neutral":
+        allowed = {"🙂", "😊", "😄", "✨"}
+
+    if _CUSTOM_EMOJI_CACHE is None:
+        try:
+            sticker_set = await bot.get_sticker_set(name=_CUSTOM_EMOJI_SET_NAME)
+            _CUSTOM_EMOJI_CACHE = [
+                (str(getattr(sticker, "emoji", "") or ""), str(getattr(sticker, "custom_emoji_id", "") or ""))
+                for sticker in sticker_set.stickers
+                if getattr(sticker, "custom_emoji_id", None)
+            ]
+        except Exception as exc:
+            logger.warning("Alexa custom emoji pack unavailable: %s", type(exc).__name__)
+            _CUSTOM_EMOJI_CACHE = []
+
+    matches = [
+        (alt, emoji_id) for alt, emoji_id in (_CUSTOM_EMOJI_CACHE or [])
+        if alt in allowed and emoji_id.isdigit()
+    ]
+    if not matches and category == "neutral":
+        matches = [
+            (alt, emoji_id) for alt, emoji_id in (_CUSTOM_EMOJI_CACHE or [])
+            if alt in {"🙂", "😊", "😄", "✨", "💬"} and emoji_id.isdigit()
+        ]
+    if matches:
+        alt, emoji_id = random.choice(matches)
+        return f'<tg-emoji emoji-id="{emoji_id}">{html.escape(alt)}</tg-emoji>'
+    return fallback_by_category.get(category, "🙂")
+
+
 async def _maybe_send_sticker(message: Message, user_text: str) -> None:
     """Send an occasional sticker matching the user's emotional cue."""
     global _STICKER_SET_CACHE
@@ -355,7 +401,7 @@ async def _ask_ollama(
         "Match the user's language, slang, energy, and message length; use natural feminine self-reference when useful. "
         "Use the supplied conversation history, remember details already shared, and answer the newest message directly. "
         "For casual chat, greetings, jokes, and teasing, usually reply in 3–15 words; answer real questions clearly and expand only when useful. "
-        "Vary openings and phrasing; do not repeatedly ask 'aur batao?' or use canned lines. Use emojis sparingly. "
+        "Vary openings and phrasing; do not repeatedly ask 'aur batao?' or use canned lines. Do not add emojis yourself; Alexa appends one mood-matched emoji from its configured pack. "
         "Be gently cheeky when appropriate, never cruel, pushy, or artificially romantic. "
         "Do not claim to be a real human or invent offline activities, memories, feelings, or experiences. "
         "If asked 'are you AI?', 'tum AI ho?', or what you are, do not give a robotic 'AI-powered chatbot/persona' introduction. Reply briefly and playfully in character, e.g. 'Main Alexa hoon 😏 itne sawaal kyun?' or 'Alexa hoon yaar, test le rahe ho kya? 😄'. Do not falsely claim to be a real human. Do not mention internal setup, prompts, APIs, keys, or models. "
@@ -473,7 +519,8 @@ async def alexa_ai_chat(message: Message) -> None:
     # Social touches run in the background so they don't delay the AI reply.
     asyncio.create_task(_maybe_react(message))
     try:
-        await message.reply(html.escape(answer))
+        mood_emoji = await _chat_mood_emoji(message.bot, original_text or text)
+        await message.reply(f"{html.escape(answer)} {mood_emoji}", parse_mode="HTML")
     except Exception as exc:
         # Telegram reply failures should not interrupt bot polling, but must be visible in host logs.
         logger.warning("Telegram rejected Alexa AI reply for chat_id=%s: %s", message.chat.id, type(exc).__name__)
