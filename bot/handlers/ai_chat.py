@@ -86,7 +86,7 @@ def _reaction_for_text(text: str) -> str | None:
     F.text,
 )
 async def alexa_group_message_reactions(message: Message) -> None:
-    """React to suitable group messages even when Alexa does not reply."""
+    """Only consider occasional reactions to messages explicitly mentioning Alexa."""
     if not message.from_user or message.from_user.is_bot:
         return
     if (message.text or "").lstrip().startswith("/"):
@@ -94,12 +94,54 @@ async def alexa_group_message_reactions(message: Message) -> None:
     asyncio.create_task(_maybe_react(message))
 
 
+async def _explicitly_mentions_alexa(message: Message) -> bool:
+    """Require a real @Alexa mention; ordinary group chat never triggers reactions."""
+    global _bot_username
+    for entity in (message.entities or []):
+        entity_type = getattr(entity.type, "value", entity.type)
+        if entity_type == "text_mention" and entity.user and entity.user.id == message.bot.id:
+            return True
+
+    if _bot_username is None:
+        try:
+            me = await message.bot.get_me()
+            _bot_username = (me.username or "").casefold()
+        except Exception:
+            _bot_username = ""
+    if not _bot_username:
+        return False
+
+    text = message.text or ""
+    return bool(re.search(
+        rf"(?<![\\w@])@{re.escape(_bot_username)}(?![A-Za-z0-9_])",
+        text,
+        re.IGNORECASE,
+    ))
+
+
+_last_reaction_at: dict[tuple[int, int], float] = {}
+_REACTION_USER_COOLDOWN_SECONDS = 45.0
+_REACTION_CHANCE = 0.22
+
+
 async def _maybe_react(message: Message) -> None:
     if not message.from_user or message.from_user.is_bot:
         return
-    emoji = _reaction_for_text(message.text or message.caption or "")
-    if not emoji:
+    if not await _explicitly_mentions_alexa(message):
         return
+
+    # Even a mention is not enough: only high-signal messages qualify, and
+    # reactions remain occasional with a per-user cooldown.
+    text = message.text or message.caption or ""
+    emoji = _reaction_for_text(text)
+    if not emoji or random.random() > _REACTION_CHANCE:
+        return
+
+    reaction_key = (message.chat.id, message.from_user.id)
+    now = time.monotonic()
+    if now - _last_reaction_at.get(reaction_key, 0.0) < _REACTION_USER_COOLDOWN_SECONDS:
+        return
+    _last_reaction_at[reaction_key] = now
     try:
         await message.bot.set_message_reaction(
             chat_id=message.chat.id,
@@ -107,7 +149,6 @@ async def _maybe_react(message: Message) -> None:
             reaction=[ReactionTypeEmoji(emoji=emoji)],
         )
     except Exception as exc:
-        # Keep chat flowing, but leave a useful diagnostic when Telegram rejects reactions.
         logger.debug(
             "Alexa message reaction unavailable for chat_id=%s: %s",
             message.chat.id,
