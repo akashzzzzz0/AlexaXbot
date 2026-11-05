@@ -378,6 +378,20 @@ def _looks_like_smart_reply_candidate(text: str) -> bool:
     return len(value.split()) >= 7 or len(value) >= 45
 
 
+def _smart_group_reply_fallback(user_text: str) -> str:
+    """Never leave a relevant unaddressed group message unanswered when the model opts out."""
+    value = (user_text or "").strip().casefold()
+    if _GREETING_RE.match(value):
+        return random.choice((
+            "Hellooo! Kya haal hain?",
+            "Oye hello! Sab khairiyat?",
+            "Hii! Kya scene hai aaj?",
+        ))
+    if re.search(r"\\b(help|madad|madad chahiye|batao|guide)\\b", value):
+        return "Haan bolo, kis cheez mein help chahiye?"
+    return "Haan, bolo—kya baat hai?"
+
+
 def _should_smart_reply(message: Message, text: str) -> bool:
     """Allow one model-judged, unaddressed reply per group/user cooldown."""
     if not _looks_like_smart_reply_candidate(text):
@@ -551,6 +565,12 @@ async def _ask_ollama(
 )
 async def alexa_ai_chat(message: Message) -> None:
     text = (message.text or "").strip()
+    if message.chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}:
+        logger.info(
+            "Alexa group chat handler received message",
+            extra={"chat_id": message.chat.id, "user_id": message.from_user.id if message.from_user else None,
+                   "message_id": message.message_id},
+        )
     prefix_match = _ALEXA_PREFIX_RE.match(text)
     if prefix_match:
         text = prefix_match.group(1).strip() or "Say hello and start a friendly conversation."
@@ -611,7 +631,19 @@ async def alexa_ai_chat(message: Message) -> None:
         return
 
     # Never send a fallback/fictional AI response when Ollama is unavailable.
-    if not answer or answer.strip().casefold() == "__ignore__":
+    if smart_mode and (not answer or answer.strip().casefold() == "__ignore__"):
+        answer = _smart_group_reply_fallback(original_text or text)
+        logger.warning(
+            "Alexa smart group reply used deterministic fallback",
+            extra={"chat_id": message.chat.id, "user_id": message.from_user.id},
+        )
+    if not answer:
+        logger.warning(
+            "Alexa AI returned no usable reply",
+            extra={"chat_id": message.chat.id, "user_id": message.from_user.id},
+        )
+        return
+    if answer.strip().casefold() == "__ignore__":
         return
 
     history.append(("user", text))
