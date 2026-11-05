@@ -740,14 +740,14 @@ async def owner_global_controls(callback: CallbackQuery, _: callable, db_session
     builder.button(text="👥 Per-Group Settings", callback_data="owner:groups")
     builder.button(text="◀️ Owner Panel", callback_data="owner:menu")
     builder.adjust(1)
-    summary = "\\n".join(
+    summary = "\n".join(
         f"{label}: <b>{format_number(enabled_counts[field])}/{format_number(total)}</b> groups"
         for field, label in fields.items()
     )
     await callback.message.edit_text(
-        "🌐 <b>GLOBAL CONTROLS</b>\\n\\n"
-        f"Active groups: <b>{format_number(total)}</b>\\n"
-        f"{summary}\\n\\n"
+        "🌐 <b>GLOBAL CONTROLS</b>\n\n"
+        f"Active groups: <b>{format_number(total)}</b>\n"
+        f"{summary}\n\n"
         "Each control applies to all active registered groups. If every group is ON, tap to turn it OFF everywhere; otherwise tap to turn it ON everywhere. "
         "Lockdown requires Delete Messages permission in each group.",
         parse_mode="HTML", reply_markup=builder.as_markup()
