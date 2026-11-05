@@ -133,6 +133,18 @@ async def check_message_violations(
     violations = []
     text = message.text or message.caption or ""
 
+    # Telegram can hide a destination behind clickable text (text_link).
+    # Include hidden destinations and URL entities in link detection.
+    entities = list(message.entities or []) + list(message.caption_entities or [])
+    entity_links = []
+    for entity in entities:
+        entity_type = getattr(entity.type, "value", entity.type)
+        if entity_type == "url":
+            entity_links.append("url_entity")
+        elif entity_type == "text_link" and getattr(entity, "url", None):
+            entity_links.append(entity.url)
+    link_scan_text = " ".join([text, *entity_links])
+
     # ALEXA must not moderate its own outbound messages (for example, its
     # official referral/promotion links). Other bots remain subject to the
     # configured group bot/content locks.
@@ -164,7 +176,7 @@ async def check_message_violations(
     # both kinds is still caught by both relevant controls.
     if security.anti_invite and contains_invite_link(text):
         violations.append("invite_link")
-    if security.anti_link and contains_non_invite_link(text):
+    if security.anti_link and (contains_link(link_scan_text) or "url_entity" in entity_links):
         violations.append("link")
     if security.anti_phone and contains_phone_number(text):
         violations.append("phone_number")
@@ -199,7 +211,7 @@ async def check_message_violations(
     # enforced even when the message is otherwise harmless.
     if security.lock_text and message.text and not message.caption:
         violations.append("locked_text")
-    if security.lock_links and contains_link(text):
+    if security.lock_links and (contains_link(link_scan_text) or "url_entity" in entity_links):
         violations.append("locked_link")
     if security.lock_bots and message.from_user and message.from_user.is_bot:
         violations.append("locked_bot")
