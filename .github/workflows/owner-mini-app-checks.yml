@@ -35,7 +35,7 @@ jobs:
               "owner:broadcast", "owner:promotion", "owner:promo_requests",
               "owner:group_message", "owner:referrals", "owner:ai",
               "owner:global_controls", "owner:emergency", "owner:banall",
-              "owner:settings",
+              "owner:settings", "owner:maintenance",
           ]
           missing_buttons = [value for value in required if f'callback_data="{value}"' not in owner]
           if missing_buttons:
