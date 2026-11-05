@@ -387,7 +387,7 @@ def _smart_group_reply_fallback(user_text: str) -> str:
             "Oye hello! Sab khairiyat?",
             "Hii! Kya scene hai aaj?",
         ))
-    if re.search(r"\\b(help|madad|madad chahiye|batao|guide)\\b", value):
+    if re.search(r"\b(help|madad|madad chahiye|batao|guide)\b", value):
         return "Haan bolo, kis cheez mein help chahiye?"
     return "Haan, bolo—kya baat hai?"
 
