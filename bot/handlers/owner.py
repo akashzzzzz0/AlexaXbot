@@ -1,10 +1,9 @@
-import os
 import asyncio
 import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from aiogram import Router, F, Bot
-from aiogram.types import CallbackQuery, Message, BotCommand, BotCommandScopeDefault, BotCommandScopeChat, ReplyParameters, WebAppInfo
+from aiogram.types import CallbackQuery, Message, BotCommand, BotCommandScopeDefault, BotCommandScopeChat, ReplyParameters
 from aiogram.exceptions import TelegramRetryAfter, TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -13,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
 from sqlalchemy.exc import IntegrityError
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from bot.database.models import User, Group, GroupMember, GroupSettings, ActionLog, SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig, ScamReview, InboxMessage, GlobalSetting, GroupPromotionOptIn
+from bot.database.models import User, Group, GroupMember, GroupSettings, ActionLog, SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig, ScamReview, InboxMessage, GlobalSetting, GroupPromotionOptIn, Referral, AffiliateRequest
 from bot.keyboards.main_menu import back_button_kb
 from bot.config import settings
 from bot.utils.helpers import format_number
@@ -71,7 +70,7 @@ def is_owner(user_id: int) -> bool:
 
 
 def owner_kb(_=None) -> object:
-    """Restore the native Telegram Owner Panel; keep the Mini App as an optional shortcut."""
+    """Build the complete native Telegram Owner Panel; no web Mini App launcher."""
     builder = InlineKeyboardBuilder()
     builder.button(text="📊 Statistics", callback_data="owner:stats")
     builder.button(text="🩺 Bot Health", callback_data="owner:health")
@@ -83,18 +82,14 @@ def owner_kb(_=None) -> object:
     builder.button(text="📩 User Messages / Inbox", callback_data="owner:inbox")
     builder.button(text="📨 DM Broadcast", callback_data="owner:broadcast")
     builder.button(text="📣 Group Promotion", callback_data="owner:promotion")
+    builder.button(text="✉️ Message Selected Groups", callback_data="owner:group_message")
+    builder.button(text="🎁 Referrals / Stars", callback_data="owner:referrals")
+    builder.button(text="🧠 Global AI Control", callback_data="owner:ai")
     builder.button(text="🌐 Global Controls", callback_data="owner:global_controls")
     builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
     builder.button(text="🔨 Ban All", callback_data="owner:banall")
     builder.button(text="⚙️ Owner Settings", callback_data="owner:settings")
-    # A blank host variable must not disable the secure Mini App launcher.
-    owner_mini_app_url = (
-        os.getenv("OWNER_MINI_APP_URL", "").strip()
-        or "https://alexa-bot.fadehost.app/owner"
-    )
-    if owner_mini_app_url.startswith("https://"):
-        builder.button(text="💎 Open VIP Owner Mini App", web_app=WebAppInfo(url=owner_mini_app_url))
-    builder.adjust(2, 2, 2, 2, 2, 2, 2, 1)
+    builder.adjust(2, 2, 2, 2, 2, 2, 2, 2, 1)
     return builder.as_markup()
 
 # NOTE: this function is intentionally called only by the bot owner.
@@ -2217,6 +2212,95 @@ async def owner_inbox_direct_send(message: Message, state: FSMContext, db_sessio
     finally:
         await state.clear()
 
+
+
+@router.callback_query(F.data == "owner:referrals")
+async def owner_referrals(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Not available.", show_alert=True)
+        return
+
+    total = await db_session.scalar(select(func.count()).select_from(Referral)) or 0
+    rewarded = await db_session.scalar(
+        select(func.count()).select_from(Referral).where(Referral.reward_given.is_(True))
+    ) or 0
+    pending = (await db_session.scalars(
+        select(AffiliateRequest).where(AffiliateRequest.status == "pending")
+        .order_by(AffiliateRequest.created_at.asc()).limit(12)
+    )).all()
+    top = (await db_session.execute(
+        select(User, func.count(Referral.id).label("ref_count"))
+        .join(Referral, Referral.referrer_id == User.id)
+        .group_by(User.id).order_by(desc(func.count(Referral.id))).limit(5)
+    )).all()
+
+    lines = [
+        "🎁 <b>REFERRALS & REWARDS</b>",
+        f"Recorded referrals: <b>{format_number(total)}</b>",
+        f"Rewards marked given: <b>{format_number(rewarded)}</b>",
+        f"Pending Stars/Premium requests: <b>{len(pending)}</b>",
+    ]
+    if top:
+        lines.extend(["", "<b>Top referrers</b>"])
+        lines.extend(
+            f"• {escape(user.first_name or 'User')} · <code>{user.id}</code> — {count}"
+            for user, count in top
+        )
+    if pending:
+        lines.extend(["", "<b>Pending requests</b>"])
+        for item in pending:
+            user = await db_session.get(User, item.user_id)
+            name = escape(user.first_name if user else f"User {item.user_id}")
+            kind = "Stars" if item.request_type == "stars" else "Telegram Premium"
+            amount = f" · {item.requested_stars} Stars" if item.requested_stars else ""
+            lines.append(f"• #{item.id} · {name} · {kind}{amount}")
+    else:
+        lines.extend(["", "No pending reward requests."])
+
+    builder = InlineKeyboardBuilder()
+    for item in pending:
+        kind = "Stars" if item.request_type == "stars" else "Premium"
+        builder.button(text=f"✅ Approve #{item.id} ({kind})", callback_data=f"owner:affiliate:{item.id}:approved")
+        builder.button(text=f"❌ Reject #{item.id}", callback_data=f"owner:affiliate:{item.id}:rejected")
+    builder.button(text="🔄 Refresh", callback_data="owner:referrals")
+    builder.button(text="👑 Owner Panel", callback_data="owner:menu")
+    builder.adjust(2, 2, 1, 1)
+    await callback.message.edit_text("\\n".join(lines), parse_mode="HTML", reply_markup=builder.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner:affiliate:"))
+async def owner_affiliate_review(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Not available.", show_alert=True)
+        return
+    try:
+        _, _, request_id_text, status = callback.data.split(":", 3)
+        request_id = int(request_id_text)
+    except (ValueError, TypeError):
+        await callback.answer("Invalid request.", show_alert=True)
+        return
+    if status not in {"approved", "rejected"}:
+        await callback.answer("Invalid review status.", show_alert=True)
+        return
+    item = await db_session.get(AffiliateRequest, request_id)
+    if not item or item.status != "pending":
+        await callback.answer("Pending request not found.", show_alert=True)
+        return
+    item.status = status
+    item.admin_reply = "Reviewed by the owner in Telegram Owner Panel"
+    await db_session.commit()
+    try:
+        kind = "Stars" if item.request_type == "stars" else "Telegram Premium"
+        await callback.bot.send_message(
+            item.user_id,
+            f"👑 Your {kind} reward request #{item.id} has been {status}. "
+            + ("The owner will arrange the approved reward separately." if status == "approved" else "You can contact the owner if you need more information.")
+        )
+    except Exception as exc:
+        logger.warning("Owner affiliate decision saved but user notification failed", request_id=item.id, error=str(exc))
+    await callback.answer(f"Request #{request_id} {status}.", show_alert=True)
+    await owner_referrals(callback, db_session)
 
 
 @router.callback_query(F.data.startswith("owner:"))
