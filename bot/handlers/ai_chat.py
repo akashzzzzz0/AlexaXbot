@@ -159,6 +159,8 @@ async def _maybe_react(message: Message) -> None:
 # Emotion-aware sticker selection from the public pack configured below.
 _STICKER_SET_NAME = os.getenv("ALEXA_STICKER_SET_NAME", "video6104468803_by_vzrobot").strip()
 _STICKER_SET_CACHE: list[tuple[str, str]] | None = None
+_last_sticker_at: dict[tuple[int, int], float] = {}
+_STICKER_USER_COOLDOWN_SECONDS = 90.0
 
 
 def _emotion_category(text: str) -> str | None:
@@ -169,7 +171,7 @@ def _emotion_category(text: str) -> str | None:
         ("angry", r"angry|gussa|ghussa|naraz|😡|🤬|😠|😤"),
         ("love", r"thanks|thank you|shukriya|pyaar|pyar|cute|❤️|😍|🥰|😘|💕"),
         ("surprise", r"wow|omg|shocked|surprised|😮|😱|🤯|😳"),
-        ("greeting", r"^\s*(hi+|hello+|hey+|salam|aoa|bye+|good night|good morning)\b"),
+        ("greeting", r"^\s*(?:hi+|hello+|helo+|hey+|salam|assalamualaikum|aoa|bye+|good\s+(?:morning|afternoon|evening|night)|good day|gm|gn|morning|afternoon|evening)\b"),
         ("attitude", r"attitude|boss|savage|swag|😎|😏|🔥"),
     )
     for category, pattern in rules:
@@ -239,7 +241,13 @@ async def _maybe_send_sticker(message: Message, user_text: str) -> None:
     """Send an occasional sticker matching the user's emotional cue."""
     global _STICKER_SET_CACHE
     category = _emotion_category(user_text)
-    if not category or random.random() >= 0.35:
+    if not category or random.random() >= 0.50:
+        return
+    if not message.from_user or message.from_user.is_bot:
+        return
+    sticker_key = (message.chat.id, message.from_user.id)
+    now = time.monotonic()
+    if now - _last_sticker_at.get(sticker_key, 0.0) < _STICKER_USER_COOLDOWN_SECONDS:
         return
     if _STICKER_SET_CACHE is None:
         try:
@@ -258,6 +266,7 @@ async def _maybe_send_sticker(message: Message, user_text: str) -> None:
     if matching:
         try:
             await message.answer_sticker(random.choice(matching))
+            _last_sticker_at[sticker_key] = now
         except Exception:
             pass
         return
@@ -275,6 +284,7 @@ async def _maybe_send_sticker(message: Message, user_text: str) -> None:
     if file_ids:
         try:
             await message.answer_sticker(random.choice(file_ids))
+            _last_sticker_at[sticker_key] = now
         except Exception:
             pass
 
@@ -356,7 +366,7 @@ _SMART_REPLY_USER_COOLDOWN_SECONDS = 45.0
 
 _GREETING_RE = re.compile(
     r"^\s*(?:hi+|hello+|helo+|hey+|salam|assalamualaikum|aoa|"
-    r"good\s+(?:morning|afternoon|evening|night)|gm|gn)(?:\b.*)?$",
+    r"good\s+(?:morning|afternoon|evening|night)|good\s+day|morning|afternoon|evening|gm|gn)(?:\b.*)?$",
     re.IGNORECASE,
 )
 _ALEXA_PREFIX_RE = re.compile(r"^\s*alexa\b[\s,!:.-]*(.*)$", re.IGNORECASE)
@@ -625,10 +635,19 @@ async def alexa_ai_chat(message: Message) -> None:
         )
     except (httpx.HTTPError, ValueError, TypeError) as exc:
         logger.warning("Alexa AI reply failed for chat_id=%s: %s", message.chat.id, type(exc).__name__)
-        return
+        # Basic greetings should never be silently ignored just because Ollama is
+        # temporarily unavailable. Keep this fallback limited to unaddressed group
+        # greetings; addressed/private AI requests still fail silently as before.
+        if smart_mode and _GREETING_RE.match(original_text or text):
+            answer = _smart_group_reply_fallback(original_text or text)
+        else:
+            return
     except Exception:
         logger.exception("Unexpected Alexa AI chat failure for chat_id=%s", message.chat.id)
-        return
+        if smart_mode and _GREETING_RE.match(original_text or text):
+            answer = _smart_group_reply_fallback(original_text or text)
+        else:
+            return
 
     # Never send a fallback/fictional AI response when Ollama is unavailable.
     if smart_mode and (not answer or answer.strip().casefold() == "__ignore__"):
