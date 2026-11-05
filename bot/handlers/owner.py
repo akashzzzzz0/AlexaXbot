@@ -78,18 +78,20 @@ def owner_kb(_=None) -> object:
     builder.button(text="📈 Group Activities", callback_data="owner:activities")
     builder.button(text="🔗 Group Links", callback_data="owner:links")
     builder.button(text="➕ Add Alexa to Groups", callback_data="owner:addgroups")
-    builder.button(text="👤 Users", callback_data="owner:users")
+    builder.button(text="👤 Active DM Users", callback_data="owner:users")
     builder.button(text="📩 User Messages / Inbox", callback_data="owner:inbox")
     builder.button(text="📨 DM Broadcast", callback_data="owner:broadcast")
-    builder.button(text="📣 Group Promotion", callback_data="owner:promotion")
+    builder.button(text="📨 Opt-in Group Message", callback_data="owner:promotion")
+    builder.button(text="🚀 Free Group Promotion Requests", callback_data="owner:promo_requests")
     builder.button(text="✉️ Message Selected Groups", callback_data="owner:group_message")
     builder.button(text="🎁 Referrals / Stars", callback_data="owner:referrals")
     builder.button(text="🧠 Global AI Control", callback_data="owner:ai")
     builder.button(text="🌐 Global Controls", callback_data="owner:global_controls")
     builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
     builder.button(text="🔨 Ban All", callback_data="owner:banall")
+    builder.button(text="🔧 Maintenance Mode", callback_data="owner:maintenance")
     builder.button(text="⚙️ Owner Settings", callback_data="owner:settings")
-    builder.adjust(2, 2, 2, 2, 2, 2, 2, 2, 1)
+    builder.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2)
     return builder.as_markup()
 
 # NOTE: this function is intentionally called only by the bot owner.
@@ -250,7 +252,8 @@ async def owner_settings(callback: CallbackQuery, _: callable, db_session: Async
     builder = InlineKeyboardBuilder()
     builder.button(text=f"{'🟢 Turn maintenance OFF' if _maintenance_mode else '🔧 Turn maintenance ON'}", callback_data="owner:maintenance")
     builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
-    builder.button(text="📣 Group Promotion", callback_data="owner:promotion")
+    builder.button(text="📨 Opt-in Group Message", callback_data="owner:promotion")
+    builder.button(text="🚀 Free Group Promotion Requests", callback_data="owner:promo_requests")
     builder.button(text="👥 Groups • Activity • Links • Permissions", callback_data="owner:groups")
     builder.button(text="◀️ Owner Panel", callback_data="owner:menu")
     builder.adjust(1, 2, 1, 1)
@@ -708,14 +711,20 @@ async def owner_global_controls(callback: CallbackQuery, _: callable, db_session
     if not is_owner(callback.from_user.id):
         await callback.answer("Not available.", show_alert=True); return
     groups = await _active_groups(db_session)
-    emergency_on = anti_spam_on = anti_flood_on = 0
+    fields = {
+        **{key: label for key, (label, _) in _owner_security_fields().items()},
+        "emergency_mode": "Emergency Lockdown",
+    }
+    enabled_counts = {field: 0 for field in fields}
     for group in groups:
-        security = await db_session.scalar(select(SecuritySettings).where(SecuritySettings.group_id == group.id))
+        security = await db_session.scalar(
+            select(SecuritySettings).where(SecuritySettings.group_id == group.id)
+        )
         if security:
-            emergency_on += int(bool(security.emergency_mode))
-            anti_spam_on += int(bool(security.anti_spam))
-            anti_flood_on += int(bool(security.anti_flood))
+            for field in fields:
+                enabled_counts[field] += int(bool(getattr(security, field, False)))
     total = len(groups)
+
     def toggle_label(name: str, enabled_count: int) -> str:
         if total and enabled_count == total:
             return f"🟢 {name}: ON · Tap to turn OFF"
@@ -724,25 +733,23 @@ async def owner_global_controls(callback: CallbackQuery, _: callable, db_session
         return f"🔴 {name}: OFF · Tap to turn ON"
 
     builder = InlineKeyboardBuilder()
-    for label, field, enabled_count in [
-        ("Anti-Spam", "anti_spam", anti_spam_on),
-        ("Anti-Flood", "anti_flood", anti_flood_on),
-        ("Lockdown", "emergency_mode", emergency_on),
-    ]:
+    for field, label in fields.items():
         builder.button(
-            text=toggle_label(label, enabled_count),
+            text=toggle_label(label, enabled_counts[field]),
             callback_data=f"owner:global_toggle:{field}",
         )
     builder.button(text="👥 Per-Group Settings", callback_data="owner:groups")
     builder.button(text="◀️ Owner Panel", callback_data="owner:menu")
     builder.adjust(1)
+    summary = "\n".join(
+        f"{label}: <b>{format_number(enabled_counts[field])}/{format_number(total)}</b> groups"
+        for field, label in fields.items()
+    )
     await callback.message.edit_text(
         "🌐 <b>GLOBAL CONTROLS</b>\n\n"
         f"Active groups: <b>{format_number(total)}</b>\n"
-        f"Anti-Spam enabled: <b>{format_number(anti_spam_on)}</b> groups\n"
-        f"Anti-Flood enabled: <b>{format_number(anti_flood_on)}</b> groups\n"
-        f"Emergency Lockdown enabled: <b>{format_number(emergency_on)}</b> groups\n\n"
-        "Each control is a single toggle for all active registered groups. If every group is ON, tap to turn it OFF everywhere; otherwise tap to turn it ON everywhere. "
+        f"{summary}\n\n"
+        "Each control applies to all active registered groups. If every group is ON, tap to turn it OFF everywhere; otherwise tap to turn it ON everywhere. "
         "Lockdown requires Delete Messages permission in each group.",
         parse_mode="HTML", reply_markup=builder.as_markup()
     )
@@ -759,7 +766,7 @@ async def owner_global_toggle(callback: CallbackQuery, _: callable, db_session: 
     except ValueError:
         await callback.answer("Invalid global setting.", show_alert=True)
         return
-    if field not in {"anti_spam", "anti_flood", "emergency_mode"}:
+    if field not in {*_owner_security_fields().keys(), "emergency_mode"}:
         await callback.answer("Invalid global setting.", show_alert=True)
         return
 
@@ -804,7 +811,7 @@ async def owner_global_set(callback: CallbackQuery, _: callable, db_session: Asy
         enabled = value_text == "1"
     except ValueError:
         await callback.answer("Invalid global setting.", show_alert=True); return
-    if field not in {"anti_spam", "anti_flood", "emergency_mode"} or value_text not in {"0", "1"}:
+    if field not in {*_owner_security_fields().keys(), "emergency_mode"} or value_text not in {"0", "1"}:
         await callback.answer("Invalid global setting.", show_alert=True); return
     groups = await _active_groups(db_session); changed = 0
     try:
@@ -1809,7 +1816,7 @@ async def owner_menu_back(callback: CallbackQuery, _: callable, **kwargs):
         "Broadcast • Promotion • Global Controls • Statistics\n"
         "Groups • Referrals • Ban All • Settings\n"
         "Maintenance • User List • User Messages • Emergency Controls\n\n"
-        "🔹 Select a module below. The native Telegram controls are restored; the Mini App remains an optional shortcut.",
+        "🔹 Select a module below. All owner controls are available directly in Telegram.",
         reply_markup=owner_kb(),
         parse_mode="HTML",
     )
