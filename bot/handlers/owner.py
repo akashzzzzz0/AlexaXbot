@@ -710,14 +710,20 @@ async def owner_global_controls(callback: CallbackQuery, _: callable, db_session
     if not is_owner(callback.from_user.id):
         await callback.answer("Not available.", show_alert=True); return
     groups = await _active_groups(db_session)
-    emergency_on = anti_spam_on = anti_flood_on = 0
+    fields = {
+        **{key: label for key, (label, _) in _owner_security_fields().items()},
+        "emergency_mode": "Emergency Lockdown",
+    }
+    enabled_counts = {field: 0 for field in fields}
     for group in groups:
-        security = await db_session.scalar(select(SecuritySettings).where(SecuritySettings.group_id == group.id))
+        security = await db_session.scalar(
+            select(SecuritySettings).where(SecuritySettings.group_id == group.id)
+        )
         if security:
-            emergency_on += int(bool(security.emergency_mode))
-            anti_spam_on += int(bool(security.anti_spam))
-            anti_flood_on += int(bool(security.anti_flood))
+            for field in fields:
+                enabled_counts[field] += int(bool(getattr(security, field, False)))
     total = len(groups)
+
     def toggle_label(name: str, enabled_count: int) -> str:
         if total and enabled_count == total:
             return f"🟢 {name}: ON · Tap to turn OFF"
@@ -726,25 +732,23 @@ async def owner_global_controls(callback: CallbackQuery, _: callable, db_session
         return f"🔴 {name}: OFF · Tap to turn ON"
 
     builder = InlineKeyboardBuilder()
-    for label, field, enabled_count in [
-        ("Anti-Spam", "anti_spam", anti_spam_on),
-        ("Anti-Flood", "anti_flood", anti_flood_on),
-        ("Lockdown", "emergency_mode", emergency_on),
-    ]:
+    for field, label in fields.items():
         builder.button(
-            text=toggle_label(label, enabled_count),
+            text=toggle_label(label, enabled_counts[field]),
             callback_data=f"owner:global_toggle:{field}",
         )
     builder.button(text="👥 Per-Group Settings", callback_data="owner:groups")
     builder.button(text="◀️ Owner Panel", callback_data="owner:menu")
     builder.adjust(1)
+    summary = "\\n".join(
+        f"{label}: <b>{format_number(enabled_counts[field])}/{format_number(total)}</b> groups"
+        for field, label in fields.items()
+    )
     await callback.message.edit_text(
-        "🌐 <b>GLOBAL CONTROLS</b>\n\n"
-        f"Active groups: <b>{format_number(total)}</b>\n"
-        f"Anti-Spam enabled: <b>{format_number(anti_spam_on)}</b> groups\n"
-        f"Anti-Flood enabled: <b>{format_number(anti_flood_on)}</b> groups\n"
-        f"Emergency Lockdown enabled: <b>{format_number(emergency_on)}</b> groups\n\n"
-        "Each control is a single toggle for all active registered groups. If every group is ON, tap to turn it OFF everywhere; otherwise tap to turn it ON everywhere. "
+        "🌐 <b>GLOBAL CONTROLS</b>\\n\\n"
+        f"Active groups: <b>{format_number(total)}</b>\\n"
+        f"{summary}\\n\\n"
+        "Each control applies to all active registered groups. If every group is ON, tap to turn it OFF everywhere; otherwise tap to turn it ON everywhere. "
         "Lockdown requires Delete Messages permission in each group.",
         parse_mode="HTML", reply_markup=builder.as_markup()
     )
@@ -761,7 +765,7 @@ async def owner_global_toggle(callback: CallbackQuery, _: callable, db_session: 
     except ValueError:
         await callback.answer("Invalid global setting.", show_alert=True)
         return
-    if field not in {"anti_spam", "anti_flood", "emergency_mode"}:
+    if field not in {*_owner_security_fields().keys(), "emergency_mode"}:
         await callback.answer("Invalid global setting.", show_alert=True)
         return
 
@@ -806,7 +810,7 @@ async def owner_global_set(callback: CallbackQuery, _: callable, db_session: Asy
         enabled = value_text == "1"
     except ValueError:
         await callback.answer("Invalid global setting.", show_alert=True); return
-    if field not in {"anti_spam", "anti_flood", "emergency_mode"} or value_text not in {"0", "1"}:
+    if field not in {*_owner_security_fields().keys(), "emergency_mode"} or value_text not in {"0", "1"}:
         await callback.answer("Invalid global setting.", show_alert=True); return
     groups = await _active_groups(db_session); changed = 0
     try:
