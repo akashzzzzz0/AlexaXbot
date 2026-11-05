@@ -404,6 +404,9 @@ async def main() -> None:
     # second capture middleware: it opened a competing SQLite write transaction
     # for every message and caused avoidable "database is locked" failures.
     from bot.middlewares.auto_delete import AutoDeleteCommandMiddleware
+    from bot.middlewares.anti_link import AntiLinkEnforcementMiddleware
+    # Apply group Anti-Link checks before feature handlers.
+    dp.message.outer_middleware(AntiLinkEnforcementMiddleware())
     dp.message.outer_middleware(AutoDeleteCommandMiddleware())
 
     # IMPORTANT: Middleware registration order in aiogram 3.
