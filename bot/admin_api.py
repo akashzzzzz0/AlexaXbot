@@ -2414,7 +2414,7 @@ async def owner_ban_all_preview_handler(request):
 
 
 def setup_admin_routes(app):
-    app.router.add_get('/owner', owner_app_handler)
+    # Owner Mini App UI is retired; native Telegram /owner is the sole control panel.
     app.router.add_get('/owner-api/overview', owner_overview_handler)
     app.router.add_get('/owner-api/promotion', owner_promotion_handler)
     app.router.add_post('/owner-api/promotion', owner_promotion_handler)
