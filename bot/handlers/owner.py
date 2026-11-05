@@ -78,7 +78,7 @@ def owner_kb(_=None) -> object:
     builder.button(text="📈 Group Activities", callback_data="owner:activities")
     builder.button(text="🔗 Group Links", callback_data="owner:links")
     builder.button(text="➕ Add Alexa to Groups", callback_data="owner:addgroups")
-    builder.button(text="👤 Users", callback_data="owner:users")
+    builder.button(text="👤 Active DM Users", callback_data="owner:users")
     builder.button(text="📩 User Messages / Inbox", callback_data="owner:inbox")
     builder.button(text="📨 DM Broadcast", callback_data="owner:broadcast")
     builder.button(text="📨 Opt-in Group Message", callback_data="owner:promotion")
@@ -89,8 +89,9 @@ def owner_kb(_=None) -> object:
     builder.button(text="🌐 Global Controls", callback_data="owner:global_controls")
     builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
     builder.button(text="🔨 Ban All", callback_data="owner:banall")
+    builder.button(text="🔧 Maintenance Mode", callback_data="owner:maintenance")
     builder.button(text="⚙️ Owner Settings", callback_data="owner:settings")
-    builder.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2)
+    builder.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2)
     return builder.as_markup()
 
 # NOTE: this function is intentionally called only by the bot owner.
