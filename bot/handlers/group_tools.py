@@ -12,6 +12,7 @@ import re
 import json
 from bot.database.models import GroupRule, GroupFilter, SavedMessage, GroupBlocklist, GroupDisabledCommand, GroupMember, User, SecuritySettings, GroupSettings
 from bot.middlewares.admin_actions import AdminActionMiddleware
+from bot.config import settings
 
 router = Router()
 
@@ -29,7 +30,7 @@ async def _insert_or_get(session: AsyncSession, candidate, model, *conditions):
         return existing
 
 
-router.message.outer_middleware(AdminActionMiddleware(commands={"setrules", "filter", "stopfilter", "approve", "unapprove", "save", "clear", "addblocklist", "rmblocklist", "locktypes", "disablecmd", "enablecmd", "autodelete", "grouppromo"}))
+router.message.outer_middleware(AdminActionMiddleware(commands={"setrules", "approve", "unapprove", "save", "clear", "addblocklist", "rmblocklist", "locktypes", "disablecmd", "enablecmd", "autodelete", "grouppromo"}))
 
 class GroupToolsStates(StatesGroup):
     waiting_rules = State()
@@ -371,10 +372,31 @@ async def set_rules_finish(message: Message, db_session: AsyncSession, state: FS
 async def lock_types(message: Message, **kwargs):
     await message.reply("🔒 Lock types: text, links, photos, videos, gifs, audio, voice, docs, polls, games, bots, forwards, contacts, locations, stickers, inline, mentions, hashtags. Use /lock <type> or /unlock <type>.")
 
+async def _can_manage_group_filters(message: Message) -> bool:
+    """Allow only the configured bot owner or a Telegram group admin."""
+    actor = message.from_user
+    if actor and settings.effective_owner_id and actor.id == settings.effective_owner_id:
+        return True
+    # Anonymous admins post as the group itself.
+    if message.sender_chat and message.sender_chat.id == message.chat.id:
+        return True
+    if not actor or message.chat.type not in ("group", "supergroup"):
+        return False
+    try:
+        member = await message.bot.get_chat_member(message.chat.id, actor.id)
+        status = str(getattr(member.status, "value", member.status))
+        return status in ("administrator", "creator")
+    except Exception:
+        return False
+
+
 @router.message(Command("filter"))
 async def add_filter(message: Message, db_session: AsyncSession, **kwargs):
     if message.chat.type not in ("group", "supergroup"):
         await message.reply("Groups only."); return
+    if not await _can_manage_group_filters(message):
+        await message.reply("Only group admins or the ALEXA owner can set or edit filters.")
+        return
     parts = (message.text or "").split(None, 2)
     if len(parts) < 2:
         await message.reply("Usage: /filter <keyword> <reply text>, or reply to text/sticker with /filter <keyword> [@username or user ID]."); return
@@ -392,14 +414,9 @@ async def add_filter(message: Message, db_session: AsyncSession, **kwargs):
         })
         response_type = "copy"
 
-        # A reply is an explicit target: scope this filter to the author of
-        # the replied-to message without asking admins to retype their ID.
-        replied_user = getattr(replied, "from_user", None)
-        if replied_user is not None:
-            target_user_id = replied_user.id
-            target_username = (replied_user.username or "").lower() or None
-
-        # An explicit third argument may override the reply target.
+        # Reply-saved filters are group-wide by default, regardless of who
+        # originally sent the sticker/photo/link/audio/video/text.
+        # An explicit third argument can still restrict the filter to a user.
         if len(parts) > 2:
             token = parts[2].strip()
             if token.startswith("@"):
@@ -453,6 +470,12 @@ async def add_filter(message: Message, db_session: AsyncSession, **kwargs):
 
 @router.message(Command("stopfilter"))
 async def remove_filter(message: Message, db_session: AsyncSession, **kwargs):
+    if message.chat.type not in ("group", "supergroup"):
+        await message.reply("Use /stopfilter inside a group.")
+        return
+    if not await _can_manage_group_filters(message):
+        await message.reply("Only group admins or the ALEXA owner can remove filters.")
+        return
     parts = (message.text or "").split(None, 1)
     if len(parts) < 2:
         await message.reply("Usage: /stopfilter <keyword>"); return
@@ -480,7 +503,7 @@ async def trigger_group_filters(message: Message, db_session: AsyncSession, **kw
     for row in rows:
         keyword = (row.keyword or "").strip().casefold()
         if not keyword or not re.search(
-            rf"(?<![\\w]){re.escape(keyword)}(?![\\w])",
+            rf"(?<!\w){re.escape(keyword)}(?!\w)",
             normalized,
             re.IGNORECASE,
         ):
