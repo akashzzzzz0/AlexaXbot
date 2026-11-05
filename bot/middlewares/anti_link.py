@@ -24,7 +24,7 @@ class AntiLinkEnforcementMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         sender = event.from_user
-        if sender is None or sender.is_bot:
+        if sender is None:
             return await handler(event, data)
 
         session = data.get("db_session")
