@@ -43,14 +43,12 @@ jobs:
 
           routes = []
           for source in handlers:
-              for match in re.finditer(r"@router\.callback_query\\((.*?)\\)\s*\nasync def", source, re.S):
-                  expression = match.group(1)
-                  routes.extend(("exact", value) for value in re.findall(r'F\.data\s*==\s*["\\']([^"\\']+)["\\']', expression))
-                  routes.extend(("prefix", value) for value in re.findall(r'F\.data\.startswith\\(["\\']([^"\\']+)["\\']\\)', expression))
+              routes.extend(("exact", value) for value in re.findall(r"F\.data\s*==\s*['\"]([^'\"]+)['\"]", source))
+              routes.extend(("prefix", value) for value in re.findall(r"F\.data\.startswith\(['\"]([^'\"]+)['\"]\)", source))
 
           callback_values = []
           for source in handlers:
-              for value in re.findall(r'callback_data\s*=\s*(?:f)?["\\']([^"\\']+)["\\']', source):
+              for value in re.findall(r"callback_data\s*=\s*f?['\"]([^'\"]+)['\"]", source):
                   value = re.sub(r"\{[^}]+\}", "DYNAMIC", value)
                   if value.startswith("owner:"):
                       callback_values.append(value)
@@ -80,7 +78,6 @@ jobs:
       - name: Verify Mini App retirement
         run: |
           python - <<'PY'
-          import re
           from pathlib import Path
 
           if Path("web/owner/index.html").exists():
@@ -88,7 +85,7 @@ jobs:
           source = Path("bot/admin_api.py").read_text(encoding="utf-8")
           setup = source.split("def setup_admin_routes(app):", 1)[-1]
           setup = setup.split('app.router.add_get("/admin/stats"', 1)[0]
-          if re.search(r"app\.router\.add_[^(]*\\(['\\\"]/?owner-api/", setup):
+          if "/owner-api/" in setup:
               raise SystemExit("Retired /owner-api route is still registered")
           if 'app.router.add_get("/admin/stats"' not in source:
               raise SystemExit("Unrelated /admin routes were unexpectedly removed")
