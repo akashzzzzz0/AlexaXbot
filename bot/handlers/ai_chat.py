@@ -411,9 +411,14 @@ def _should_smart_reply(message: Message, text: str) -> bool:
     chat_id = message.chat.id
     user_id = message.from_user.id if message.from_user else 0
     user_key = (chat_id, user_id)
-    if now - _smart_reply_last_check.get(chat_id, 0.0) < _SMART_REPLY_GROUP_COOLDOWN_SECONDS:
+    # Missing timestamps mean this is the first eligible message, not a cooldown.
+    # Using 0.0 as a default can suppress greetings during the first seconds after
+    # process startup because monotonic clocks are allowed to start near zero.
+    last_group_check = _smart_reply_last_check.get(chat_id)
+    if last_group_check is not None and now - last_group_check < _SMART_REPLY_GROUP_COOLDOWN_SECONDS:
         return False
-    if now - _smart_reply_user_last_check.get(user_key, 0.0) < _SMART_REPLY_USER_COOLDOWN_SECONDS:
+    last_user_check = _smart_reply_user_last_check.get(user_key)
+    if last_user_check is not None and now - last_user_check < _SMART_REPLY_USER_COOLDOWN_SECONDS:
         return False
     _smart_reply_last_check[chat_id] = now
     _smart_reply_user_last_check[user_key] = now
