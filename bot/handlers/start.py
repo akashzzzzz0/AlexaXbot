@@ -117,12 +117,12 @@ async def cmd_start(message: Message, _: callable, db_session: AsyncSession = No
             [InlineKeyboardButton(text="◀️ Back to Main Menu", callback_data="start:open")],
         ])
         await message.answer(
-            "📣 <b>FREE GROUP PROMOTION</b>\\n\\n"
-            "Promote your Telegram group through ALEXA.\\n\\n"
-            "1. Add ALEXA to your Telegram group and promote her to Admin.\\n"
-            "2. Send your group link here by itself, or send <code>.done https://t.me/YourGroup</code>.\\n"
-            "3. Alexa will verify that she is an Admin in the group.\\n"
-            "4. After verification, your request will wait for the owner's approval.\\n\\n"
+            "📣 <b>FREE GROUP PROMOTION</b>\n\n"
+            "Promote your Telegram group through ALEXA.\n\n"
+            "1. Add ALEXA to your Telegram group and promote her to Admin.\n"
+            "2. Send your group link here by itself, or send <code>.done https://t.me/YourGroup</code>.\n"
+            "3. Alexa will verify that she is an Admin in the group.\n"
+            "4. After verification, your request will wait for the owner's approval.\n\n"
             "Once approved, your group will be promoted within <b>24 hours of approval</b>. 🚀",
             parse_mode="HTML",
             reply_markup=promotion_markup,
