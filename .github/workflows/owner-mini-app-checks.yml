@@ -1,59 +1,96 @@
-name: Owner Mini App checks
+name: Native Telegram Owner Panel checks
 
 on:
   push:
-    branches: [main, feature/vip-owner-mini-app]
+    branches: [main]
   pull_request:
     branches: [main]
 
 jobs:
-  owner-mini-app:
+  native-owner-panel:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
       - name: Compile all bot Python modules
         run: python -m compileall -q bot
-      - name: Check Owner Mini App JavaScript syntax
+      - name: Verify native Owner Panel buttons and callback routes
         run: |
           python - <<'PY'
           import re
           from pathlib import Path
-          html = Path("web/owner/index.html").read_text(encoding="utf-8")
-          scripts = re.findall(r"<script(?:\\s[^>]*)?>(.*?)</script>", html, flags=re.I | re.S)
-          inline = [part for part in scripts if part.strip()]
-          if not inline:
-              raise SystemExit("No inline Owner Mini App script found")
-          Path("/tmp/owner-mini-app.js").write_text("\\n".join(inline), encoding="utf-8")
+
+          owner = Path("bot/handlers/owner.py").read_text(encoding="utf-8")
+          activity = Path("bot/handlers/owner_group_activity.py").read_text(encoding="utf-8")
+          group_message = Path("bot/handlers/owner_group_message.py").read_text(encoding="utf-8")
+          ai_control = Path("bot/handlers/owner_ai_control.py").read_text(encoding="utf-8")
+          promotion = Path("bot/handlers/group_promotion.py").read_text(encoding="utf-8")
+          handlers = [owner, activity, group_message, ai_control, promotion]
+
+          required = [
+              "owner:stats", "owner:health", "owner:groups", "owner:activities",
+              "owner:links", "owner:addgroups", "owner:users", "owner:inbox",
+              "owner:broadcast", "owner:promotion", "owner:promo_requests",
+              "owner:group_message", "owner:referrals", "owner:ai",
+              "owner:global_controls", "owner:emergency", "owner:banall",
+              "owner:settings",
+          ]
+          missing_buttons = [value for value in required if f'callback_data="{value}"' not in owner]
+          if missing_buttons:
+              raise SystemExit("Missing native Owner Panel buttons: " + ", ".join(missing_buttons))
+
+          routes = []
+          for source in handlers:
+              for match in re.finditer(r"@router\\.callback_query\\((.*?)\\)\\s*\\nasync def", source, re.S):
+                  expression = match.group(1)
+                  routes.extend(("exact", value) for value in re.findall(r'F\\.data\\s*==\\s*["\\']([^"\\']+)["\\']', expression))
+                  routes.extend(("prefix", value) for value in re.findall(r'F\\.data\\.startswith\\(["\\']([^"\\']+)["\\']\\)', expression))
+
+          callback_values = []
+          for source in handlers:
+              for value in re.findall(r'callback_data\\s*=\\s*(?:f)?["\\']([^"\\']+)["\\']', source):
+                  value = re.sub(r"\\{[^}]+\\}", "DYNAMIC", value)
+                  if value.startswith("owner:"):
+                      callback_values.append(value)
+
+          unmatched = sorted({
+              value for value in callback_values
+              if not any(value == route if kind == "exact" else value.startswith(route)
+                         for kind, route in routes)
+          })
+          if unmatched:
+              raise SystemExit("Unmatched Owner Panel callbacks: " + ", ".join(unmatched))
+
+          router_setup = Path("bot/handlers/__init__.py").read_text(encoding="utf-8")
+          ordered = [
+              "router.include_router(owner_group_message.router)",
+              "router.include_router(owner_group_activity.router)",
+              "router.include_router(group_promotion.router)",
+              "router.include_router(owner_ai_control.router)",
+              "router.include_router(owner.router)",
+          ]
+          positions = [router_setup.find(item) for item in ordered]
+          if any(position < 0 for position in positions) or positions != sorted(positions):
+              raise SystemExit("Owner feature routers must be included before owner catch-all")
+
+          print(f"Verified {len(required)} native Owner Panel buttons and {len(callback_values)} callback values")
           PY
-          node --check /tmp/owner-mini-app.js
-      - name: Verify Owner Mini App route registrations
+      - name: Verify Mini App retirement
         run: |
           python - <<'PY'
+          import re
           from pathlib import Path
+
+          if Path("web/owner/index.html").exists():
+              raise SystemExit("Retired Owner Mini App HTML still exists")
           source = Path("bot/admin_api.py").read_text(encoding="utf-8")
-          required = [
-              "/owner", "/owner-api/overview", "/owner-api/security",
-              "/owner-api/settings-overview",
-              "/owner-api/referrals", "/owner-api/promotion-requests",
-              "/owner-api/inbox", "/owner-api/statistics", "/owner-api/health",
-              "/owner-api/group-message", "/owner-api/users", "/owner-api/groups",
-              "/owner-api/force-join", "/owner-api/groups/{group_id}/force-join",
-              "/owner-api/groups/{group_id}/purge",
-              "/owner-api/groups/{group_id}/leave",
-              "/owner-api/groups/{group_id}/service-settings",
-              "/owner-api/groups/{group_id}/communication-settings",
-              "/owner-api/group-links", "/owner-api/groups/{group_id}/invite-link",
-              "/owner-api/group-avatar", "/owner-api/groups/{group_id}/members",
-              "/owner-api/logs", "/owner-api/broadcast", "/owner-api/economy/leaderboard",
-          ]
-          missing = [route for route in required if route not in source]
-          if missing:
-              raise SystemExit("Missing Owner Mini App routes: " + ", ".join(missing))
-          print(f"Verified {len(required)} required Owner Mini App routes")
+          setup = source.split("def setup_admin_routes(app):", 1)[-1]
+          setup = setup.split('app.router.add_get("/admin/stats"', 1)[0]
+          if re.search(r"app\\.router\\.add_[^(]*\\(['\\\"]/?owner-api/", setup):
+              raise SystemExit("Retired /owner-api route is still registered")
+          if 'app.router.add_get("/admin/stats"' not in source:
+              raise SystemExit("Unrelated /admin routes were unexpectedly removed")
+          print("Verified retired Mini App is not served and legacy Owner API routes are unregistered")
           PY
