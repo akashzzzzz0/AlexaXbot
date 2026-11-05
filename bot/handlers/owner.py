@@ -2224,6 +2224,7 @@ async def owner_referrals(callback: CallbackQuery, db_session: AsyncSession, **k
     rewarded = await db_session.scalar(
         select(func.count()).select_from(Referral).where(Referral.reward_given.is_(True))
     ) or 0
+    pending_count = await db_session.scalar(select(func.count()).select_from(AffiliateRequest).where(AffiliateRequest.status == "pending")) or 0
     pending = (await db_session.scalars(
         select(AffiliateRequest).where(AffiliateRequest.status == "pending")
         .order_by(AffiliateRequest.created_at.asc()).limit(12)
@@ -2238,7 +2239,7 @@ async def owner_referrals(callback: CallbackQuery, db_session: AsyncSession, **k
         "🎁 <b>REFERRALS & REWARDS</b>",
         f"Recorded referrals: <b>{format_number(total)}</b>",
         f"Rewards marked given: <b>{format_number(rewarded)}</b>",
-        f"Pending Stars/Premium requests: <b>{len(pending)}</b>",
+        f"Pending Stars/Premium requests: <b>{format_number(pending_count)}</b>",
     ]
     if top:
         lines.extend(["", "<b>Top referrers</b>"])
@@ -2300,7 +2301,7 @@ async def owner_affiliate_review(callback: CallbackQuery, db_session: AsyncSessi
     except Exception as exc:
         logger.warning("Owner affiliate decision saved but user notification failed", request_id=item.id, error=str(exc))
     await callback.answer(f"Request #{request_id} {status}.", show_alert=True)
-    await owner_referrals(callback, db_session)
+    await owner_referrals(callback, db_session, _skip_callback_answer=True)
 
 
 @router.callback_query(F.data.startswith("owner:"))
