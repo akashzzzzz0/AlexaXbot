@@ -25,7 +25,7 @@ SCAM_PATTERNS = [
 
 INVITE_PATTERN = re.compile(r"(?:https?://)?(?:t\.me|telegram\.me)/(?:joinchat/|\+)[a-zA-Z0-9_-]+")
 LINK_PATTERN = re.compile(
-    r"(?:https?://|www\\.)[^\\s]+|(?<![\\w])(?:t\\.me|telegram\\.me)/[^\\s]+|(?<![\\w])@[A-Za-z0-9_]{1,32}\\b|(?<![\\w])[A-Za-z0-9_-]{5,}\\.t\\.me\\b|(?<![@\\w.-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,}(?::\\d+)?(?:/[^\\s]*)?",
+    r"(?:https?://|www\.)[^\s]+|(?<![\w])(?:t\.me|telegram\.me)/[^\s]+|(?<![\w])@[A-Za-z0-9_]{1,32}\b|(?<![\w])[A-Za-z0-9_-]{5,}\.t\.me\b|(?<![@\w.-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?::\d+)?(?:/[^\s]*)?",
     re.IGNORECASE,
 )
 PHONE_PATTERN = re.compile(r"(?:\+?\d[\d\s\-]{7,}\d)")
