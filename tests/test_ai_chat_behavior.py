@@ -7,11 +7,11 @@ from aiogram.enums import ChatType
 from bot.handlers import ai_chat
 
 
-def _group_message(text: str):
+def _group_message(text: str, chat_id: int = -100123):
     return SimpleNamespace(
         text=text,
         from_user=SimpleNamespace(id=12345, is_bot=False),
-        chat=SimpleNamespace(id=-100123, type=ChatType.SUPERGROUP),
+        chat=SimpleNamespace(id=chat_id, type=ChatType.SUPERGROUP),
         reply_to_message=None,
         entities=[],
         bot=SimpleNamespace(id=99999),
@@ -21,15 +21,27 @@ def _group_message(text: str):
 class AlexaGroupChatBehaviorTests(unittest.TestCase):
     def setUp(self):
         ai_chat._bot_username = ""
+        ai_chat._smart_reply_last_check.clear()
+        ai_chat._smart_reply_user_last_check.clear()
 
     def test_untagged_group_messages_from_any_member_trigger_chat(self):
-        for text in (
+        for index, text in enumerate((
             "hi", "hello", "good morning", "good afternoon",
             "good evening", "good night", "kya haal hai?",
             "aaj group mein kya scene hai",
-        ):
+        )):
             with self.subTest(text=text):
-                self.assertTrue(asyncio.run(ai_chat.is_alexa_trigger(_group_message(text))))
+                # Each sample represents a fresh group so the intentional
+                # per-group anti-spam cooldown does not suppress later samples.
+                self.assertTrue(asyncio.run(
+                    ai_chat.is_alexa_trigger(_group_message(text, chat_id=-100123-index))
+                ))
+
+    def test_group_smart_reply_cooldowns_prevent_spam(self):
+        message = _group_message("hi")
+        self.assertTrue(asyncio.run(ai_chat.is_alexa_trigger(message)))
+        # A second greeting in the same group is held by the 15-second group cooldown.
+        self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(_group_message("hello"))))
 
     def test_slash_commands_do_not_trigger_casual_chat(self):
         self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(_group_message("/ban 123"))))

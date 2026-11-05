@@ -4,7 +4,7 @@ from aiogram.types import TelegramObject, Message, CallbackQuery, Update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from bot.database.models import User, Group, GroupMember, SecuritySettings, GroupDisabledCommand, InboxMessage, GroupInboxMessage
+from bot.database.models import User, Wallet, Group, GroupMember, SecuritySettings, GroupDisabledCommand, InboxMessage, GroupInboxMessage
 import structlog
 
 logger = structlog.get_logger()
@@ -300,6 +300,7 @@ class DatabaseMiddleware(BaseMiddleware):
 
     async def _get_or_create_user(self, session: AsyncSession, tg_user) -> User:
         user = await session.get(User, tg_user.id)
+        newly_created = user is None
         if user is None:
             candidate = User(
                 id=tg_user.id,
@@ -322,6 +323,16 @@ class DatabaseMiddleware(BaseMiddleware):
                 user = await session.get(User, tg_user.id)
                 if user is None:
                     raise
+
+        if newly_created:
+            # One-time starter balance; existing users without a wallet are not gifted.
+            try:
+                async with session.begin_nested():
+                    session.add(Wallet(user_id=tg_user.id, balance=200, bank_balance=0))
+                    await session.flush()
+            except IntegrityError:
+                # Another concurrent update may already have initialized this wallet.
+                pass
 
         user.username = tg_user.username
         user.first_name = tg_user.first_name or "User"
