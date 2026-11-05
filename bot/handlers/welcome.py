@@ -211,10 +211,16 @@ async def _send_welcome_message(bot, db_session, chat, user):
         return
     welcome_text = (ws.message if ws and ws.message else None) or "👋 Welcome {name} to {group}!"
     from html import escape
+    display_name = " ".join(
+        part for part in (user.first_name, user.last_name) if part
+    ) or f"User#{user.id}"
+    clickable_name = mention_user(user.id, escape(display_name))
     replacements = {
-        "{name}": escape(user.first_name or "User"),
-        "{username}": escape(f"@{user.username}" if user.username else (user.first_name or "User")),
-        "{mention}": mention_user(user.id, escape(safe_username(user))),
+        # Both common name placeholders must be real Telegram mentions,
+        # so existing custom welcome templates become tappable without edits.
+        "{name}": clickable_name,
+        "{mention}": clickable_name,
+        "{username}": escape(f"@{user.username}" if user.username else display_name),
         "{id}": str(user.id),
         "{group}": escape(chat.title or "Group"),
     }
