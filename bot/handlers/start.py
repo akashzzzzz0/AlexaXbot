@@ -107,6 +107,27 @@ async def cmd_start(message: Message, _: callable, db_session: AsyncSession = No
         await message.answer("👋 ALEXA is active. Use /help to see available commands.")
         return
     args = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else ""
+    # Dedicated Telegram deep link: https://t.me/<bot_username>?start=promotion
+    # Opens the existing Free Group Promotion instructions directly, without
+    # changing the normal /start welcome flow or any promotion verification logic.
+    if args == "promotion":
+        me = await message.bot.get_me()
+        promotion_markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Add Me to Your Group", url=f"https://t.me/{me.username}?startgroup=true")],
+            [InlineKeyboardButton(text="◀️ Back to Main Menu", callback_data="start:open")],
+        ])
+        await message.answer(
+            "📣 <b>FREE GROUP PROMOTION</b>\\n\\n"
+            "Promote your Telegram group through ALEXA.\\n\\n"
+            "1. Add ALEXA to your Telegram group and promote her to Admin.\\n"
+            "2. Send your group link here by itself, or send <code>.done https://t.me/YourGroup</code>.\\n"
+            "3. Alexa will verify that she is an Admin in the group.\\n"
+            "4. After verification, your request will wait for the owner's approval.\\n\\n"
+            "Once approved, your group will be promoted within <b>24 hours of approval</b>. 🚀",
+            parse_mode="HTML",
+            reply_markup=promotion_markup,
+        )
+        return
     if db_user:
         db_user.dm_started = True
     # The Mini App's "Open Alexa Bot" deep link must land on the real owner
