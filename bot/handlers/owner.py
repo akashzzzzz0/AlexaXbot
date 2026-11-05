@@ -2267,7 +2267,8 @@ async def owner_referrals(callback: CallbackQuery, db_session: AsyncSession, **k
     builder.button(text="👑 Owner Panel", callback_data="owner:menu")
     builder.adjust(2, 2, 1, 1)
     await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=builder.as_markup())
-    await callback.answer()
+    if not kwargs.get("_skip_callback_answer"):
+        await callback.answer()
 
 
 @router.callback_query(F.data.startswith("owner:affiliate:"))
