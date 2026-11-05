@@ -135,10 +135,11 @@ async def check_message_violations(
 
     # Telegram can hide a destination behind clickable text (text_link).
     # Include hidden destinations and URL entities in link detection.
-    entities = list(message.entities or []) + list(message.caption_entities or [])
+    entities = list(getattr(message, "entities", None) or []) + list(getattr(message, "caption_entities", None) or [])
     entity_links = []
     for entity in entities:
-        entity_type = getattr(entity.type, "value", entity.type)
+        raw_type = getattr(entity, "type", None)
+        entity_type = getattr(raw_type, "value", raw_type)
         if entity_type == "url":
             entity_links.append("url_entity")
         elif entity_type == "text_link" and getattr(entity, "url", None):
