@@ -10,6 +10,8 @@ def fake_message(text="hello", *, is_bot=False, markup=None, sender_id=123, bot_
     message = SimpleNamespace(
         text=text,
         caption=None,
+        entities=None,
+        caption_entities=None,
         from_user=SimpleNamespace(id=sender_id, is_bot=is_bot, username=None),
         chat=SimpleNamespace(id=-100123),
         forward_origin=None,
@@ -82,6 +84,26 @@ class ContentLockTests(unittest.IsolatedAsyncioTestCase):
         self.security.anti_link = False
         self.assertNotIn("link", await check_message_violations(message, self.security))
         self.security.anti_link = True
+        self.assertIn("link", await check_message_violations(message, self.security))
+
+    async def test_anti_link_detects_bare_domains(self):
+        self.security.anti_link = True
+        for value in ("example.com", "sub.example.co.uk/path", "example.com:8080"):
+            with self.subTest(value=value):
+                self.assertIn("link", await check_message_violations(fake_message(value), self.security))
+
+    async def test_anti_link_detects_hidden_text_links(self):
+        self.security.anti_link = True
+        entity = SimpleNamespace(type="text_link", url="https://hidden.example/path")
+        message = fake_message("click here")
+        message.entities = [entity]
+        self.assertIn("link", await check_message_violations(message, self.security))
+
+    async def test_anti_link_detects_url_entities(self):
+        self.security.anti_link = True
+        entity = SimpleNamespace(type="url", url=None)
+        message = fake_message("example.com")
+        message.entities = [entity]
         self.assertIn("link", await check_message_violations(message, self.security))
 
     async def test_anti_invite_toggle_detects_telegram_invites_only_when_enabled(self):
