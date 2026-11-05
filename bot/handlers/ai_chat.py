@@ -638,13 +638,13 @@ async def alexa_ai_chat(message: Message) -> None:
         # Basic greetings should never be silently ignored just because Ollama is
         # temporarily unavailable. Keep this fallback limited to unaddressed group
         # greetings; addressed/private AI requests still fail silently as before.
-        if smart_mode and _GREETING_RE.match(original_text or text):
+        if smart_mode:
             answer = _smart_group_reply_fallback(original_text or text)
         else:
             return
     except Exception:
         logger.exception("Unexpected Alexa AI chat failure for chat_id=%s", message.chat.id)
-        if smart_mode and _GREETING_RE.match(original_text or text):
+        if smart_mode:
             answer = _smart_group_reply_fallback(original_text or text)
         else:
             return
