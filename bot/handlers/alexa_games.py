@@ -188,7 +188,7 @@ async def rob(message: Message, db_session: AsyncSession, db_user, **kwargs):
     robber.last_rob_at = now
     robber.successful_robs = (robber.successful_robs or 0) + 1
     await message.reply(
-        f"👤 <b>{escape(db_user.first_name or 'Player')} robbed {amount} coins from {escape(target.first_name or 'Player')}.</b>\\n"
+        f"👤 <b>{escape(db_user.first_name or 'Player')} robbed {amount} coins from {escape(target.first_name or 'Player')}.</b>\n"
         f"💰 Gained {gained} coins after the 10% game fee.",
         parse_mode="HTML",
     )
