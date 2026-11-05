@@ -389,7 +389,7 @@ def _looks_like_smart_reply_candidate(text: str) -> bool:
 
 
 def _smart_group_reply_fallback(user_text: str) -> str:
-    """Never leave a relevant unaddressed group message unanswered when the model opts out."""
+    """Use a tiny fallback only for greetings or clear requests for help."""
     value = (user_text or "").strip().casefold()
     if _GREETING_RE.match(value):
         return random.choice((
@@ -399,7 +399,8 @@ def _smart_group_reply_fallback(user_text: str) -> str:
         ))
     if re.search(r"\b(help|madad|madad chahiye|batao|guide)\b", value):
         return "Haan bolo, kis cheez mein help chahiye?"
-    return "Haan, bolo—kya baat hai?"
+    # Silence is better than interrupting the group with a meaningless fallback.
+    return ""
 
 
 def _should_smart_reply(message: Message, text: str) -> bool:
@@ -471,10 +472,10 @@ async def is_alexa_trigger(message: Message) -> bool:
     if _ALEXA_PREFIX_RE.match(text):
         return True
 
-    # Owner-requested open group chat: reply to every ordinary human text
-    # message, even when Alexa is not tagged. Slash commands and messages
-    # explicitly addressed to another tagged member were filtered above.
-    return True
+    # Join group conversation selectively: greetings, questions, jokes and
+    # meaningful statements pass the candidate filter and cooldowns. Do not
+    # turn every ordinary group message into an AI request.
+    return _should_smart_reply(message, text)
 
 
 async def _ask_ollama_with_typing(
@@ -528,7 +529,8 @@ async def _ask_ollama(
         system_instruction += (
             "This is a SMART GROUP REPLY to an unaddressed message that has already passed relevance filters. "
             "Give a short, useful, natural reply to the message. Answer clear questions, join a joke naturally, or offer a brief empathetic reaction. "
-            "Do not output __IGNORE__ for any ordinary human group message. Respond naturally even if it is a short statement, joke, greeting, or casual comment. "
+            "If the message is routine, adds no new context, or does not need Alexa's input, output exactly __IGNORE__. "
+            "Do not force a reply to every statement; choose only moments where a real group member would naturally join in. "
             "Do not mention or tag everyone, do not invent missing context, and do not write long explanations. "
             "Use Pakistani Roman Urdu/Hinglish when appropriate, usually in one short sentence."
         )
