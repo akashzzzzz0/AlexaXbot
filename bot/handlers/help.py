@@ -70,7 +70,7 @@ def build_help_text(_: callable) -> str:
         "/tagall &lt;message&gt; — mention all saved members with your message\n"
         "/admin &lt;message&gt; — mention group admins with your message\n"
         "@tagall &lt;message&gt; — tagall text alias\n"
-        "/rules /setrules /report /admins /id /info — group utilities\n"
+        "/rules /setrules /report /admins /id /info /if — group utilities (/if: reply to a member)\n"
         "/disablecmd /enablecmd /disabledcmds — command controls\n"
         "/approve /unapprove /approvebio — member and bio approvals\n"
         "/note /autodelete /setwelcome /cancel — extra group tools\n"
