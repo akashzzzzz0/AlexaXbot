@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from html import escape
 
 from aiogram import F, Router
+from aiogram.filters import StateFilter
 from aiogram.enums import ChatType
 from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError
 from aiogram.fsm.context import FSMContext
@@ -93,7 +94,7 @@ async def _send_owner_request(bot, request: GroupPromotionRequest):
         pass
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(_TRIGGER_RE))
+@router.message(StateFilter(None), F.chat.type == ChatType.PRIVATE, F.text.regexp(_TRIGGER_RE))
 async def receive_group_promotion_link(message: Message, db_session: AsyncSession, **kwargs):
     text = (message.text or "").strip()
     match = _LINK_RE.search(text)
