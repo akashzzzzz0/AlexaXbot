@@ -4,7 +4,7 @@ from aiogram.types import TelegramObject, Message, CallbackQuery, Update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from bot.database.models import User, Wallet, Group, GroupMember, SecuritySettings, GroupDisabledCommand, InboxMessage, GroupInboxMessage
+from bot.database.models import User, Wallet, Group, GroupMember, GroupMemberJoin, SecuritySettings, GroupDisabledCommand, InboxMessage, GroupInboxMessage
 import structlog
 
 logger = structlog.get_logger()
@@ -138,6 +138,45 @@ class DatabaseMiddleware(BaseMiddleware):
                                     session, chat.id, target.id
                                 )
                                 target_member.role = event.chat_member.new_chat_member.status
+
+                                # Persist only a verified join transition. A member first
+                                # seen in an ordinary message must not get a fabricated
+                                # historical join date.
+                                old_member = event.chat_member.old_chat_member
+                                new_member = event.chat_member.new_chat_member
+
+                                def _is_current_member(chat_member):
+                                    status = getattr(chat_member.status, "value", chat_member.status)
+                                    if status in ("member", "administrator", "creator"):
+                                        return True
+                                    return status == "restricted" and bool(getattr(chat_member, "is_member", False))
+
+                                if not _is_current_member(old_member) and _is_current_member(new_member):
+                                    join_date = event.chat_member.date
+                                    join_row = await session.scalar(select(GroupMemberJoin).where(
+                                        GroupMemberJoin.group_id == chat.id,
+                                        GroupMemberJoin.user_id == target.id,
+                                    ))
+                                    if join_row:
+                                        join_row.joined_at = join_date
+                                    else:
+                                        candidate_join = GroupMemberJoin(
+                                            group_id=chat.id,
+                                            user_id=target.id,
+                                            joined_at=join_date,
+                                        )
+                                        try:
+                                            async with session.begin_nested():
+                                                session.add(candidate_join)
+                                                await session.flush()
+                                        except IntegrityError:
+                                            join_row = await session.scalar(select(GroupMemberJoin).where(
+                                                GroupMemberJoin.group_id == chat.id,
+                                                GroupMemberJoin.user_id == target.id,
+                                            ))
+                                            if join_row:
+                                                join_row.joined_at = join_date
+
                                 data["db_member"] = target_member
 
                         # Any update delivered from a group proves ALEXA is currently
