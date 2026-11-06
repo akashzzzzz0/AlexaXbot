@@ -29,11 +29,11 @@ async def acknowledge_join_request(request: ChatJoinRequest, **kwargs):
         await request.bot.send_message(
             chat_id=request.user_chat_id,
             text=(
-                f"👋 Hello {first_name}!\\n\\n"
+                f"👋 Hello {first_name}!\n\n"
                 f"Thanks for requesting to join <b>{group_name}</b>. "
-                "Your request has been received and is waiting for an admin's review.\\n\\n"
+                "Your request has been received and is waiting for an admin's review.\n\n"
                 "Tap the button below to verify and activate your ALEXA private chat. "
-                "Alexa will continue right here in this DM.\\n\\n"
+                "Alexa will continue right here in this DM.\n\n"
                 "✨ Want free group promotion? Add ALEXA to your own group, "
                 "then send your group link here in this DM."
             ),
