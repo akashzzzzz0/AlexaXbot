@@ -13,6 +13,18 @@ from aiogram.types import ChatJoinRequest, CallbackQuery, InlineKeyboardMarkup, 
 logger = structlog.get_logger()
 router = Router()
 
+# Only users who actually received a join-request DM button are eligible for
+# the private welcome after that exact group's join transition.
+_pending_join_request_dms = set()
+
+
+def consume_join_request_dm(chat_id: int, user_id: int) -> bool:
+    key = (chat_id, user_id)
+    if key not in _pending_join_request_dms:
+        return False
+    _pending_join_request_dms.discard(key)
+    return True
+
 
 @router.chat_join_request()
 async def acknowledge_join_request(request: ChatJoinRequest, **kwargs):
@@ -39,6 +51,9 @@ async def acknowledge_join_request(request: ChatJoinRequest, **kwargs):
             parse_mode="HTML",
             reply_markup=keyboard,
         )
+        if len(_pending_join_request_dms) >= 5000:
+            _pending_join_request_dms.pop()
+        _pending_join_request_dms.add((request.chat.id, request.from_user.id))
         logger.info("Join-request acknowledgement sent privately", chat_id=request.chat.id, user_id=request.from_user.id)
     except Exception as exc:
         # A failed DM must not alter the pending request or produce a group message.
