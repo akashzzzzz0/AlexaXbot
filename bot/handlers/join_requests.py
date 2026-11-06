@@ -27,7 +27,9 @@ async def acknowledge_join_request(request: ChatJoinRequest, **kwargs):
                 f"Thanks for requesting to join <b>{group_name}</b>. "
                 "Your request has been received and is waiting for an admin's review.\n\n"
                 "You do not need to send anything else. If an admin approves your request, "
-                "you will be added to the group."
+                "you will be added to the group.\n\n"
+                "✨ Want free group promotion? Add ALEXA to your own group, "
+                "then send your group link here in this DM."
             ),
             parse_mode="HTML",
         )
