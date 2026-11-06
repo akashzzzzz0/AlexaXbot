@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from html import escape
 import re
 import json
-from bot.database.models import GroupRule, GroupFilter, SavedMessage, GroupBlocklist, GroupDisabledCommand, GroupMember, User, SecuritySettings, GroupSettings
+from bot.database.models import GroupRule, GroupFilter, SavedMessage, GroupBlocklist, GroupDisabledCommand, GroupMember, GroupMemberJoin, User, SecuritySettings, GroupSettings
 from bot.middlewares.admin_actions import AdminActionMiddleware
 from bot.config import settings
 
@@ -46,6 +46,50 @@ async def user_info(message: Message, **kwargs):
     target = message.reply_to_message.from_user if message.reply_to_message and message.reply_to_message.from_user else message.from_user
     username = f"@{target.username}" if target.username else "Not set"
     await message.reply(f"👤 <b>User Info</b>\nName: {escape(target.full_name or target.first_name or 'User')}\nUsername: {escape(username)}\nID: <code>{target.id}</code>\nBot account: {'yes' if target.is_bot else 'no'}", parse_mode="HTML")
+
+@router.message(Command("if"))
+async def member_profile(message: Message, db_session: AsyncSession, **kwargs):
+    """Show the replied-to member's profile and Alexa's tracked group activity."""
+    if message.chat.type not in ("group", "supergroup"):
+        await message.reply("📍 Use /if inside a group.")
+        return
+
+    replied = message.reply_to_message
+    if not replied or not replied.from_user:
+        await message.reply("💡 Reply to a member's message with /if to view their profile.")
+        return
+
+    target = replied.from_user
+    username = f"@{target.username}" if target.username else "Not set"
+    joined_label = "Not recorded yet"
+    messages_label = "Not tracked yet"
+
+    if db_session is not None:
+        member = await db_session.scalar(select(GroupMember).where(
+            GroupMember.group_id == message.chat.id,
+            GroupMember.user_id == target.id,
+        ))
+        if member is not None:
+            messages_label = f"{member.message_count or 0:,}"
+
+        join_row = await db_session.scalar(select(GroupMemberJoin).where(
+            GroupMemberJoin.group_id == message.chat.id,
+            GroupMemberJoin.user_id == target.id,
+        ))
+        if join_row and join_row.joined_at:
+            joined_label = join_row.joined_at.strftime("%d %b %Y, %H:%M UTC")
+
+    profile = (
+        "👤 <b>USER INFORMATION</b>\n"
+        f"🏷️ <b>Group:</b> {escape(message.chat.title or 'Group')}\n"
+        f"📝 <b>Name:</b> {escape(target.full_name or target.first_name or 'User')}\n"
+        f"🆔 <b>Numeric ID:</b> <code>{target.id}</code>\n"
+        f"🔗 <b>Username:</b> {escape(username)}\n"
+        f"📅 <b>Joined Group:</b> {escape(joined_label)}\n"
+        f"💬 <b>Total Messages:</b> {escape(messages_label)}\n\n"
+        "✨ <i>Powered by Alexa</i>"
+    )
+    await message.reply(profile, parse_mode="HTML")
 
 
 @router.message(Command("admins"))

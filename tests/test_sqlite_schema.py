@@ -30,6 +30,29 @@ class SQLiteSchemaTests(unittest.TestCase):
         finally:
             engine.dispose()
 
+    def test_verified_group_member_join_record_round_trips(self):
+        from bot.database.models import GroupMemberJoin
+        engine = create_engine("sqlite:///:memory:")
+        try:
+            Base.metadata.create_all(engine)
+            joined_at = datetime.now(timezone.utc)
+            with Session(engine) as session:
+                session.add(User(id=654321, first_name="Joined User", telegram_id=654321))
+                session.add(Group(id=-100654321, title="Join Test", type="supergroup"))
+                session.flush()
+                session.add(GroupMemberJoin(
+                    group_id=-100654321, user_id=654321, joined_at=joined_at
+                ))
+                session.commit()
+                row = session.scalar(select(GroupMemberJoin).where(
+                    GroupMemberJoin.group_id == -100654321,
+                    GroupMemberJoin.user_id == 654321,
+                ))
+                self.assertIsNotNone(row)
+                self.assertEqual(row.joined_at.replace(tzinfo=timezone.utc), joined_at)
+        finally:
+            engine.dispose()
+
     def test_all_tables_create_and_basic_records_round_trip(self):
         engine = create_engine("sqlite:///:memory:")
         try:
