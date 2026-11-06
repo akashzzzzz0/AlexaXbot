@@ -51,6 +51,8 @@ async def acknowledge_join_request(request: ChatJoinRequest, **kwargs):
             parse_mode="HTML",
             reply_markup=keyboard,
         )
+        if len(_pending_join_request_dms) >= 5000:
+            _pending_join_request_dms.pop()
         _pending_join_request_dms.add((request.chat.id, request.from_user.id))
         logger.info("Join-request acknowledgement sent privately", chat_id=request.chat.id, user_id=request.from_user.id)
     except Exception as exc:
