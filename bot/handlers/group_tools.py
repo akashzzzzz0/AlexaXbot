@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from html import escape
 import re
 import json
-from bot.database.models import GroupRule, GroupFilter, SavedMessage, GroupBlocklist, GroupDisabledCommand, GroupMember, User, SecuritySettings, GroupSettings
+from bot.database.models import GroupRule, GroupFilter, SavedMessage, GroupBlocklist, GroupDisabledCommand, GroupMember, GroupMemberJoin, User, SecuritySettings, GroupSettings
 from bot.middlewares.admin_actions import AdminActionMiddleware
 from bot.config import settings
 
