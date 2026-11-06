@@ -47,7 +47,7 @@ def _detect_lang(tg_lang):
     return "en"
 
 
-async def _send_add_group_prompt(message: Message, db_user=None):
+async def _send_add_group_prompt(message: Message, db_user=None, user=None):
     me = await message.bot.get_me()
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Add Me to Your Group", url=f"https://t.me/{me.username}?startgroup=true")],
@@ -58,7 +58,7 @@ async def _send_add_group_prompt(message: Message, db_user=None):
         [InlineKeyboardButton(text="⭐ Get Telegram Premium + Stars", callback_data="affiliate:promo")],
         [InlineKeyboardButton(text="📣 Free Group Promotion", callback_data="start:promotion")],
     ])
-    user = message.from_user
+    user = user or message.from_user
     first_name = escape(user.first_name or "there") if user else "there"
     username_line = f"👤 @{escape(user.username)}\n" if user and user.username else ""
     referral_link = (
