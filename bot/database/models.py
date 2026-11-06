@@ -106,6 +106,20 @@ class GroupMember(Base):
     user = relationship("User")
 
 
+class GroupMemberJoin(Base):
+    """Last verified join transition observed from Telegram chat_member updates."""
+    __tablename__ = "group_member_joins"
+    __table_args__ = (
+        UniqueConstraint("group_id", "user_id", name="uq_group_member_joins_group_user"),
+        Index("ix_group_member_joins_group_user", "group_id", "user_id"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    group_id = Column(BigInteger, ForeignKey("groups.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    joined_at = Column(DateTime(timezone=True), nullable=False)
+
+
 class GroupSettings(Base):
     __tablename__ = "group_settings"
 
