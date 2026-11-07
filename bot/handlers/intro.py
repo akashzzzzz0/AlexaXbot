@@ -1,8 +1,8 @@
 import logging
-from html import escape
 
 from aiogram import F, Router
-from aiogram.filters import Command
+from aiogram.exceptions import SkipHandler
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
@@ -15,7 +15,6 @@ from aiogram.types import (
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.config import settings
 from bot.database.models import IntroProfile, User
 
 logger = logging.getLogger(__name__)
@@ -41,7 +40,6 @@ _STEPS = [
     ("favourite", IntroSetup.favourite, "⭐ Tell us your favourite things (optional)."),
     ("photo", IntroSetup.photo, "📸 Send a profile photo, or skip to use your Telegram profile photo."),
 ]
-_TEXT_FIELDS = {"nickname", "about", "hobbies", "interests", "languages", "favourite"}
 
 
 def _skip_keyboard():
@@ -60,9 +58,6 @@ def _step_index(state_name):
 
 
 async def _ask_step(message: Message, state: FSMContext, index: int):
-    if index >= len(_STEPS):
-        await _save_profile(message, state)
-        return
     field, state_obj, prompt = _STEPS[index]
     await state.set_state(state_obj)
     await message.answer(prompt, reply_markup=_skip_keyboard())
@@ -103,14 +98,14 @@ async def set_intro(message: Message, state: FSMContext):
     )
 
 
-@router.message(Command("cancel"), state="*")
+@router.message(Command("cancel"), StateFilter("*"))
 async def cancel_intro(message: Message, state: FSMContext):
-    if await state.get_state() and (await state.get_state()).startswith("IntroSetup:"):
+    current = await state.get_state()
+    if current and current.startswith("IntroSetup:"):
         await state.clear()
         await message.answer("❌ Introduction setup cancelled. You can restart it anytime with /setintro.")
-    else:
-        from aiogram.exceptions import SkipHandler
-        raise SkipHandler
+        return
+    raise SkipHandler
 
 
 @router.callback_query(F.data == "intro:cancel")
@@ -122,7 +117,7 @@ async def cancel_intro_callback(callback: CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(F.data == "intro:skip")
-async def skip_intro_step(callback: CallbackQuery, state: FSMContext):
+async def skip_intro_step(callback: CallbackQuery, state: FSMContext, db_session: AsyncSession, **kwargs):
     current = await state.get_state()
     if not current or not current.startswith("IntroSetup:"):
         await callback.answer("No introduction setup is active.", show_alert=True)
@@ -131,20 +126,26 @@ async def skip_intro_step(callback: CallbackQuery, state: FSMContext):
     if index < 0:
         await callback.answer("This step is no longer active.", show_alert=True)
         return
+    if index == len(_STEPS) - 1:
+        await _persist_intro_profile(
+            callback.from_user, callback.message, state, db_session, callback.bot
+        )
+        await callback.answer("Saved")
+        return
     if callback.message:
         await callback.message.edit_reply_markup(reply_markup=None)
         await _ask_step(callback.message, state, index + 1)
     await callback.answer("Skipped")
 
 
-@router.message(
+@router.message(StateFilter(
     IntroSetup.nickname,
     IntroSetup.about,
     IntroSetup.hobbies,
     IntroSetup.interests,
     IntroSetup.languages,
     IntroSetup.favourite,
-)
+))
 async def collect_intro_text(message: Message, state: FSMContext):
     current = await state.get_state()
     index = _step_index(current)
@@ -185,96 +186,54 @@ async def collect_intro_text(message: Message, state: FSMContext):
     await _ask_step(message, state, index + 1)
 
 
-@router.message(IntroSetup.photo)
-async def collect_intro_photo(message: Message, state: FSMContext):
-    if message.photo:
-        await state.update_data(intro_photo_file_id=message.photo[-1].file_id)
-        await _save_profile(message, state)
+async def _persist_intro_profile(user, reply_message: Message, state: FSMContext,
+                                 db_session: AsyncSession, bot):
+    if not db_session:
+        await reply_message.answer("Intro profiles are temporarily unavailable. Please try again.")
         return
-    if message.text and message.text.strip().lower() in {"/skip", "skip"}:
-        await _save_profile(message, state)
-        return
-    await message.answer("Please send a photo, or tap Skip to use your Telegram profile photo.")
-
-
-async def _save_profile(message: Message, state: FSMContext):
     data = await state.get_data()
     fields = data.get("intro_fields") or {}
-    entities = data.get("intro_entities") or {}
     photo_file_id = data.get("intro_photo_file_id")
 
     if not photo_file_id:
         try:
-            photos = await message.bot.get_user_profile_photos(message.from_user.id, limit=1)
+            photos = await bot.get_user_profile_photos(user.id, limit=1)
             if photos.total_count and photos.photos:
                 photo_file_id = photos.photos[0][-1].file_id
         except Exception as exc:
-            logger.info("Could not fetch Telegram profile photo for intro", extra={"error": str(exc)})
+            logger.info("Could not fetch Telegram profile photo for intro: %s", exc)
 
-    session: AsyncSession = message.bot.get("unused_session") if False else None
-    # DatabaseMiddleware injects the current update's session through handler kwargs.
-    # The state data is kept until this handler receives the session below.
-    await state.update_data(intro_pending_photo=photo_file_id)
-    await message.answer("💾 Saving your introduction…")
-    await state.set_state(IntroSetup.photo)
-    await state.update_data(intro_ready_to_save=True)
-
-
-async def persist_intro_profile(message: Message, state: FSMContext, db_session: AsyncSession):
-    data = await state.get_data()
-    fields = data.get("intro_fields") or {}
-    entities = data.get("intro_entities") or {}
-    profile = await db_session.get(IntroProfile, message.from_user.id)
+    profile = await db_session.get(IntroProfile, user.id)
     if profile is None:
-        profile = IntroProfile(user_id=message.from_user.id)
+        profile = IntroProfile(user_id=user.id)
         db_session.add(profile)
-    profile.nickname = fields.get("nickname") or (message.from_user.first_name or "Member")
+    profile.nickname = fields.get("nickname") or (user.first_name or "Member")
     profile.about = fields.get("about")
     profile.hobbies = fields.get("hobbies")
     profile.interests = fields.get("interests")
     profile.languages = fields.get("languages")
     profile.favourite = fields.get("favourite")
-    profile.photo_file_id = data.get("intro_pending_photo")
-    profile.field_entities = entities
+    profile.photo_file_id = photo_file_id
+    profile.field_entities = data.get("intro_entities") or {}
     await db_session.flush()
     await state.clear()
-    await message.answer(
+    await reply_message.answer(
         "🎉 <b>Your introduction is saved!</b>\n\n"
         "Use /intro in a group to show your card, or /setintro anytime to update it.",
         parse_mode="HTML",
     )
 
 
-# Complete the photo/skip step with the middleware's active database session.
-@router.message(IntroSetup.photo, F.photo, flags={"intro_save": True})
-async def save_intro_photo(message: Message, state: FSMContext, db_session: AsyncSession, **kwargs):
-    await state.update_data(intro_photo_file_id=message.photo[-1].file_id)
-    await persist_intro_profile(message, state, db_session)
-
-
-@router.message(IntroSetup.photo, F.text, flags={"intro_save": True})
-async def save_intro_without_photo(message: Message, state: FSMContext, db_session: AsyncSession, **kwargs):
-    if not message.text or message.text.strip().lower() not in {"/skip", "skip"}:
-        await message.answer("Please send a photo or tap Skip.")
+@router.message(IntroSetup.photo)
+async def collect_intro_photo(message: Message, state: FSMContext, db_session: AsyncSession, **kwargs):
+    if message.photo:
+        await state.update_data(intro_photo_file_id=message.photo[-1].file_id)
+        await _persist_intro_profile(message.from_user, message, state, db_session, message.bot)
         return
-    await persist_intro_profile(message, state, db_session)
-
-
-@router.callback_query(F.data == "intro:skip", IntroSetup.photo)
-async def save_intro_skip_callback(callback: CallbackQuery, state: FSMContext, db_session: AsyncSession, **kwargs):
-    if callback.message:
-        data = await state.get_data()
-        photo_file_id = data.get("intro_photo_file_id")
-        if not photo_file_id:
-            try:
-                photos = await callback.bot.get_user_profile_photos(callback.from_user.id, limit=1)
-                if photos.total_count and photos.photos:
-                    photo_file_id = photos.photos[0][-1].file_id
-            except Exception as exc:
-                logger.info("Could not fetch Telegram profile photo for intro", extra={"error": str(exc)})
-        await state.update_data(intro_pending_photo=photo_file_id)
-        await persist_intro_profile(callback.message, state, db_session)
-    await callback.answer("Saved")
+    if message.text and message.text.strip().lower() in {"/skip", "skip"}:
+        await _persist_intro_profile(message.from_user, message, state, db_session, message.bot)
+        return
+    await message.answer("Please send a photo, or tap Skip to use your Telegram profile photo.")
 
 
 def _utf16_len(value: str) -> int:
@@ -300,7 +259,10 @@ def _build_intro_card(profile: IntroProfile, user: User):
         prefix = "🔗 Telegram: "
         offset = _utf16_len("".join(parts) + prefix)
         parts.append(prefix + username_label + "\n")
-        entities.append(MessageEntity(type="text_link", offset=offset, length=_utf16_len(username_label), url=f"tg://user?id={user.id}"))
+        entities.append(MessageEntity(
+            type="text_link", offset=offset, length=_utf16_len(username_label),
+            url=f"tg://user?id={user.id}",
+        ))
     else:
         parts.append(f"🆔 Telegram ID: {user.id}\n")
 
@@ -339,13 +301,14 @@ async def _show_intro(message: Message, target: User, db_session: AsyncSession):
         try:
             await message.answer_photo(photo=profile.photo_file_id)
         except Exception as exc:
-            logger.info("Could not send saved intro photo", extra={"error": str(exc)})
+            logger.info("Could not send saved intro photo: %s", exc)
     try:
         await message.answer(card_text, entities=entities or None, parse_mode=None, disable_web_page_preview=True)
     except Exception as exc:
-        # If Telegram rejects a custom emoji entity (for example, if the bot
-        # owner's account lacks Premium), retain the readable fallback emoji.
-        logger.warning("Could not send intro entities; retrying plain text", extra={"error": str(exc)})
+        # Telegram requires the bot owner's Premium subscription (or eligible
+        # Fragment usernames) to send custom emoji entities. Keep readable text
+        # available if Telegram rejects those entities.
+        logger.warning("Could not send intro entities; retrying plain text: %s", exc)
         await message.answer(card_text, parse_mode=None, disable_web_page_preview=True)
 
 
@@ -357,8 +320,7 @@ async def show_intro(message: Message, db_session: AsyncSession, **kwargs):
     target = None
     args = (message.text or "").split(maxsplit=1)
     if message.reply_to_message and message.reply_to_message.from_user:
-        target_id = message.reply_to_message.from_user.id
-        target = await db_session.get(User, target_id)
+        target = await db_session.get(User, message.reply_to_message.from_user.id)
     elif len(args) > 1 and args[1].strip().startswith("@"):
         username = args[1].strip().split()[0].lstrip("@").lower()
         target = await db_session.scalar(select(User).where(func.lower(User.username) == username))
@@ -378,11 +340,3 @@ async def delete_intro(message: Message, db_session: AsyncSession, **kwargs):
         return
     await db_session.delete(profile)
     await message.answer("🗑️ Your introduction has been deleted.")
-
-
-@router.message(Command("introfinish"))
-async def finish_intro(message: Message, state: FSMContext, db_session: AsyncSession, **kwargs):
-    if await state.get_state() == IntroSetup.photo.state:
-        await persist_intro_profile(message, state, db_session)
-    else:
-        await message.answer("Please finish the current step first.")
