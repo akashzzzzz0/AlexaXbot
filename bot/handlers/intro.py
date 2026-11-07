@@ -165,17 +165,26 @@ async def collect_intro_text(message: Message, state: FSMContext):
         return
 
     field = _STEPS[index][0]
-    value = message.text.strip()
+    raw_value = message.text
+    value = raw_value.strip()
+    # Telegram entity offsets refer to the original message, before strip().
+    leading_trim_units = _utf16_length(raw_value[:len(raw_value) - len(raw_value.lstrip())])
     limit = 500 if field == "about" else 250
     if len(value) > limit:
         await message.answer(f"Please keep this answer under {limit} characters.")
         return
 
-    custom_entities = [
-        entity.model_dump(mode="json", exclude_none=True)
-        for entity in (message.entities or [])
-        if getattr(entity.type, "value", entity.type) == "custom_emoji"
-    ]
+    custom_entities = []
+    for entity in (message.entities or []):
+        if getattr(entity.type, "value", entity.type) != "custom_emoji":
+            continue
+        entity_data = entity.model_dump(mode="json", exclude_none=True)
+        # Store offsets relative to the trimmed value so they remain correct
+        # when the profile is later rendered as a Telegram-native message.
+        entity_data["offset"] = int(entity_data.get("offset", 0)) - leading_trim_units
+        if entity_data["offset"] < 0:
+            continue
+        custom_entities.append(entity_data)
     if custom_entities and not bool(getattr(message.from_user, "is_premium", False)):
         await message.answer(
             "⭐ Telegram Premium Custom Emojis are available in your intro only when your Telegram account has Premium. "
@@ -365,8 +374,13 @@ def _utf16_length(value: str) -> int:
     return len(value.encode("utf-16-le")) // 2
 
 
+def _utf16_slice(value: str, offset: int, length: int) -> str:
+    encoded = value.encode("utf-16-le")
+    return encoded[offset * 2:(offset + length) * 2].decode("utf-16-le", errors="ignore")
+
+
 def _build_intro_telegram_text(profile: IntroProfile, target: User):
-    """Build a Telegram-native copy so Premium custom emoji entities stay intact."""
+    """Build a Telegram-native copy with correctly rebased Premium emoji entities."""
     nickname = (profile.nickname or "").strip() or (target.first_name or "Member")
     lines = ["✨ PERSONAL INTRODUCTION ✨", f"👤 {nickname}"]
     if target.username:
@@ -383,10 +397,9 @@ def _build_intro_telegram_text(profile: IntroProfile, target: User):
         value = getattr(profile, field, None)
         if not value:
             continue
+        value = str(value)
         prefix = f"{label}: "
-        current_text = "\n".join(lines) + "\n"
-        base_offset = _utf16_length(current_text + prefix)
-        lines.append(prefix + str(value))
+        base_offset = _utf16_length("\n".join(lines) + "\n" + prefix)
         for raw_entity in saved_entities.get(field, []) or []:
             if not isinstance(raw_entity, dict):
                 continue
@@ -396,19 +409,22 @@ def _build_intro_telegram_text(profile: IntroProfile, target: User):
                 entity_data = dict(raw_entity)
                 local_offset = int(entity_data.get("offset", 0))
                 local_length = int(entity_data.get("length", 0))
-                if local_offset < 0 or local_length <= 0:
+                value_length = _utf16_length(value)
+                if local_offset < 0 or local_length <= 0 or local_offset + local_length > value_length:
                     continue
-                if local_offset + local_length > _utf16_length(str(value)):
+                # Telegram requires the custom-emoji entity to cover its
+                # complete Unicode fallback emoji, not surrounding text.
+                fallback_emoji = _utf16_slice(value, local_offset, local_length)
+                if not fallback_emoji:
                     continue
                 entity_data["offset"] = base_offset + local_offset
                 entity = MessageEntity.model_validate(entity_data)
-                if entity.offset >= base_offset and entity.length > 0:
-                    entities.append(entity)
-            except (TypeError, ValueError):
+                entities.append(entity)
+            except (TypeError, ValueError, UnicodeError):
                 logger.warning("Skipping invalid saved intro custom-emoji entity")
+        lines.append(prefix + value)
     lines.append("\n💜 Powered by ALEXA")
     return "\n".join(lines), entities
-
 
 async def _show_intro(message: Message, target: User, db_session: AsyncSession):
     profile = await db_session.get(IntroProfile, target.id)
@@ -440,21 +456,31 @@ async def _show_intro(message: Message, target: User, db_session: AsyncSession):
             logger.info("Telegram profile-photo fallback unavailable for intro: %s", exc)
             photo_bytes = None
 
+    telegram_text, telegram_entities = _build_intro_telegram_text(profile, target)
     try:
         card = _render_intro_card(profile, target, photo_bytes)
         await message.answer_photo(photo=card)
-        # Pillow cannot draw Telegram Premium custom emoji. Send a Telegram-native
-        # companion only when such entities exist, preserving their original IDs.
-        telegram_text, telegram_entities = _build_intro_telegram_text(profile, target)
-        if telegram_entities:
-            await message.answer(telegram_text, entities=telegram_entities, disable_web_page_preview=True)
-    except Exception as exc:
-        logger.exception("Could not render intro card image: %s", exc)
-        fallback_text, fallback_entities = _build_intro_telegram_text(profile, target)
-        if fallback_entities:
-            await message.answer(fallback_text, entities=fallback_entities, disable_web_page_preview=True)
-        else:
-            await message.answer(fallback_text, disable_web_page_preview=True)
+    except Exception:
+        logger.exception("Could not render intro card image")
+        # Keep the profile view available even if Pillow/photo rendering fails.
+        if not telegram_entities:
+            await message.answer(telegram_text, disable_web_page_preview=True)
+            return
+
+    # Pillow cannot draw Telegram custom emoji. Telegram-native message entities
+    # are required for the Premium emoji to render; send them separately.
+    if telegram_entities:
+        try:
+            await message.answer(
+                telegram_text,
+                entities=telegram_entities,
+                disable_web_page_preview=True,
+            )
+        except Exception:
+            logger.exception("Telegram rejected custom emoji entities in intro output")
+            # Preserve the readable fallback emoji/text rather than retrying the
+            # same invalid entities and failing the entire /intro command.
+            await message.answer(telegram_text, disable_web_page_preview=True)
 
 
 @router.message(Command("intro"))
