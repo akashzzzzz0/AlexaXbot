@@ -4,11 +4,11 @@ from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.types import Message, ChatMemberUpdated, ChatPermissions, CallbackQuery
 from aiogram.filters import ChatMemberUpdatedFilter, JOIN_TRANSITION, LEAVE_TRANSITION
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, update, func
+from sqlalchemy import select, and_, update, func, delete
 from sqlalchemy.exc import IntegrityError
 from bot.database.models import (
     Group, GroupMember, GroupSettings, WelcomeSettings, GoodbyeSettings,
-    SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig, CaptchaChallenge, GroupStats, User, GroupFilter, GroupBlocklist, ActionLog, DailyGroupMessageStat
+    SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig, CaptchaChallenge, GroupStats, User, GroupFilter, GroupBlocklist, ActionLog, DailyGroupMessageStat, Warning
 )
 from bot.services.security_service import (
     check_message_violations, is_raid_detected, create_captcha_challenge,
@@ -332,19 +332,13 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
                         )
                         if muted:
                             minutes = max(1, applied_duration // 60)
-                            builder = InlineKeyboardBuilder()
-                            builder.button(
-                                text="🔓 Verify Bio & Unmute",
-                                callback_data=f"bio_unmute:{chat.id}:{user.id}",
-                            )
-                            builder.adjust(1)
                             await event.bot.send_message(
                                 chat.id,
                                 f"🔇 {user_link} [<code>{user.id}</code>] muted for {minutes} minute(s).\n"
                                 f"❌ Reason: {reason}\n"
-                                "Remove the link from your bio, then tap the button below. ALEXA will verify it before unmuting.",
+                                "Group admins can whitelist this member or unmute and reset their Bio Link Protection warnings below.",
                                 parse_mode="HTML",
-                                reply_markup=builder.as_markup(),
+                                reply_markup=_bio_admin_action_keyboard(chat.id, user.id),
                             )
                         else:
                             await _send_temporary_notice(
@@ -501,6 +495,21 @@ async def _handle_captcha(event, db_session, security, user, chat, _):
             logger.error("Captcha message failed", error=str(e))
 
 
+def _bio_admin_action_keyboard(group_id: int, user_id: int, *, include_whitelist: bool = True):
+    builder = InlineKeyboardBuilder()
+    if include_whitelist:
+        builder.button(
+            text="✅ Whitelist",
+            callback_data=f"bio_admin:whitelist:{group_id}:{user_id}",
+        )
+    builder.button(
+        text="🔓 Unmute + Reset Warnings",
+        callback_data=f"bio_admin:unmute:{group_id}:{user_id}",
+    )
+    builder.adjust(2 if include_whitelist else 1)
+    return builder.as_markup()
+
+
 @router.callback_query(F.data.startswith("bio_unmute:"))
 async def bio_unmute_after_profile_fix(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
     """Unmute only the member whose bio-link mute created this verification button."""
@@ -584,6 +593,115 @@ async def bio_unmute_after_profile_fix(callback: CallbackQuery, db_session: Asyn
         )
     except Exception:
         pass
+
+
+@router.callback_query(F.data.startswith("bio_admin:"))
+async def bio_link_admin_action(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    """Allow group admins to whitelist a bio-link member or unmute and clear warnings."""
+    try:
+        _, action, raw_group_id, raw_user_id = (callback.data or "").split(":", 3)
+        group_id, user_id = int(raw_group_id), int(raw_user_id)
+    except (ValueError, TypeError):
+        await callback.answer("This Bio Link Protection action is invalid.", show_alert=True)
+        return
+
+    if action not in {"whitelist", "unmute"}:
+        await callback.answer("Unknown Bio Link Protection action.", show_alert=True)
+        return
+    if not callback.message or callback.message.chat.id != group_id:
+        await callback.answer("This button belongs to a different group.", show_alert=True)
+        return
+
+    try:
+        admin = await callback.bot.get_chat_member(group_id, callback.from_user.id)
+    except Exception:
+        await callback.answer("Could not verify your group admin status.", show_alert=True)
+        return
+    if admin.status not in {"administrator", "creator", "owner"}:
+        await callback.answer("Only group admins can use these buttons.", show_alert=True)
+        return
+    if action == "unmute" and admin.status != "creator" and not getattr(admin, "can_restrict_members", False):
+        await callback.answer("You need Restrict Members permission to unmute.", show_alert=True)
+        return
+
+    member = await db_session.scalar(
+        select(GroupMember).where(
+            GroupMember.group_id == group_id,
+            GroupMember.user_id == user_id,
+        )
+    )
+    if member is None:
+        await callback.answer("The member record is unavailable. No changes were made.", show_alert=True)
+        return
+
+    latest_mute = await db_session.scalar(
+        select(ActionLog)
+        .where(
+            ActionLog.group_id == group_id,
+            ActionLog.user_id == user_id,
+            ActionLog.action == "mute",
+        )
+        .order_by(ActionLog.created_at.desc(), ActionLog.id.desc())
+        .limit(1)
+    )
+    details = (latest_mute.details or {}) if latest_mute else {}
+    mute_reason = details.get("reason", "") if isinstance(details, dict) else ""
+    if not latest_mute or "bio" not in str(mute_reason).lower():
+        await callback.answer("This member's latest mute was not caused by Bio Link Protection.", show_alert=True)
+        return
+
+    if action == "whitelist":
+        try:
+            member.is_whitelisted = True
+            await db_session.commit()
+        except Exception as exc:
+            await db_session.rollback()
+            logger.warning("Could not whitelist bio-link member", group_id=group_id, user_id=user_id, error=str(exc))
+            await callback.answer("Could not save the whitelist entry. Try again.", show_alert=True)
+            return
+
+        try:
+            await callback.message.edit_reply_markup(
+                reply_markup=_bio_admin_action_keyboard(group_id, user_id, include_whitelist=False)
+            )
+        except Exception:
+            pass
+        await callback.answer("Member added to the Bio Link Protection whitelist.")
+        return
+
+    ok = await unmute_user(callback.bot, db_session, group_id, user_id, callback.from_user.id)
+    if not ok:
+        await db_session.rollback()
+        await callback.answer("Unmute failed. Check Alexa's Restrict Members permission.", show_alert=True)
+        return
+    try:
+        await db_session.execute(
+            delete(Warning).where(
+                Warning.group_id == group_id,
+                Warning.user_id == user_id,
+            )
+        )
+        member.warn_count = 0
+        await db_session.commit()
+    except Exception as exc:
+        await db_session.rollback()
+        logger.warning("Could not reset bio-link warnings after unmute", group_id=group_id, user_id=user_id, error=str(exc))
+        await callback.answer("Unmute was attempted, but warning reset could not be saved. Please retry after checking the database.", show_alert=True)
+        return
+
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    try:
+        await callback.bot.send_message(
+            group_id,
+            f"✅ {mention_user(user_id, f'User {user_id}')} has been unmuted by an admin. Bio-link warnings have been reset.",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+    await callback.answer("Member unmuted and Bio Link Protection warnings reset.")
 
 
 @router.callback_query(F.data.startswith("captcha_verify:"))
@@ -1045,10 +1163,12 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                                             message.bot.id, duration, "3 bio-link warnings reached"
                                         )
                                         notice = (
-                                            ""
+                                            f"🔇 {user_link} was muted after reaching 3/3 Bio Link Protection warnings."
                                             if muted else
                                             f"⚠️ {user_link} — bio-link warning limit reached (3/3), but mute failed. Check ALEXA's Restrict Members permission."
                                         )
+                                        if muted:
+                                            notice_markup = _bio_admin_action_keyboard(db_group.id, db_user.id)
                                     elif reached and action == "warn_ban":
                                         banned = await ban_user(
                                             message.bot, db_session, db_group.id, db_user.id,
@@ -1072,10 +1192,12 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                                         message.bot.id, duration, "Link found in profile bio"
                                     )
                                 notice = (
-                                    ""
+                                    f"🔇 {user_link} was muted by Bio Link Protection."
                                     if muted else
                                     f"⚠️ {user_link} — message removed because a link was found in the member's bio, but mute failed. Check ALEXA's Restrict Members permission."
                                 )
+                                if muted:
+                                    notice_markup = _bio_admin_action_keyboard(db_group.id, db_user.id)
                             else:
                                 banned = False
                                 if db_user:
@@ -1086,7 +1208,12 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                                 notice = "" if banned else f"⚠️ {user_link} — message removed, but ban failed. Check ALEXA's Ban Users permission."
                             if notice:
                                 try:
-                                    await message.bot.send_message(message.chat.id, notice, parse_mode="HTML")
+                                    await message.bot.send_message(
+                                        message.chat.id,
+                                        notice,
+                                        parse_mode="HTML",
+                                        reply_markup=locals().get("notice_markup"),
+                                    )
                                 except Exception:
                                     pass
                             return
