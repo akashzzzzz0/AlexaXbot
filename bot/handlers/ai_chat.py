@@ -393,7 +393,7 @@ def _looks_like_smart_reply_candidate(text: str) -> bool:
     # Unaddressed messages qualify only when they clearly ask something or request help.
     return bool(
         re.search(
-            r"[?؟]|\\b(?:kya|kyun|kaise|kaisa|kaisi|kab|kahan|kon|kaun|who|what|why|how|when|where|which|anyone|suggest|opinion|batao|help|madad|guide)\\b",
+            r"[?؟]|\b(?:kya|kyun|kaise|kaisa|kaisi|kab|kahan|kon|kaun|who|what|why|how|when|where|which|anyone|suggest|opinion|batao|help|madad|guide)\b",
             value,
             re.IGNORECASE,
         )
@@ -581,7 +581,7 @@ async def _ask_ollama(
             return ""
         raise
     answer = answer[:700].rsplit(" ", 1)[0] if answer else ""
-    if re.search(r"(?i)\\ballah\\b|الله|اللّٰه", answer):
+    if re.search(r"(?i)\ballah\b|الله|اللّٰه", answer):
         logger.warning("Alexa Ollama response was rejected by the existing vocabulary filter")
         return ""
     return answer
