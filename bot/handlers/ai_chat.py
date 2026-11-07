@@ -87,11 +87,12 @@ def _reaction_for_text(text: str) -> str | None:
     F.text,
 )
 async def alexa_group_message_reactions(message: Message) -> None:
-    """Only consider occasional reactions to messages explicitly mentioning Alexa."""
+    """Observe group activity without consuming updates needed by the AI handler."""
     if not message.from_user or message.from_user.is_bot:
         return
     if (message.text or "").lstrip().startswith("/"):
         return
+    _record_group_activity(message)
     asyncio.create_task(_maybe_react(message))
     # This observer is registered before the AI chat handler. Let the update
     # continue so normal group messages can reach alexa_ai_chat as well.
@@ -368,6 +369,35 @@ _smart_reply_user_last_check: dict[tuple[int, int], float] = {}
 _SMART_REPLY_GROUP_COOLDOWN_SECONDS = 15.0
 _SMART_REPLY_USER_COOLDOWN_SECONDS = 45.0
 
+# Track recent human participation so opportunistic replies never cut into
+# an active member-to-member conversation. Explicit Alexa calls bypass this.
+_GROUP_ACTIVITY_WINDOW_SECONDS = 90.0
+_group_recent_activity: dict[int, deque] = defaultdict(lambda: deque(maxlen=40))
+
+
+def _record_group_activity(message: Message) -> None:
+    now = time.monotonic()
+    activity = _group_recent_activity[message.chat.id]
+    user_ids = {message.from_user.id}
+    replied_user = getattr(message.reply_to_message, "from_user", None)
+    if replied_user and not replied_user.is_bot:
+        user_ids.add(replied_user.id)
+    for user_id in user_ids:
+        activity.append((now, user_id))
+
+
+def _group_conversation_is_active(chat_id: int) -> bool:
+    now = time.monotonic()
+    activity = _group_recent_activity.get(chat_id)
+    if not activity:
+        return False
+    while activity and now - activity[0][0] > _GROUP_ACTIVITY_WINDOW_SECONDS:
+        activity.popleft()
+    # Two or more distinct members recently participating means Alexa should
+    # stay out unless someone explicitly addresses her.
+    return len({user_id for _, user_id in activity}) >= 2
+
+
 _GREETING_RE = re.compile(
     r"^\s*(?:hi+|hello+|helo+|hey+|salam|assalamualaikum|aoa|"
     r"good\s+(?:morning|afternoon|evening|night)|good\s+day|morning|afternoon|evening|gm|gn)(?:\b.*)?$",
@@ -416,7 +446,9 @@ def _smart_group_reply_fallback(user_text: str) -> str:
 
 
 def _should_smart_reply(message: Message, text: str) -> bool:
-    """Allow one model-judged, unaddressed reply per group/user cooldown."""
+    """Reply only when one member is speaking and the group is otherwise quiet."""
+    if _group_conversation_is_active(message.chat.id):
+        return False
     if not _looks_like_smart_reply_candidate(text):
         return False
     now = time.monotonic()
