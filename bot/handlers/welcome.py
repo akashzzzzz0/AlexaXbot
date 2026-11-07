@@ -214,7 +214,7 @@ async def _send_welcome_message(bot, db_session, chat, user):
     display_name = " ".join(
         part for part in (user.first_name, user.last_name) if part
     ) or f"User#{user.id}"
-    clickable_name = mention_user(user.id, escape(display_name))
+    clickable_name = mention_user(user.id, display_name)
     replacements = {
         # Both common name placeholders must be real Telegram mentions,
         # so existing custom welcome templates become tappable without edits.
@@ -982,7 +982,7 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                         )
                     if notice:
                         try:
-                            await message.bot.send_message(message.chat.id, notice)
+                            await message.bot.send_message(message.chat.id, notice, parse_mode="HTML")
                         except Exception:
                             pass
                 return
@@ -1029,6 +1029,10 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                                 await message.delete()
                             except Exception:
                                 pass
+                            user_link = mention_user(
+                                message.from_user.id,
+                                message.from_user.full_name or message.from_user.first_name or f"User {message.from_user.id}",
+                            )
                             if action in ("warn", "warn_mute", "warn_ban"):
                                 if db_user:
                                     count, reached = await warn_user(
@@ -1057,9 +1061,9 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                                         )
                                     else:
                                         next_action = "muted" if action == "warn_mute" else "banned" if action == "warn_ban" else "moderated"
-                                        notice = f"⚠️ Message removed. Bio-link warning {count}/3. At 3 warnings, the member will be {next_action}."
+                                        notice = f"⚠️ {user_link} — message removed. Bio-link warning {count}/3. At 3 warnings, the member will be {next_action}."
                                 else:
-                                    notice = "⚠️ Message removed because a link was found in your bio. Please remove it."
+                                    notice = f"⚠️ {user_link}, message removed because a link was found in your bio. Please remove it."
                             elif action == "mute":
                                 muted = False
                                 if db_user:
@@ -1079,7 +1083,7 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                                         message.bot, db_session, db_group.id, db_user.id,
                                         message.bot.id, "Link found in profile bio"
                                     )
-                                notice = "" if banned else "⚠️ Message removed, but ban failed. Check ALEXA's Ban Users permission."
+                                notice = "" if banned else f"⚠️ {user_link} — message removed, but ban failed. Check ALEXA's Ban Users permission."
                             if notice:
                                 try:
                                     await message.bot.send_message(message.chat.id, notice)
