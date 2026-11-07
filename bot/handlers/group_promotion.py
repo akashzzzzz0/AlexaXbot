@@ -10,7 +10,7 @@ from aiogram.filters import StateFilter
 from aiogram.enums import ChatType
 from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, ChatMemberUpdated, InlineKeyboardMarkup, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import desc, select
 from sqlalchemy.exc import IntegrityError
@@ -348,6 +348,125 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
         can_invite_users=can_invite_users,
         group_resolved=group_resolved,
     )
+
+@router.my_chat_member()
+async def resolve_private_promotion_when_alexa_is_added(
+    event: ChatMemberUpdated,
+    db_session: AsyncSession,
+    **kwargs,
+):
+    """Resolve a private invite request when its requester adds/promotes Alexa."""
+    if event.chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}:
+        return
+    if not event.from_user or event.from_user.is_bot:
+        return
+
+    new_status = str(
+        getattr(event.new_chat_member.status, "value", event.new_chat_member.status)
+    ).lower()
+    if new_status not in {"administrator", "creator"}:
+        return
+
+    # Never guess which private invite belongs to this chat. Match the person
+    # who submitted the link to the person who added/promoted Alexa, and require
+    # exactly one unresolved request from that person.
+    pending = (await db_session.scalars(
+        select(GroupPromotionRequest)
+        .where(
+            GroupPromotionRequest.user_id == event.from_user.id,
+            GroupPromotionRequest.group_id <= _UNRESOLVED_PRIVATE_ID_BASE,
+            GroupPromotionRequest.status == "pending",
+        )
+        .order_by(desc(GroupPromotionRequest.requested_at))
+        .limit(2)
+    )).all()
+    if len(pending) != 1:
+        if len(pending) > 1:
+            logger.warning(
+                "Ambiguous private promotion request for requester_id=%s, chat_id=%s",
+                event.from_user.id,
+                event.chat.id,
+            )
+        return
+
+    request = pending[0]
+    try:
+        me = await event.bot.get_me()
+        member = await event.bot.get_chat_member(event.chat.id, me.id)
+        status = str(getattr(member.status, "value", member.status)).lower()
+    except Exception:
+        logger.exception("Could not verify Alexa in chat_id=%s", event.chat.id)
+        return
+    if status not in {"administrator", "creator"}:
+        return
+
+    can_invite = status == "creator" or bool(
+        getattr(member, "can_invite_users", False)
+    )
+    chat_type = str(getattr(event.chat.type, "value", event.chat.type))
+    group = await db_session.get(Group, event.chat.id)
+    if group is None:
+        group = await _insert_or_get_group(
+            db_session,
+            Group(
+                id=event.chat.id,
+                title=event.chat.title or request.group_title or "Telegram Group",
+                username=event.chat.username,
+                type=chat_type,
+                is_active=True,
+            ),
+        )
+    else:
+        group.title = event.chat.title or group.title
+        group.username = event.chat.username
+        group.type = chat_type
+        group.is_active = True
+
+    # Replace the synthetic unresolved key with Telegram's real chat ID.
+    # The existing owner proof and approval callbacks can then check rights live.
+    try:
+        async with db_session.begin_nested():
+            request.group_id = event.chat.id
+            request.group_title = event.chat.title or request.group_title
+            await db_session.flush()
+    except IntegrityError:
+        logger.warning(
+            "Cannot attach private promotion request: chat_id=%s already has an active request",
+            event.chat.id,
+        )
+        return
+
+    group.invite_link = request.group_link
+    await db_session.commit()
+    await db_session.refresh(request)
+
+    # The group notice is sent only after Alexa's admin status was confirmed.
+    try:
+        if can_invite:
+            notice = (
+                "✅ <b>Alexa group verification complete!</b>\n\n"
+                "👑 Administrator status: <b>Confirmed</b>\n"
+                "🔗 Invite-link permission: <b>Confirmed</b>\n"
+                "📨 Your promotion request has been sent to the owner for review."
+            )
+        else:
+            notice = (
+                "⚠️ <b>Alexa is an administrator, but verification is incomplete.</b>\n\n"
+                "Please grant Alexa the <b>Invite Users via Link</b> permission. "
+                "The owner will receive the current verification status."
+            )
+        await event.bot.send_message(event.chat.id, notice, parse_mode="HTML")
+    except Exception:
+        logger.exception("Could not post verification notice in chat_id=%s", event.chat.id)
+
+    await _send_owner_request(
+        event.bot,
+        request,
+        bot_status=status,
+        can_invite_users=can_invite,
+        group_resolved=True,
+    )
+
 
 @router.message(
     F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}),
