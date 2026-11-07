@@ -16,6 +16,7 @@ from pathlib import Path
 
 import httpx
 from aiogram import F, Router
+from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.enums import ChatType
 from aiogram.types import Message, ReactionTypeEmoji
 
@@ -92,6 +93,9 @@ async def alexa_group_message_reactions(message: Message) -> None:
     if (message.text or "").lstrip().startswith("/"):
         return
     asyncio.create_task(_maybe_react(message))
+    # This observer is registered before the AI chat handler. Let the update
+    # continue so normal group messages can reach alexa_ai_chat as well.
+    raise SkipHandler
 
 
 async def _explicitly_mentions_alexa(message: Message) -> bool:
