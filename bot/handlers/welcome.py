@@ -1047,7 +1047,7 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                                         notice = (
                                             ""
                                             if muted else
-                                            "⚠️ Bio-link warning limit reached (3/3), but mute failed. Check ALEXA's Restrict Members permission."
+                                            f"⚠️ {user_link} — bio-link warning limit reached (3/3), but mute failed. Check ALEXA's Restrict Members permission."
                                         )
                                     elif reached and action == "warn_ban":
                                         banned = await ban_user(
@@ -1057,7 +1057,7 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                                         notice = (
                                             ""
                                             if banned else
-                                            "⚠️ Bio-link warning limit reached (3/3), but ban failed. Check ALEXA's Ban Users permission."
+                                            f"⚠️ {user_link} — bio-link warning limit reached (3/3), but ban failed. Check ALEXA's Ban Users permission."
                                         )
                                     else:
                                         next_action = "muted" if action == "warn_mute" else "banned" if action == "warn_ban" else "moderated"
@@ -1074,7 +1074,7 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                                 notice = (
                                     ""
                                     if muted else
-                                    "⚠️ Message removed because a link was found in the member's bio, but mute failed. Check ALEXA's Restrict Members permission."
+                                    f"⚠️ {user_link} — message removed because a link was found in the member's bio, but mute failed. Check ALEXA's Restrict Members permission."
                                 )
                             else:
                                 banned = False
