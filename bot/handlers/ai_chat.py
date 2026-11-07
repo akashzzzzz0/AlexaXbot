@@ -376,14 +376,11 @@ _group_recent_activity: dict[int, deque] = defaultdict(lambda: deque(maxlen=40))
 
 
 def _record_group_activity(message: Message) -> None:
+    """Count only people who actually sent messages, not reply-to targets."""
+    if not message.from_user or message.from_user.is_bot:
+        return
     now = time.monotonic()
-    activity = _group_recent_activity[message.chat.id]
-    user_ids = {message.from_user.id}
-    replied_user = getattr(message.reply_to_message, "from_user", None)
-    if replied_user and not replied_user.is_bot:
-        user_ids.add(replied_user.id)
-    for user_id in user_ids:
-        activity.append((now, user_id))
+    _group_recent_activity[message.chat.id].append((now, message.from_user.id))
 
 
 def _group_conversation_is_active(chat_id: int) -> bool:
@@ -407,27 +404,10 @@ _ALEXA_PREFIX_RE = re.compile(r"^\s*alexa\b[\s,!:.-]*(.*)$", re.IGNORECASE)
 
 
 def _looks_like_smart_reply_candidate(text: str) -> bool:
-    """Only join unaddressed group chat for greetings, questions, or clear requests."""
-    value = text.strip().casefold()
-    if not value:
-        return False
-
-    # Simple greetings are intentional conversation openers.
-    if _GREETING_RE.match(value):
-        return True
-
-    # Do not interrupt ordinary statements, reactions, or long group discussions.
-    if re.fullmatch(r"(?:ok(?:ay)?|acha|hmm+|huh|nice|same|true|right|👍+|👌+|❤️+|😂+|🤣+|🙏+)[.!?\s]*", value):
-        return False
-
-    # Unaddressed messages qualify only when they clearly ask something or request help.
-    return bool(
-        re.search(
-            r"[?؟]|\b(?:kya|kyun|kaise|kaisa|kaisi|kab|kahan|kon|kaun|who|what|why|how|when|where|which|anyone|suggest|opinion|batao|help|madad|guide)\b",
-            value,
-            re.IGNORECASE,
-        )
-    )
+    """Allow a lone member's message in any language to reach Alexa."""
+    # Language-neutral by design: no English/Hindi greeting or keyword is
+    # required. Conversation detection and cooldowns decide when to stay quiet.
+    return bool((text or "").strip())
 
 
 def _smart_group_reply_fallback(user_text: str) -> str:
