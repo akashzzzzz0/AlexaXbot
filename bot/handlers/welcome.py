@@ -239,10 +239,10 @@ async def _send_welcome_message(bot, db_session, chat, user):
         dm_user = await db_session.get(User, user.id)
         if dm_user and dm_user.dm_started and consume_join_request_dm(chat.id, user.id):
             private_text = (
-                f"👋 Hello {escape(user.first_name or 'there')}!\\n\\n"
-                f"Welcome to <b>{escape(chat.title or 'the group')}</b>! 🎉\\n"
+                f"👋 Hello {escape(user.first_name or 'there')}!\n\n"
+                f"Welcome to <b>{escape(chat.title or 'the group')}</b>! 🎉\n"
                 "I’m ALEXA, the group’s assistant. I can help with group safety, "
-                "moderation and fun features.\\n\\n"
+                "moderation and fun features.\n\n"
                 "Have a great time in the community! 💜"
             )
             await bot.send_message(user.id, private_text, parse_mode="HTML")
@@ -317,8 +317,8 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
                         await event.bot.ban_chat_member(chat.id, user.id)
                         await event.bot.unban_chat_member(chat.id, user.id)
                         notice = (
-                            "🚫 <b>Member Removed</b> 🚫\\n\\n"
-                            f"👤 User: {user_link} [<code>{user.id}</code>]\\n"
+                            "🚫 <b>Member Removed</b> 🚫\n\n"
+                            f"👤 User: {user_link} [<code>{user.id}</code>]\n"
                             f"❌ Reason: {reason}"
                         )
                         await event.bot.send_message(chat.id, notice, parse_mode="HTML")
@@ -340,8 +340,8 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
                             builder.adjust(1)
                             await event.bot.send_message(
                                 chat.id,
-                                f"🔇 {user_link} [<code>{user.id}</code>] muted for {minutes} minute(s).\\n"
-                                f"❌ Reason: {reason}\\n"
+                                f"🔇 {user_link} [<code>{user.id}</code>] muted for {minutes} minute(s).\n"
+                                f"❌ Reason: {reason}\n"
                                 "Remove the link from your bio, then tap the button below. ALEXA will verify it before unmuting.",
                                 parse_mode="HTML",
                                 reply_markup=builder.as_markup(),
@@ -362,10 +362,10 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
                         )
                         await db_session.commit()
                         notice = (
-                            "🚨 <b>Warning Issued</b> 🚨\\n\\n"
-                            f"👤 User: {user_link} [<code>{user.id}</code>]\\n"
-                            f"❌ Reason: {reason}\\n"
-                            f"⚠️ Warning: {warning_count}/{max_warns}\\n\\n"
+                            "🚨 <b>Warning Issued</b> 🚨\n\n"
+                            f"👤 User: {user_link} [<code>{user.id}</code>]\n"
+                            f"❌ Reason: {reason}\n"
+                            f"⚠️ Warning: {warning_count}/{max_warns}\n\n"
                             "Notice: Please remove any links from your bio."
                         )
                         await event.bot.send_message(chat.id, notice, parse_mode="HTML")
