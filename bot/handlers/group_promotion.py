@@ -154,6 +154,9 @@ async def _send_owner_request(
     owner_id = settings.effective_owner_id
     if not owner_id:
         return
+    permission_report = await _live_permission_report(bot, request) if group_resolved else (
+        "⚠️ <b>Detailed permissions:</b> Waiting for Alexa to be added to the group so Telegram can provide its chat ID."
+    )
     text = (
         "📣 <b>NEW FREE GROUP PROMOTION REQUEST</b>\n\n"
         f"👥 <b>{escape(request.group_title)}</b>\n"
@@ -165,7 +168,8 @@ async def _send_owner_request(
         f"{'✅' if group_resolved else '⚠️'} Group identity: <b>{'Resolved' if group_resolved else 'Not resolvable by Telegram Bot API'}</b>\n"
         f"{'✅' if bot_status in {'administrator', 'creator'} else '❌' if group_resolved and bot_status != 'unknown' else '❔'} Alexa admin: <b>{'YES' if bot_status in {'administrator', 'creator'} else 'NO' if group_resolved and bot_status != 'unknown' else 'UNKNOWN'}</b>\n"
         f"{'✅' if can_invite_users else '❌' if group_resolved and bot_status != 'unknown' else '❔'} Invite-link right: <b>{'YES' if can_invite_users else 'NO' if group_resolved and bot_status != 'unknown' else 'UNKNOWN'}</b>\n\n"
-        "\n\n<b>Available owner actions:</b> Approve & Publish or Reject. Approval is accepted only after Alexa's group ID, admin status, and invite-link permission are confirmed.\n"
+        f"{permission_report}\n\n"
+        "<b>Available owner actions:</b> Approve & Publish or Reject. Approval is accepted only after Alexa's group ID, admin status, and invite-link permission are confirmed.\n"
         "Use <b>Refresh Verification Proof</b> to recheck Telegram permissions."
     )
     try:
@@ -397,7 +401,6 @@ async def resolve_private_promotion_when_alexa_is_added(
     pending = (await db_session.scalars(
         select(GroupPromotionRequest)
         .where(
-            GroupPromotionRequest.user_id == event.from_user.id,
             GroupPromotionRequest.group_id <= _UNRESOLVED_PRIVATE_ID_BASE,
             GroupPromotionRequest.status == "pending",
         )
