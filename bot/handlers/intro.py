@@ -210,18 +210,25 @@ async def _persist_intro_profile(user, reply_message: Message, state: FSMContext
     fields = data.get("intro_fields") or {}
     photo_file_id = data.get("intro_photo_file_id")
 
-    if not photo_file_id:
-        try:
-            photos = await bot.get_user_profile_photos(user.id, limit=1)
-            if photos.total_count and photos.photos:
-                photo_file_id = photos.photos[0][-1].file_id
-        except Exception as exc:
-            logger.info("Could not fetch Telegram profile photo for intro: %s", exc)
-
     profile = await db_session.get(IntroProfile, user.id)
     if profile is None:
         profile = IntroProfile(user_id=user.id)
         db_session.add(profile)
+
+    # Keep the previous saved photo when someone updates text and skips the
+    # photo step. A newly uploaded photo always takes priority.
+    if not photo_file_id and profile.photo_file_id:
+        photo_file_id = profile.photo_file_id
+
+    # If this is a new profile with no uploaded/saved photo, use the current
+    # Telegram profile photo as the initial avatar.
+    if not photo_file_id:
+        try:
+            photos = await bot.get_user_profile_photos(user.id, limit=1)
+            if photos.total_count and photos.photos and photos.photos[0]:
+                photo_file_id = photos.photos[0][-1].file_id
+        except Exception as exc:
+            logger.info("Could not fetch Telegram profile photo for intro: %s", exc)
     profile.nickname = fields.get("nickname") or (user.first_name or "Member")
     profile.about = fields.get("about")
     profile.hobbies = fields.get("hobbies")
@@ -426,49 +433,85 @@ def _build_intro_telegram_text(profile: IntroProfile, target: User):
     lines.append("\n💜 Powered by ALEXA")
     return "\n".join(lines), entities
 
+async def _load_intro_photo(bot, user_id: int, preferred_file_id=None):
+    """Download and validate a saved or current Telegram profile photo."""
+    candidate_ids = []
+    if preferred_file_id:
+        candidate_ids.append(preferred_file_id)
+
+    # If a previously saved Telegram file_id is no longer downloadable, try
+    # the user's latest profile photo before giving up.
+    try:
+        photos = await bot.get_user_profile_photos(user_id, limit=1)
+        if photos.total_count and photos.photos and photos.photos[0]:
+            latest_file_id = photos.photos[0][-1].file_id
+            if latest_file_id and latest_file_id not in candidate_ids:
+                candidate_ids.append(latest_file_id)
+    except Exception as exc:
+        logger.info("Could not look up current Telegram profile photo: %s", exc)
+
+    for file_id in candidate_ids:
+        try:
+            telegram_file = await bot.get_file(file_id)
+            if not telegram_file.file_path:
+                raise ValueError("Telegram returned an empty photo file path")
+            photo_bytes = io.BytesIO()
+            await bot.download_file(telegram_file.file_path, destination=photo_bytes)
+            photo_bytes.seek(0)
+            # Validate the downloaded bytes before passing them to Pillow.
+            with Image.open(photo_bytes) as image:
+                image.verify()
+            photo_bytes.seek(0)
+            return file_id, photo_bytes
+        except Exception as exc:
+            logger.warning("Could not download intro photo %s: %s", file_id, exc)
+
+    return (candidate_ids[-1] if candidate_ids else None), None
+
+
 async def _show_intro(message: Message, target: User, db_session: AsyncSession):
     profile = await db_session.get(IntroProfile, target.id)
     if not profile:
         await message.answer("👤 This member hasn't created an introduction yet.")
         return
 
-    photo_bytes = None
-    if profile.photo_file_id:
-        try:
-            photo_bytes = io.BytesIO()
-            await message.bot.download(profile.photo_file_id, destination=photo_bytes)
-            photo_bytes.seek(0)
-        except Exception as exc:
-            logger.info("Saved intro photo download failed; trying Telegram profile photo: %s", exc)
-            photo_bytes = None
-
-    # A saved upload can expire or become unavailable. Retry with the user's
-    # current Telegram profile photo before rendering the card without an avatar.
-    if photo_bytes is None:
-        try:
-            photos = await message.bot.get_user_profile_photos(target.id, limit=1)
-            if photos.total_count and photos.photos:
-                fallback_file_id = photos.photos[0][-1].file_id
-                photo_bytes = io.BytesIO()
-                await message.bot.download(fallback_file_id, destination=photo_bytes)
-                photo_bytes.seek(0)
-        except Exception as exc:
-            logger.info("Telegram profile-photo fallback unavailable for intro: %s", exc)
-            photo_bytes = None
-
+    photo_file_id, photo_bytes = await _load_intro_photo(
+        message.bot, target.id, profile.photo_file_id
+    )
     telegram_text, telegram_entities = _build_intro_telegram_text(profile, target)
+
+    card_sent = False
     try:
         card = _render_intro_card(profile, target, photo_bytes)
         await message.answer_photo(photo=card)
+        card_sent = True
     except Exception:
         logger.exception("Could not render intro card image")
-        # Keep the profile view available even if Pillow/photo rendering fails.
-        if not telegram_entities:
-            await message.answer(telegram_text, disable_web_page_preview=True)
-            return
 
-    # Pillow cannot draw Telegram custom emoji. Telegram-native message entities
-    # are required for the Premium emoji to render; send them separately.
+    # If the card could not embed the avatar, still show the original Telegram
+    # photo as a separate image instead of silently dropping it.
+    if photo_file_id and (not card_sent or photo_bytes is None):
+        try:
+            await message.answer_photo(photo=photo_file_id, caption="📸 Profile photo")
+        except Exception as exc:
+            logger.warning("Could not send intro photo fallback: %s", exc)
+
+    if not card_sent:
+        if telegram_entities:
+            try:
+                await message.answer(
+                    telegram_text,
+                    entities=telegram_entities,
+                    disable_web_page_preview=True,
+                )
+                return
+            except Exception:
+                logger.exception("Telegram rejected custom emoji entities in intro fallback")
+        await message.answer(telegram_text, disable_web_page_preview=True)
+        return
+
+    # Pillow cannot draw Telegram Premium custom emoji. Telegram-native message
+    # entities are required for those emojis to render.
     if telegram_entities:
         try:
             await message.answer(
@@ -478,8 +521,6 @@ async def _show_intro(message: Message, target: User, db_session: AsyncSession):
             )
         except Exception:
             logger.exception("Telegram rejected custom emoji entities in intro output")
-            # Preserve the readable fallback emoji/text rather than retrying the
-            # same invalid entities and failing the entire /intro command.
             await message.answer(telegram_text, disable_web_page_preview=True)
 
 
