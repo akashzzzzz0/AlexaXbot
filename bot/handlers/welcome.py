@@ -239,10 +239,10 @@ async def _send_welcome_message(bot, db_session, chat, user):
         dm_user = await db_session.get(User, user.id)
         if dm_user and dm_user.dm_started and consume_join_request_dm(chat.id, user.id):
             private_text = (
-                f"👋 Hello {escape(user.first_name or 'there')}!\\n\\n"
-                f"Welcome to <b>{escape(chat.title or 'the group')}</b>! 🎉\\n"
+                f"👋 Hello {escape(user.first_name or 'there')}!\n\n"
+                f"Welcome to <b>{escape(chat.title or 'the group')}</b>! 🎉\n"
                 "I’m ALEXA, the group’s assistant. I can help with group safety, "
-                "moderation and fun features.\\n\\n"
+                "moderation and fun features.\n\n"
                 "Have a great time in the community! 💜"
             )
             await bot.send_message(user.id, private_text, parse_mode="HTML")
@@ -309,11 +309,19 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
                 action = config.action if config else "mute"
                 duration = config.mute_duration if config else 3600
                 try:
+                    display_name = escape(user.full_name or user.first_name or "User")
+                    user_link = f'<a href="tg://user?id={user.id}">{display_name}</a>'
+                    reason = "URL found in bio"
+
                     if action == "ban":
                         await event.bot.ban_chat_member(chat.id, user.id)
                         await event.bot.unban_chat_member(chat.id, user.id)
-                        notice = "🚫 Member removed: profile bio contains a link."
-                        await _send_temporary_notice(event.bot, chat.id, notice)
+                        notice = (
+                            "🚫 <b>Member Removed</b> 🚫\n\n"
+                            f"👤 User: {user_link} [<code>{user.id}</code>]\n"
+                            f"❌ Reason: {reason}"
+                        )
+                        await event.bot.send_message(chat.id, notice, parse_mode="HTML")
                     elif action == "mute":
                         # Use the shared moderation service so the configured duration,
                         # full muted permissions, member state, and audit log stay in sync.
@@ -332,7 +340,8 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
                             builder.adjust(1)
                             await event.bot.send_message(
                                 chat.id,
-                                f"🔇 <a href=\"tg://user?id={user.id}\">Member</a> muted for {minutes} minute(s) because their profile bio contains a link.\n"
+                                f"🔇 {user_link} [<code>{user.id}</code>] muted for {minutes} minute(s).\n"
+                                f"❌ Reason: {reason}\n"
                                 "Remove the link from your bio, then tap the button below. ALEXA will verify it before unmuting.",
                                 parse_mode="HTML",
                                 reply_markup=builder.as_markup(),
@@ -343,8 +352,46 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
                                 "⚠️ Bio-link protection found a link in the member's profile, but the mute failed. Check ALEXA's Restrict Members permission."
                             )
                     else:
-                        notice = "⚠️ Warning: profile bio contains a link. Please remove it to avoid moderation."
-                        await _send_temporary_notice(event.bot, chat.id, notice)
+                        # Persist a real warning and show the member's clickable Telegram name.
+                        group_settings = await db_session.scalar(
+                            select(GroupSettings).where(GroupSettings.group_id == chat.id)
+                        )
+                        max_warns = max(1, int(group_settings.max_warns if group_settings else 3))
+                        warning_count, reached_limit = await warn_user(
+                            db_session, chat.id, user.id, event.bot.id, reason, max_warns
+                        )
+                        await db_session.commit()
+                        notice = (
+                            "🚨 <b>Warning Issued</b> 🚨\n\n"
+                            f"👤 User: {user_link} [<code>{user.id}</code>]\n"
+                            f"❌ Reason: {reason}\n"
+                            f"⚠️ Warning: {warning_count}/{max_warns}\n\n"
+                            "Notice: Please remove any links from your bio."
+                        )
+                        await event.bot.send_message(chat.id, notice, parse_mode="HTML")
+
+                        if reached_limit:
+                            if action == "warn_ban":
+                                await event.bot.ban_chat_member(chat.id, user.id)
+                                await event.bot.unban_chat_member(chat.id, user.id)
+                                await event.bot.send_message(
+                                    chat.id,
+                                    f"🚫 {user_link} has been removed after reaching the warning limit.",
+                                    parse_mode="HTML",
+                                )
+                                return
+                            applied_duration = max(60, int(duration or 3600))
+                            muted = await mute_user(
+                                event.bot, db_session, chat.id, user.id, event.bot.id,
+                                applied_duration, "Bio-link warning limit reached"
+                            )
+                            if muted:
+                                await event.bot.send_message(
+                                    chat.id,
+                                    f"🔇 {user_link} muted for {max(1, applied_duration // 60)} minute(s) after reaching the warning limit.",
+                                    parse_mode="HTML",
+                                )
+                                return
                 except Exception as action_exc:
                     logger.warning("Bio-link action failed", chat_id=chat.id, user_id=user.id, action=action, error=str(action_exc))
                 logger.info("Member bio contains a link", chat_id=chat.id, user_id=user.id, action=action)
