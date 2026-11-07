@@ -446,9 +446,10 @@ def _smart_group_reply_fallback(user_text: str) -> str:
 
 
 def _should_smart_reply(message: Message, text: str) -> bool:
-    """Reply only when one member is speaking and the group is otherwise quiet."""
-    if _group_conversation_is_active(message.chat.id):
-        return False
+    """Join selected group messages even during active chats, with strict cooldowns."""
+    # Do not suppress every opportunistic reply just because multiple members
+    # are chatting. The candidate filter below limits replies to greetings,
+    # genuine questions and clear requests; cooldowns prevent flooding.
     if not _looks_like_smart_reply_candidate(text):
         return False
     now = time.monotonic()
