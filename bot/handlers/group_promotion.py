@@ -577,7 +577,7 @@ async def _process_owner_promotion_action(callback: CallbackQuery, db_session: A
                 channel_id,
                 "📣 <b>VERIFIED GROUP — ALEXA FREE PROMOTION</b> 💜\n\n"
                 f"👥 <b>{escape(request.group_title)}</b>\n\n"
-                f"🔗 <a href=\"{escape(request.group_link, quote=True)}\">Open Group Link</a>\\n\\n"
+                f"🔗 <a href=\"{escape(request.group_link, quote=True)}\">Open Group Link</a>\n\n"
                 "Join this community using the link above or the button below. 🚀",
                 parse_mode="HTML",
                 reply_markup=builder.as_markup(),
@@ -672,7 +672,7 @@ async def promotion_request_proof(callback: CallbackQuery, db_session: AsyncSess
         f"🤖 Alexa membership: <b>{escape(status.title()) if resolved else 'UNKNOWN'}</b>\n"
         f"👑 Alexa is administrator: <b>{'YES' if is_admin else 'UNKNOWN' if status == 'unknown' or not resolved else 'NO'}</b>\n"
         f"🔗 Invite Users via Link right: <b>{'YES' if can_invite else 'UNKNOWN' if status == 'unknown' or not resolved else 'NO'}</b>\n\n"
-        + permission_report + "\\n\\n"
+        + permission_report + "\n\n"
         + (
             "✅ <b>Both required permissions are confirmed.</b> You can approve and publish."
             if is_admin and can_invite
