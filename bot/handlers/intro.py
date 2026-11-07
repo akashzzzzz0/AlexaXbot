@@ -1,4 +1,7 @@
+import io
 import logging
+
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from aiogram import F, Router
 from aiogram.filters import Command, StateFilter
@@ -239,59 +242,122 @@ async def collect_intro_photo(message: Message, state: FSMContext, db_session: A
     await message.answer("Please send a photo, or tap Skip to use your Telegram profile photo.")
 
 
-def _utf16_len(value: str) -> int:
-    return len(value.encode("utf-16-le")) // 2
-
-
-def _build_intro_card(profile: IntroProfile, user: User):
-    parts = ["✨ PERSONAL INTRODUCTION ✨\n"]
-    entities = []
-    nickname = profile.nickname or user.first_name or "Member"
-    nickname_offset = _utf16_len("✨ PERSONAL INTRODUCTION ✨\n👤 ")
-    parts.append("👤 " + nickname + "\n")
-    for raw in (profile.field_entities or {}).get("nickname", []):
+def _load_intro_font(size: int, bold: bool = False):
+    paths = (
+        ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+         "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"]
+        if bold else
+        ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+         "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf"]
+    )
+    for path in paths:
         try:
-            entity = MessageEntity.model_validate(raw)
-            entity.offset += nickname_offset
-            entities.append(entity)
-        except Exception:
+            return ImageFont.truetype(path, size=size)
+        except OSError:
             continue
+    return ImageFont.load_default()
 
-    if user.username:
-        username_label = "@" + user.username
-        prefix = "🔗 Telegram: "
-        offset = _utf16_len("".join(parts) + prefix)
-        parts.append(prefix + username_label + "\n")
-        entities.append(MessageEntity(
-            type="text_link", offset=offset, length=_utf16_len(username_label),
-            url=f"tg://user?id={user.id}",
-        ))
-    else:
-        parts.append(f"🆔 Telegram ID: {user.id}\n")
 
-    labels = [
-        ("about", "📝 About Me"),
-        ("hobbies", "🎮 Hobbies"),
-        ("interests", "💖 Interests"),
-        ("languages", "🌍 Languages"),
-        ("favourite", "⭐ Favourite Things"),
+def _wrap_intro_text(draw, value: str, font, max_width: int):
+    words = str(value).split()
+    lines = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if current and draw.textlength(candidate, font=font) > max_width:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines or [""]
+
+
+def _render_intro_card(profile: IntroProfile, user: User, photo_bytes=None):
+    """Render the member profile and all supplied answers into one image."""
+    width = 1080
+    margin = 54
+    inner_width = width - margin * 2
+    title_font = _load_intro_font(43, True)
+    name_font = _load_intro_font(48, True)
+    label_font = _load_intro_font(25, True)
+    body_font = _load_intro_font(27)
+    small_font = _load_intro_font(21)
+
+    nickname = (profile.nickname or "").strip() or (user.first_name or "Member")
+    sections = [
+        ("ABOUT ME", profile.about),
+        ("HOBBIES", profile.hobbies),
+        ("INTERESTS", profile.interests),
+        ("LANGUAGES", profile.languages),
+        ("FAVOURITE THINGS", profile.favourite),
     ]
-    for field, label in labels:
-        value = getattr(profile, field, None)
-        if not value:
-            continue
-        prefix = label + ": "
-        offset = _utf16_len("".join(parts) + prefix)
-        parts.append(prefix + value + "\n")
-        for raw in (profile.field_entities or {}).get(field, []):
-            try:
-                entity = MessageEntity.model_validate(raw)
-                entity.offset += offset
-                entities.append(entity)
-            except Exception:
-                continue
-    parts.append("\n💜 Powered by ALEXA")
-    return "".join(parts), entities
+    sections = [(label, str(value).strip()) for label, value in sections if value and str(value).strip()]
+
+    # Measure the card first so long answers fit without being clipped.
+    probe = Image.new("RGB", (width, 100), "#090511")
+    probe_draw = ImageDraw.Draw(probe)
+    section_layout = []
+    height = 360
+    for label, value in sections:
+        lines = _wrap_intro_text(probe_draw, value, body_font, inner_width - 58)
+        block_height = 76 + len(lines) * 39 + 28
+        section_layout.append((label, lines, block_height))
+        height += block_height + 18
+    height += 100
+
+    canvas = Image.new("RGB", (width, height), "#090511")
+    draw = ImageDraw.Draw(canvas)
+    # Subtle purple glow bands and a clean neon frame.
+    draw.rounded_rectangle((12, 12, width - 12, height - 12), radius=42,
+                           fill="#10091d", outline="#a64dff", width=5)
+    draw.rounded_rectangle((27, 27, width - 27, height - 27), radius=34,
+                           outline="#542080", width=2)
+    draw.text((margin, 55), "ALEXA  |  PERSONAL INTRO", font=title_font, fill="#e8c7ff")
+
+    # Integrated circular profile picture beside the name.
+    avatar_box = (margin, 132, margin + 170, 302)
+    draw.ellipse(avatar_box, fill="#28103f", outline="#d28aff", width=6)
+    if photo_bytes:
+        try:
+            photo_bytes.seek(0)
+            avatar = Image.open(photo_bytes).convert("RGB")
+            avatar = ImageOps.fit(avatar, (158, 158), method=Image.Resampling.LANCZOS)
+            mask = Image.new("L", (158, 158), 0)
+            ImageDraw.Draw(mask).ellipse((0, 0, 157, 157), fill=255)
+            canvas.paste(avatar, (margin + 6, 138), mask)
+            draw = ImageDraw.Draw(canvas)
+            draw.ellipse((margin + 3, 135, margin + 167, 299), outline="#d28aff", width=5)
+        except Exception:
+            logger.exception("Could not place intro profile photo in card")
+
+    name_x = margin + 205
+    draw.text((name_x, 160), nickname, font=name_font, fill="#ffffff")
+    if user.username:
+        draw.text((name_x + 2, 226), f"@{user.username}", font=small_font, fill="#cda8f4")
+    else:
+        draw.text((name_x + 2, 226), "ALEXA MEMBER", font=small_font, fill="#cda8f4")
+
+    y = 335
+    for label, lines, block_height in section_layout:
+        draw.rounded_rectangle((margin, y, width - margin, y + block_height),
+                               radius=25, fill="#1b1029", outline="#9a48d7", width=3)
+        draw.text((margin + 28, y + 18), label, font=label_font, fill="#d9a8ff")
+        text_y = y + 60
+        for line in lines:
+            draw.text((margin + 30, text_y), line, font=body_font, fill="#f7efff")
+            text_y += 39
+        y += block_height + 18
+
+    footer_y = height - 82
+    draw.line((margin, footer_y - 12, width - margin, footer_y - 12), fill="#65318d", width=2)
+    draw.text((margin, footer_y), "POWERED BY ALEXA", font=label_font, fill="#d9a8ff")
+    output = io.BytesIO()
+    canvas.save(output, format="PNG", optimize=True)
+    output.seek(0)
+    output.name = "alexa_intro_card.png"
+    return output
 
 
 async def _show_intro(message: Message, target: User, db_session: AsyncSession):
@@ -299,20 +365,40 @@ async def _show_intro(message: Message, target: User, db_session: AsyncSession):
     if not profile:
         await message.answer("👤 This member hasn't created an introduction yet.")
         return
-    card_text, entities = _build_intro_card(profile, target)
+
+    photo_bytes = None
     if profile.photo_file_id:
         try:
-            await message.answer_photo(photo=profile.photo_file_id)
+            photo_bytes = io.BytesIO()
+            await message.bot.download(profile.photo_file_id, destination=photo_bytes)
+            photo_bytes.seek(0)
         except Exception as exc:
-            logger.info("Could not send saved intro photo: %s", exc)
+            logger.info("Could not download saved intro photo: %s", exc)
+            photo_bytes = None
+
     try:
-        await message.answer(card_text, entities=entities or None, parse_mode=None, disable_web_page_preview=True)
+        card = _render_intro_card(profile, target, photo_bytes)
+        await message.answer_photo(photo=card)
     except Exception as exc:
-        # Telegram requires the bot owner's Premium subscription (or eligible
-        # Fragment usernames) to send custom emoji entities. Keep readable text
-        # available if Telegram rejects those entities.
-        logger.warning("Could not send intro entities; retrying plain text: %s", exc)
-        await message.answer(card_text, parse_mode=None, disable_web_page_preview=True)
+        # Keep the existing text-card route as a safe fallback if image rendering
+        # or upload fails; no separate profile-photo message is sent.
+        logger.exception("Could not render intro card image: %s", exc)
+        fallback_name = (profile.nickname or "").strip() or (target.first_name or "Member")
+        lines = [f"✨ PERSONAL INTRODUCTION ✨", f"👤 {fallback_name}"]
+        if target.username:
+            lines.append(f"🔗 Telegram: @{target.username}")
+        for field, label in (
+            ("about", "📝 About Me"),
+            ("hobbies", "🎮 Hobbies"),
+            ("interests", "💖 Interests"),
+            ("languages", "🌍 Languages"),
+            ("favourite", "⭐ Favourite Things"),
+        ):
+            value = getattr(profile, field, None)
+            if value:
+                lines.append(f"{label}: {value}")
+        lines.append("\n💜 Powered by ALEXA")
+        await message.answer("\n".join(lines), disable_web_page_preview=True)
 
 
 @router.message(Command("intro"))
