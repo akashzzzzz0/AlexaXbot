@@ -480,8 +480,12 @@ async def is_alexa_trigger(message: Message) -> bool:
         return True
 
     replied = message.reply_to_message
-    if replied and replied.from_user and replied.from_user.id == message.bot.id:
-        return True
+    if replied is not None:
+        # A reply to any member is part of their conversation, not an invitation
+        # for Alexa. Only replies to Alexa's own messages may trigger her.
+        if replied.from_user and replied.from_user.id == message.bot.id:
+            return True
+        return False
 
     if _bot_username is None:
         try:

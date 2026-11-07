@@ -7,12 +7,12 @@ from aiogram.enums import ChatType
 from bot.handlers import ai_chat
 
 
-def _group_message(text: str, chat_id: int = -100123):
+def _group_message(text: str, chat_id: int = -100123, reply_to_message=None):
     return SimpleNamespace(
         text=text,
         from_user=SimpleNamespace(id=12345, is_bot=False),
         chat=SimpleNamespace(id=chat_id, type=ChatType.SUPERGROUP),
-        reply_to_message=None,
+        reply_to_message=reply_to_message,
         entities=[],
         bot=SimpleNamespace(id=99999),
     )
@@ -55,6 +55,28 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
     def test_smart_reply_ignores_message_tagging_another_member(self):
         self.assertFalse(asyncio.run(
             ai_chat.is_alexa_trigger(_group_message("hello @someone123"))
+        ))
+
+    def test_reply_to_another_member_stays_silent_even_if_alexa_is_named(self):
+        replied_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=22222, is_bot=False)
+        )
+        for text in ("hello", "Alexa help"):
+            with self.subTest(text=text):
+                self.assertFalse(asyncio.run(
+                    ai_chat.is_alexa_trigger(
+                        _group_message(text, reply_to_message=replied_message)
+                    )
+                ))
+
+    def test_reply_to_alexa_still_triggers_chat(self):
+        alexa_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=99999, is_bot=True)
+        )
+        self.assertTrue(asyncio.run(
+            ai_chat.is_alexa_trigger(
+                _group_message("hello", reply_to_message=alexa_message)
+            )
         ))
 
     def test_slash_commands_do_not_trigger_casual_chat(self):
