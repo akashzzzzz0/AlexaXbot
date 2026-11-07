@@ -137,8 +137,9 @@ def _normalize_link(link: str) -> str:
 
 def _request_keyboard(request_id: int):
     builder = InlineKeyboardBuilder()
-    builder.button(text="🔎 View Verification Proof", callback_data=f"owner:promo_request:proof:{request_id}")
+    builder.button(text="✅ Approve & Publish", callback_data=f"owner:promo_request:approve:{request_id}")
     builder.button(text="❌ Reject", callback_data=f"owner:promo_request:reject:{request_id}")
+    builder.button(text="🔎 Refresh Verification Proof", callback_data=f"owner:promo_request:proof:{request_id}")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -164,7 +165,8 @@ async def _send_owner_request(
         f"{'✅' if group_resolved else '⚠️'} Group identity: <b>{'Resolved' if group_resolved else 'Not resolvable by Telegram Bot API'}</b>\n"
         f"{'✅' if bot_status in {'administrator', 'creator'} else '❌' if group_resolved and bot_status != 'unknown' else '❔'} Alexa admin: <b>{'YES' if bot_status in {'administrator', 'creator'} else 'NO' if group_resolved and bot_status != 'unknown' else 'UNKNOWN'}</b>\n"
         f"{'✅' if can_invite_users else '❌' if group_resolved and bot_status != 'unknown' else '❔'} Invite-link right: <b>{'YES' if can_invite_users else 'NO' if group_resolved and bot_status != 'unknown' else 'UNKNOWN'}</b>\n\n"
-        "Tap <b>View Verification Proof</b> to refresh the live rights check. Approve & Publish appears only when both required rights are confirmed."
+        "\n\n<b>Available owner actions:</b> Approve & Publish or Reject. Approval is accepted only after Alexa's group ID, admin status, and invite-link permission are confirmed.\n"
+        "Use <b>Refresh Verification Proof</b> to recheck Telegram permissions."
     )
     try:
         await bot.send_message(owner_id, text, parse_mode="HTML", reply_markup=_request_keyboard(request.id), disable_web_page_preview=True)
@@ -364,12 +366,34 @@ async def resolve_private_promotion_when_alexa_is_added(
     new_status = str(
         getattr(event.new_chat_member.status, "value", event.new_chat_member.status)
     ).lower()
-    if new_status not in {"administrator", "creator"}:
+    if new_status in {"left", "kicked"}:
         return
 
-    # The Bot API supplies the real chat ID in this membership update.
+    # Telegram supplies the real chat ID whenever Alexa is added or its
+    # membership changes, even when Alexa is only a regular member. Capture
+    # the group first; permissions are reported accurately below.
+    group_type = str(getattr(event.chat.type, "value", event.chat.type))
+    detected_group = await db_session.get(Group, event.chat.id)
+    if detected_group is None:
+        detected_group = await _insert_or_get_group(
+            db_session,
+            Group(
+                id=event.chat.id,
+                title=event.chat.title or "Telegram Group",
+                username=event.chat.username,
+                type=group_type,
+                is_active=True,
+            ),
+        )
+    else:
+        detected_group.title = event.chat.title or detected_group.title
+        detected_group.username = event.chat.username
+        detected_group.type = group_type
+        detected_group.is_active = True
+    await db_session.flush()
+
     # Correlate only with one unresolved request submitted by the same user
-    # who added/promoted Alexa; never guess between multiple pending links.
+    # who added Alexa; never guess between multiple pending links.
     pending = (await db_session.scalars(
         select(GroupPromotionRequest)
         .where(
@@ -397,11 +421,8 @@ async def resolve_private_promotion_when_alexa_is_added(
     except Exception:
         logger.exception("Automatic private promotion verification failed for chat_id=%s", event.chat.id)
         return
-    if status not in {"administrator", "creator"}:
-        return
-
-    can_invite = status == "creator" or bool(
-        getattr(member, "can_invite_users", False)
+    can_invite = status == "creator" or (
+        status == "administrator" and bool(getattr(member, "can_invite_users", False))
     )
     chat_type = str(getattr(event.chat.type, "value", event.chat.type))
     group = await db_session.get(Group, event.chat.id)
@@ -453,9 +474,9 @@ async def resolve_private_promotion_when_alexa_is_added(
             notice = (
                 "⚠️ <b>Alexa has joined and detected this group.</b>\n\n"
                 "🆔 Group ID: <code>" + str(event.chat.id) + "</code>\n"
-                "👑 Administrator status: <b>Confirmed</b>\n"
-                "🔗 Invite-link permission: <b>Not granted</b>\n"
-                "Please grant Alexa the Invite Users via Link permission."
+                "👑 Administrator status: <b>" + ("Confirmed" if status in {"administrator", "creator"} else "Not granted") + "</b>\n"
+                "🔗 Invite-link permission: <b>" + ("Confirmed" if can_invite else "Not granted") + "</b>\n"
+                "📨 Alexa's verification report has been sent to the owner."
             )
         await event.bot.send_message(event.chat.id, notice, parse_mode="HTML")
     except Exception:
