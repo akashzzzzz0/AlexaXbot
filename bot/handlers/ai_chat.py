@@ -446,10 +446,24 @@ def _smart_group_reply_fallback(user_text: str) -> str:
 
 
 def _should_smart_reply(message: Message, text: str) -> bool:
-    """Join selected group messages even during active chats, with strict cooldowns."""
-    # Do not suppress every opportunistic reply just because multiple members
-    # are chatting. The candidate filter below limits replies to greetings,
-    # genuine questions and clear requests; cooldowns prevent flooding.
+    """Join only quiet group moments; never interrupt member-to-member conversations."""
+    # If two or more different members have recently participated, Alexa stays
+    # silent. Explicitly addressing Alexa is handled separately and bypasses
+    # this opportunistic-reply gate.
+    if _group_conversation_is_active(message.chat.id):
+        return False
+
+    # A message directed at another member is not an invitation for Alexa.
+    if re.search(r"(?<![\\w@])@[A-Za-z0-9_]{5,}", text):
+        return False
+    for entity in (message.entities or []):
+        if (
+            getattr(entity.type, "value", entity.type) == "text_mention"
+            and entity.user
+            and entity.user.id != message.bot.id
+        ):
+            return False
+
     if not _looks_like_smart_reply_candidate(text):
         return False
     now = time.monotonic()
