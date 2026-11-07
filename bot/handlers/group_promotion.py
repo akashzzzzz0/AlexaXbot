@@ -832,3 +832,34 @@ async def promotion_request_proof(callback: CallbackQuery, db_session: AsyncSess
         proof_text,
         parse_mode="HTML",
         reply_markup=builder.as_markup(),
+        disable_web_page_preview=True,
+    )
+    await callback.answer("Live verification proof refreshed.")
+
+
+@router.callback_query(F.data.startswith("owner:promo_request:approve:"))
+async def promotion_request_approve(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not _is_owner(callback.from_user.id) or not callback.message or callback.message.chat.type != "private":
+        await callback.answer("Owner only.", show_alert=True)
+        return
+    try:
+        request_id = int(callback.data.rsplit(":", 1)[1])
+    except (TypeError, ValueError):
+        await callback.answer("Invalid request.", show_alert=True)
+        return
+    await _process_owner_promotion_action(callback, db_session, request_id, "approve")
+
+
+@router.callback_query(F.data.startswith("owner:promo_request:reject:"))
+async def promotion_request_reject(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not _is_owner(callback.from_user.id) or not callback.message or callback.message.chat.type != "private":
+        await callback.answer("Owner only.", show_alert=True)
+        return
+    try:
+        request_id = int(callback.data.rsplit(":", 1)[1])
+    except (TypeError, ValueError):
+        await callback.answer("Invalid request.", show_alert=True)
+        return
+    await _process_owner_promotion_action(callback, db_session, request_id, "reject")
+
+
