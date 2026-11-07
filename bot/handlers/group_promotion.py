@@ -43,15 +43,12 @@ _PROMOTION_STATUS_RE = re.compile(
     r"|\b(?:abhi tak|still waiting)\b"
 )
 _PROMOTION_NOTICE = (
-    "👑 <b>ALEXA VIP PROMOTION</b> 💜\n"
-    "━━━━━━━━━━━━━━━━━━\n"
-    "⏳ <b>Please wait, your group will be promoted within 24 hours.</b>\n"
-    "━━━━━━━━━━━━━━━━━━\n\n"
-    "📩 Your group link has been received!\n\n"
-    "⚡ Add Alexa as an <b>Admin</b> with the required permissions for quick verification.\n"
-    "🔗 Make sure your link is a <b>direct group link</b>. Request-to-join links are not allowed.\n\n"
-    "💎 Get your community ready to shine!\n"
-    "👑 <b>Alexa — Together We Shine!</b>"
+    "✅ <b>Your group link has been received successfully!</b>\n\n"
+    "✅ Alexa has verified your group membership and required admin permissions.\n"
+    "Your request has been sent to the owner for final approval. Once approved, your group will be published on our official channel.\n\n"
+    "📢 <b>Join our channel to view your group promotion:</b>\n"
+    "https://t.me/+tdfGw6ekfNA4OTNk\n\n"
+    "💜 Thank you for choosing Alexa Free Group Promotion!"
 )
 
 
@@ -68,13 +65,13 @@ def _normalize_link(link: str) -> str:
 
 def _request_keyboard(request_id: int):
     builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Approve & Promote", callback_data=f"owner:promo_request:approve:{request_id}")
+    builder.button(text="🔎 Proof & Publish", callback_data=f"owner:promo_request:proof:{request_id}")
     builder.button(text="❌ Reject", callback_data=f"owner:promo_request:reject:{request_id}")
     builder.adjust(1, 1)
     return builder.as_markup()
 
 
-async def _send_owner_request(bot, request: GroupPromotionRequest):
+async def _send_owner_request(bot, request: GroupPromotionRequest, bot_status: str = "administrator", can_invite_users: bool = True):
     owner_id = settings.effective_owner_id
     if not owner_id:
         return
@@ -85,7 +82,11 @@ async def _send_owner_request(bot, request: GroupPromotionRequest):
         f"👤 Requester ID: <code>{request.user_id}</code>\n"
         f"🆔 Group ID: <code>{request.group_id}</code>\n"
         f"📋 Request: <code>#{request.id}</code>\n\n"
-        "Alexa verified that she is an administrator in this group. Review the request below."
+        "🔎 <b>VERIFICATION PROOF</b>\n"
+        f"✅ Alexa membership: <b>{escape(bot_status.title())}</b>\n"
+        f"✅ Invite-link permission: <b>{'Enabled' if can_invite_users else 'Missing'}</b>\n"
+        "✅ Group link resolved and matched to this group.\n\n"
+        "Tap <b>Proof & Publish</b> to post this verified group only to the configured promotion channel."
     )
     try:
         await bot.send_message(owner_id, text, parse_mode="HTML", reply_markup=_request_keyboard(request.id), disable_web_page_preview=True)
@@ -149,9 +150,10 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
                 "Group promotion verification: private invite link is not mapped to a known group"
             )
             await message.answer(
-                "⚠️ <b>Group link could not be verified.</b>\n\n"
-                "Please send a public group link and add Alexa as an administrator first. "
-                "Private invite links can only be verified if Alexa already knows that group.",
+                "⚠️ <b>Private invite link could not be matched to a known group.</b>\n\n"
+                "Telegram does not let bots discover a group's ID from an arbitrary private invite link. "
+                "Alexa can verify this link only when that exact invite link is already mapped to a group Alexa knows. "
+                "This is not a public-link requirement.",
                 parse_mode="HTML",
             )
             return
@@ -164,8 +166,8 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
             )
             await message.answer(
                 "⚠️ <b>Group link could not be verified.</b>\n\n"
-                "Please send a public group link and add Alexa as an administrator first. "
-                "Private invite links can only be verified if Alexa already knows that group.",
+                "Please make sure Alexa is added to the group as an administrator with invite-link permission, "
+                "then send the direct group link again.",
                 parse_mode="HTML",
             )
             return
@@ -174,8 +176,8 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
         if not slug or "/" in slug:
             await message.answer(
                 "⚠️ <b>Group link could not be verified.</b>\n\n"
-                "Please send a public group link and add Alexa as an administrator first. "
-                "Private invite links can only be verified if Alexa already knows that group.",
+                "Please make sure Alexa is added to the group as an administrator with invite-link permission, "
+                "then send the direct group link again.",
                 parse_mode="HTML",
             )
             return
@@ -185,8 +187,8 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
             logger.exception("Group promotion verification: get_chat failed for public group link %s", group_link)
             await message.answer(
                 "⚠️ <b>Group link could not be verified.</b>\n\n"
-                "Please send a public group link and add Alexa as an administrator first. "
-                "Private invite links can only be verified if Alexa already knows that group.",
+                "Please make sure Alexa is added to the group as an administrator with invite-link permission, "
+                "then send the direct group link again.",
                 parse_mode="HTML",
             )
             return
@@ -195,8 +197,8 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
     if chat_type not in {"group", "supergroup"}:
         await message.answer(
                 "⚠️ <b>Group link could not be verified.</b>\n\n"
-                "Please send a public group link and add Alexa as an administrator first. "
-                "Private invite links can only be verified if Alexa already knows that group.",
+                "Please make sure Alexa is added to the group as an administrator with invite-link permission, "
+                "then send the direct group link again.",
                 parse_mode="HTML",
             )
         return
@@ -215,8 +217,8 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
         logger.exception("Group promotion verification: get_chat_member failed for chat_id=%s", chat.id)
         await message.answer(
                 "⚠️ <b>Group link could not be verified.</b>\n\n"
-                "Please send a public group link and add Alexa as an administrator first. "
-                "Private invite links can only be verified if Alexa already knows that group.",
+                "Please make sure Alexa is added to the group as an administrator with invite-link permission, "
+                "then send the direct group link again.",
                 parse_mode="HTML",
             )
         return
@@ -226,11 +228,23 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
             chat.id, bot_status,
         )
         await message.answer(
-                "⚠️ <b>Group link could not be verified.</b>\n\n"
-                "Please send a public group link and add Alexa as an administrator first. "
-                "Private invite links can only be verified if Alexa already knows that group.",
-                parse_mode="HTML",
-            )
+            "⚠️ <b>Alexa is not an administrator in this group.</b>\n\n"
+            "Please add Alexa as a group administrator and enable the required invite-link permission, then send the link again.",
+            parse_mode="HTML",
+        )
+        return
+
+    can_invite_users = bot_status == "creator" or bool(getattr(bot_member, "can_invite_users", False))
+    if not can_invite_users:
+        logger.warning(
+            "Group promotion verification denied: bot lacks invite-link permission; chat_id=%s",
+            chat.id,
+        )
+        await message.answer(
+            "⚠️ <b>Alexa is an admin, but invite-link permission is missing.</b>\n\n"
+            "Please enable <b>Invite Users via Link</b> for Alexa, then send the group link again.",
+            parse_mode="HTML",
+        )
         return
 
     group = await db_session.get(Group, chat.id)
@@ -289,7 +303,7 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
     await db_session.refresh(request)
 
     await message.answer(_PROMOTION_NOTICE, parse_mode="HTML")
-    await _send_owner_request(message.bot, request)
+    await _send_owner_request(message.bot, request, bot_status=bot_status, can_invite_users=can_invite_users)
 
 
 @router.message(
@@ -465,9 +479,14 @@ async def promotion_requests_panel(callback: CallbackQuery, db_session: AsyncSes
     lines = ["🗂 <b>PROMOTION REQUESTS</b>", "━━━━━━━━━━━━━━━━━━", ""]
     for req in requests:
         status_label = "⏳ Pending owner approval" if req.status == "pending" else "🟡 Approved — retry if needed"
-        lines.append(f"#{req.id} · <b>{escape(req.group_title)}</b>\n{escape(req.group_link)}\n{status_label}\n")
+        lines.append(
+            f"#{req.id} · <b>{escape(req.group_title)}</b>\n"
+            f"{escape(req.group_link)}\n"
+            "✅ Alexa admin + invite-link permission verified\n"
+            f"{status_label}\n"
+        )
         if req.status == "pending":
-            builder.button(text=f"✅ Approve #{req.id}", callback_data=f"owner:promo_request:approve:{req.id}")
+            builder.button(text=f"🔎 Proof & Publish #{req.id}", callback_data=f"owner:promo_request:proof:{req.id}")
             builder.button(text=f"❌ Reject #{req.id}", callback_data=f"owner:promo_request:reject:{req.id}")
         else:
             builder.button(text=f"🚀 Retry promotion #{req.id}", callback_data=f"owner:promo_request:retry:{req.id}")
@@ -483,8 +502,8 @@ async def _process_owner_promotion_action(callback: CallbackQuery, db_session: A
     if not request:
         await callback.answer("Promotion request not found.", show_alert=True)
         return
-    if action in {"approve", "retry"}:
-        if action == "approve":
+    if action in {"proof", "approve", "retry"}:
+        if action in {"proof", "approve"}:
             if request.status != "pending":
                 await callback.answer("This request has already been reviewed.", show_alert=True)
                 return
@@ -576,6 +595,19 @@ async def _process_owner_promotion_action(callback: CallbackQuery, db_session: A
             parse_mode="HTML",
             reply_markup=nav.as_markup(),
         )
+
+
+@router.callback_query(F.data.startswith("owner:promo_request:proof:"))
+async def promotion_request_proof(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    if not _is_owner(callback.from_user.id) or not callback.message or callback.message.chat.type != "private":
+        await callback.answer("Owner only.", show_alert=True)
+        return
+    try:
+        request_id = int(callback.data.rsplit(":", 1)[1])
+    except (TypeError, ValueError):
+        await callback.answer("Invalid request.", show_alert=True)
+        return
+    await _process_owner_promotion_action(callback, db_session, request_id, "proof")
 
 
 @router.callback_query(F.data.startswith("owner:promo_request:approve:"))
