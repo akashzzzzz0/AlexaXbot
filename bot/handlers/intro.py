@@ -1,7 +1,6 @@
 import logging
 
 from aiogram import F, Router
-from aiogram.exceptions import SkipHandler
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -98,14 +97,18 @@ async def set_intro(message: Message, state: FSMContext):
     )
 
 
-@router.message(Command("cancel"), StateFilter("*"))
+@router.message(Command("cancel"), StateFilter(
+    IntroSetup.nickname,
+    IntroSetup.about,
+    IntroSetup.hobbies,
+    IntroSetup.interests,
+    IntroSetup.languages,
+    IntroSetup.favourite,
+    IntroSetup.photo,
+))
 async def cancel_intro(message: Message, state: FSMContext):
-    current = await state.get_state()
-    if current and current.startswith("IntroSetup:"):
-        await state.clear()
-        await message.answer("❌ Introduction setup cancelled. You can restart it anytime with /setintro.")
-        return
-    raise SkipHandler
+    await state.clear()
+    await message.answer("❌ Introduction setup cancelled. You can restart it anytime with /setintro.")
 
 
 @router.callback_query(F.data == "intro:cancel")
