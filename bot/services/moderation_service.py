@@ -101,7 +101,17 @@ async def _announce_automatic_action(
 ) -> None:
     """Post a clear audit message when ALEXA automatically mutes or bans a member."""
     try:
-        target = f'<a href="tg://user?id={user_id}">Member</a> (<code>{user_id}</code>)'
+        target_name = f"User {user_id}"
+        try:
+            target_user = await bot.get_chat(user_id)
+            target_name = (
+                getattr(target_user, "full_name", None)
+                or getattr(target_user, "first_name", None)
+                or target_name
+            )
+        except Exception:
+            pass
+        target = f'<a href="tg://user?id={user_id}">{html_escape(str(target_name))}</a> (<code>{user_id}</code>)'
         reason_text = html_escape((reason or "").strip() or "No reason provided")
         if action == "mute":
             if duration and duration > 0:
