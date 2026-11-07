@@ -510,7 +510,7 @@ async def promotion_requests_panel(callback: CallbackQuery, db_session: AsyncSes
     )).all()
     if not requests:
         await callback.message.edit_text(
-            "🗂 <b>PROMOTION REQUESTS</b>\n\nNo pending or retryable promotion requests.",
+            "🗂 <b>PROMOTION REQUESTS</b>\n\nNo pending promotion requests.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                 {"text": "◀️ Owner Panel", "callback_data": "owner:menu"}
@@ -621,8 +621,8 @@ async def _process_owner_promotion_action(callback: CallbackQuery, db_session: A
         )
 
     if action == "reject":
-        if request.status != "pending":
-            await callback.answer("Only pending requests can be rejected.", show_alert=True)
+        if request.status not in {"pending", "approved"}:
+            await callback.answer("This request can no longer be rejected.", show_alert=True)
             return
         request.status = "rejected"
         await db_session.commit()
