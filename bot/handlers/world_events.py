@@ -566,6 +566,39 @@ def _event_caption() -> str:
     )
 
 
+SPEED_TYPE_REMINDER_DELAY_SECONDS = 30
+SPEED_TYPE_REMINDER_TEXT = (
+    "⚡ <b>HURRY UP! TIME IS RUNNING OUT!</b>\n\n"
+    "Come on, everyone! The clock is ticking...\n\n"
+    "Type the hidden word as fast as you can and claim the first place on the leaderboard!"
+)
+
+
+async def _send_speed_type_reminder(bot, chat_id: int, event_id: int) -> None:
+    """Send one reminder after 30 seconds, only while this challenge is active."""
+    await asyncio.sleep(SPEED_TYPE_REMINDER_DELAY_SECONDS)
+    async with async_session_maker() as session:
+        active = await session.scalar(
+            select(SpeedTypeEvent.id).where(
+                SpeedTypeEvent.id == event_id,
+                SpeedTypeEvent.chat_id == chat_id,
+                SpeedTypeEvent.status == "active",
+                SpeedTypeEvent.ends_at > datetime.now(timezone.utc),
+            ).limit(1)
+        )
+    if not active:
+        return
+    try:
+        await bot.send_message(
+            chat_id,
+            SPEED_TYPE_REMINDER_TEXT,
+            parse_mode="HTML",
+        )
+    except Exception:
+        # A reminder failure must never affect the active game.
+        pass
+
+
 def _normalize_text(value: str) -> str:
     """Normalize one-word answers, ignoring case, whitespace, and punctuation."""
     return re.sub(r"[^a-z0-9]+", "", (value or "").casefold())
@@ -661,6 +694,10 @@ async def _create_event(
                 saved.status = "cancelled"
                 await session.commit()
         return False
+    asyncio.create_task(
+        _send_speed_type_reminder(bot, chat_id, event_id),
+        name=f"speed-type-reminder-{event_id}",
+    )
     return True
 
 
