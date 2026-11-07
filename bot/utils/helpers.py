@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 import math
+from html import escape
 
 
 def format_duration(seconds: int) -> str:
@@ -62,7 +63,7 @@ def progress_bar(current: int, maximum: int, length: int = 10) -> str:
 
 
 def mention_user(user_id: int, name: str) -> str:
-    return f'<a href="tg://user?id={user_id}">{name}</a>'
+    return f'<a href="tg://user?id={user_id}">{escape(str(name), quote=True)}</a>'
 
 
 def get_time_until(target: datetime) -> str:
