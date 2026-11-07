@@ -355,7 +355,7 @@ async def resolve_private_promotion_when_alexa_is_added(
     db_session: AsyncSession,
     **kwargs,
 ):
-    """Ask the requester to confirm the exact group before binding a private link."""
+    """Automatically resolve a pending private promotion when its requester adds Alexa."""
     if event.chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}:
         return
     if not event.from_user or event.from_user.is_bot:
@@ -367,8 +367,9 @@ async def resolve_private_promotion_when_alexa_is_added(
     if new_status not in {"administrator", "creator"}:
         return
 
-    # Match the person who submitted the link to the person adding/promoting
-    # Alexa. Never guess between multiple unresolved requests.
+    # The Bot API supplies the real chat ID in this membership update.
+    # Correlate only with one unresolved request submitted by the same user
+    # who added/promoted Alexa; never guess between multiple pending links.
     pending = (await db_session.scalars(
         select(GroupPromotionRequest)
         .where(
@@ -382,7 +383,7 @@ async def resolve_private_promotion_when_alexa_is_added(
     if len(pending) != 1:
         if len(pending) > 1:
             logger.warning(
-                "Ambiguous private promotion request for requester_id=%s, chat_id=%s",
+                "Automatic private promotion match is ambiguous for requester_id=%s, chat_id=%s",
                 event.from_user.id,
                 event.chat.id,
             )
@@ -394,7 +395,7 @@ async def resolve_private_promotion_when_alexa_is_added(
         member = await event.bot.get_chat_member(event.chat.id, me.id)
         status = str(getattr(member.status, "value", member.status)).lower()
     except Exception:
-        logger.exception("Could not verify Alexa in chat_id=%s", event.chat.id)
+        logger.exception("Automatic private promotion verification failed for chat_id=%s", event.chat.id)
         return
     if status not in {"administrator", "creator"}:
         return
@@ -402,130 +403,71 @@ async def resolve_private_promotion_when_alexa_is_added(
     can_invite = status == "creator" or bool(
         getattr(member, "can_invite_users", False)
     )
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text="✅ Confirm This Is My Submitted Group",
-        callback_data=f"promo:link_confirm:{request.id}:{event.from_user.id}",
-    )
-    notice = (
-        "🔎 <b>Alexa is now an administrator in this group.</b>\n\n"
-        f"👑 Administrator status: <b>Confirmed</b>\n"
-        f"🔗 Invite-link permission: <b>{'Confirmed' if can_invite else 'Not granted yet'}</b>\n\n"
-        "To safely match this group with the private invite link you sent in DM, "
-        "please confirm below."
-    )
-    try:
-        await event.bot.send_message(
-            event.chat.id,
-            notice,
-            parse_mode="HTML",
-            reply_markup=builder.as_markup(),
-        )
-    except Exception:
-        logger.exception("Could not post private-link confirmation in chat_id=%s", event.chat.id)
-
-
-@router.callback_query(F.data.startswith("promo:link_confirm:"))
-async def confirm_private_promotion_group(
-    callback: CallbackQuery,
-    db_session: AsyncSession,
-    **kwargs,
-):
-    if not callback.message or callback.message.chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}:
-        await callback.answer("Please confirm this inside the group.", show_alert=True)
-        return
-    try:
-        _, _, request_id_raw, requester_id_raw = callback.data.split(":")
-        request_id = int(request_id_raw)
-        requester_id = int(requester_id_raw)
-    except (TypeError, ValueError):
-        await callback.answer("Invalid confirmation.", show_alert=True)
-        return
-
-    if callback.from_user.id != requester_id:
-        await callback.answer("Only the person who submitted this link can confirm it.", show_alert=True)
-        return
-
-    request = await db_session.get(GroupPromotionRequest, request_id)
-    if (
-        request is None
-        or request.user_id != requester_id
-        or request.status != "pending"
-        or request.group_id > _UNRESOLVED_PRIVATE_ID_BASE
-    ):
-        await callback.answer("This private-link request is no longer awaiting confirmation.", show_alert=True)
-        return
-
-    chat = callback.message.chat
-    try:
-        me = await callback.bot.get_me()
-        member = await callback.bot.get_chat_member(chat.id, me.id)
-        status = str(getattr(member.status, "value", member.status)).lower()
-    except Exception:
-        logger.exception("Private promotion confirmation live check failed for chat_id=%s", chat.id)
-        await callback.answer("Alexa's live group status could not be checked. Try again.", show_alert=True)
-        return
-
-    if status not in {"administrator", "creator"}:
-        await callback.answer("Alexa must be an administrator in this group.", show_alert=True)
-        return
-
-    can_invite = status == "creator" or bool(getattr(member, "can_invite_users", False))
-    chat_type = str(getattr(chat.type, "value", chat.type))
-    group = await db_session.get(Group, chat.id)
+    chat_type = str(getattr(event.chat.type, "value", event.chat.type))
+    group = await db_session.get(Group, event.chat.id)
     if group is None:
         group = await _insert_or_get_group(
             db_session,
             Group(
-                id=chat.id,
-                title=chat.title or request.group_title or "Telegram Group",
-                username=chat.username,
+                id=event.chat.id,
+                title=event.chat.title or request.group_title or "Telegram Group",
+                username=event.chat.username,
                 type=chat_type,
                 is_active=True,
             ),
         )
     else:
-        group.title = chat.title or group.title
-        group.username = chat.username
+        group.title = event.chat.title or group.title
+        group.username = event.chat.username
         group.type = chat_type
         group.is_active = True
 
+    # Replace the synthetic unresolved ID with Telegram's actual group ID.
     try:
         async with db_session.begin_nested():
-            request.group_id = chat.id
-            request.group_title = chat.title or request.group_title
+            request.group_id = event.chat.id
+            request.group_title = event.chat.title or request.group_title
             await db_session.flush()
     except IntegrityError:
         logger.warning(
-            "Cannot attach private promotion request: chat_id=%s already has an active request",
-            chat.id,
+            "Automatic private promotion match conflicts with an existing request for chat_id=%s",
+            event.chat.id,
         )
-        await callback.answer("This group already has an active promotion request.", show_alert=True)
         return
 
     group.invite_link = request.group_link
     await db_session.commit()
     await db_session.refresh(request)
 
+    # No group button or command: Alexa posts the result and sends the owner proof.
+    try:
+        if can_invite:
+            notice = (
+                "✅ <b>Alexa group verification complete!</b>\n\n"
+                "🆔 Group ID: <code>" + str(event.chat.id) + "</code>\n"
+                "👑 Administrator status: <b>Confirmed</b>\n"
+                "🔗 Invite-link permission: <b>Confirmed</b>\n"
+                "📨 Verification proof has been sent to the owner."
+            )
+        else:
+            notice = (
+                "⚠️ <b>Alexa has joined and detected this group.</b>\n\n"
+                "🆔 Group ID: <code>" + str(event.chat.id) + "</code>\n"
+                "👑 Administrator status: <b>Confirmed</b>\n"
+                "🔗 Invite-link permission: <b>Not granted</b>\n"
+                "Please grant Alexa the Invite Users via Link permission."
+            )
+        await event.bot.send_message(event.chat.id, notice, parse_mode="HTML")
+    except Exception:
+        logger.exception("Could not post automatic verification notice in chat_id=%s", event.chat.id)
+
     await _send_owner_request(
-        callback.bot,
+        event.bot,
         request,
         bot_status=status,
         can_invite_users=can_invite,
         group_resolved=True,
     )
-    try:
-        await callback.message.edit_reply_markup(reply_markup=None)
-    except Exception:
-        pass
-
-    if can_invite:
-        await callback.answer("Group matched. Alexa's admin and invite permissions are confirmed.")
-    else:
-        await callback.answer(
-            "Group matched, but Alexa still needs Invite Users via Link permission.",
-            show_alert=True,
-        )
 
 
 @router.message(
