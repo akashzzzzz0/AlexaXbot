@@ -8,6 +8,7 @@ from bot.database.models import Group, SecuritySettings, GroupMember, User
 from bot.keyboards.security import security_menu_kb, locks_menu_kb, captcha_menu_kb
 import structlog
 from bot.middlewares.admin_actions import AdminActionMiddleware
+from bot.utils.helpers import mention_user, safe_username
 
 logger = structlog.get_logger()
 router = Router()
@@ -383,7 +384,7 @@ async def cmd_sticker_approval(message: Message, db_session: AsyncSession = None
         await message.reply("Couldn't save sticker approval. Please check the bot logs.")
         return
     status = "approved to send stickers" if approved else "no longer approved to send stickers"
-    await message.reply(f"✅ {target.full_name} is {status} while Sticker Lock is enabled.")
+    await message.reply(f"✅ {mention_user(target.id, safe_username(target))} is {status} while Sticker Lock is enabled.", parse_mode="HTML")
 
 
 # /lock and /unlock: support all content types and persist settings.
