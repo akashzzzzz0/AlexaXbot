@@ -43,6 +43,20 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
         # A second greeting in the same group is held by the 15-second group cooldown.
         self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(_group_message("hello"))))
 
+    def test_smart_reply_ignores_active_member_to_member_conversation(self):
+        chat_id = -100555
+        ai_chat._group_recent_activity[chat_id].clear()
+        ai_chat._group_recent_activity[chat_id].append((__import__("time").monotonic(), 111))
+        ai_chat._group_recent_activity[chat_id].append((__import__("time").monotonic(), 222))
+        self.assertFalse(asyncio.run(
+            ai_chat.is_alexa_trigger(_group_message("kya haal hai?", chat_id=chat_id))
+        ))
+
+    def test_smart_reply_ignores_message_tagging_another_member(self):
+        self.assertFalse(asyncio.run(
+            ai_chat.is_alexa_trigger(_group_message("hello @someone123"))
+        ))
+
     def test_slash_commands_do_not_trigger_casual_chat(self):
         self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(_group_message("/ban 123"))))
 
