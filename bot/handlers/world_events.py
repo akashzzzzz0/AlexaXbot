@@ -19,7 +19,7 @@ from bot.database.models import Group, SpeedTypeEvent, SpeedTypeSubmission
 from bot.services.economy_service import add_coins
 
 router = Router()
-EVENT_INTERVAL_SECONDS = 3 * 60 * 60
+EVENT_INTERVAL_SECONDS = 4 * 60 * 60
 EVENT_DURATION_MINUTES = 180
 WINNER_REWARD = 10
 _event_scheduler_task = None
@@ -387,7 +387,6 @@ CHALLENGES = [
     "REVENGE",
     "DESTINY",
     "FATE",
-    "FORTUNE",
     "LUCKY",
     "BLESSED",
     "CHARM",
@@ -424,48 +423,137 @@ CHALLENGES = [
     "STARLIGHT",
     "NIGHTFALL",
     "DAYLIGHT",
-    "NOCTURNE"
+    "NOCTURNE",
+    "APPLE",
+    "BANANA",
+    "ORANGE",
+    "GRAPES",
+    "CHERRY",
+    "PEACH",
+    "MANGO",
+    "LEMON",
+    "MELON",
+    "PAPAYA",
+    "COCONUT",
+    "CARROT",
+    "POTATO",
+    "TOMATO",
+    "ONION",
+    "GARLIC",
+    "PEPPER",
+    "CUCUMBER",
+    "PUMPKIN",
+    "SPINACH",
+    "BREAD",
+    "BUTTER",
+    "CHEESE",
+    "COOKIE",
+    "BISCUIT",
+    "WAFFLE",
+    "PANCAKE",
+    "NOODLE",
+    "PASTA",
+    "BURGER",
+    "SANDWICH",
+    "PIZZA",
+    "POPCORN",
+    "CHOCOLATE",
+    "VANILLA",
+    "CARAMEL",
+    "HONEY",
+    "SUGAR",
+    "COFFEE",
+    "TEA",
+    "JUICE",
+    "WATER",
+    "BOTTLE",
+    "CUPCAKE",
+    "KETTLE",
+    "SPOON",
+    "PLATE",
+    "WINDOW",
+    "DOORWAY",
+    "CEILING",
+    "FLOOR",
+    "GARDEN",
+    "FLOWER",
+    "SUNFLOWER",
+    "TULIP",
+    "ROSE",
+    "LILY",
+    "DAISY",
+    "FOREST",
+    "RIVER",
+    "OCEAN",
+    "ISLAND",
+    "BEACH",
+    "MOUNTAIN",
+    "VALLEY",
+    "MEADOW",
+    "RAINBOW",
+    "CLOUD",
+    "BREEZE",
+    "SUNSHINE",
+    "RAINDROP",
+    "SNOWFLAKE",
+    "THUNDERBOLT",
+    "UMBRELLA",
+    "BACKPACK",
+    "NOTEBOOK",
+    "PENCIL",
+    "ERASER",
+    "RULER",
+    "CRAYON",
+    "PAINTING",
+    "CAMERA",
+    "MIRROR",
+    "PILLOW",
+    "BLANKET",
+    "CURTAIN",
+    "CARPET",
+    "BICYCLE",
+    "SCOOTER",
+    "AIRPLANE",
+    "TRAIN",
+    "ROCKETSHIP",
+    "COMPASS",
+    "CALENDAR",
+    "CLOCK",
+    "KEYBOARD",
+    "HEADPHONE",
+    "SPEAKER",
+    "LAPTOP",
+    "TELESCOPE",
+    "KEYCHAIN",
 ]
 
 
 def _make_spoiler_image(challenge: str) -> BufferedInputFile:
-    """Draw one unique challenge word into the spoiler image."""
+    """Create a simple image containing only the challenge word."""
     width, height = 1200, 800
-    image = Image.new("RGB", (width, height), (7, 8, 25))
+    image = Image.new("RGB", (width, height), (238, 242, 255))
     draw = ImageDraw.Draw(image)
-    for y in range(height):
-        shade = int(16 * y / height)
-        draw.line((0, y, width, y), fill=(7 + shade // 3, 8 + shade // 4, 25 + shade * 2))
-    draw.rounded_rectangle((35, 35, width - 35, height - 35), radius=34, outline=(0, 240, 255), width=5)
-    draw.rounded_rectangle((48, 48, width - 48, height - 48), radius=28, outline=(190, 40, 255), width=2)
-    for x in range(90, width - 90, 100):
-        draw.line((x, 90, x + 24, 90), fill=(0, 125, 190), width=3)
-        draw.line((x, height - 90, x + 24, height - 90), fill=(120, 35, 190), width=3)
     try:
-        title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 44)
-        prompt_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 52)
-        hint_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 27)
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 112)
     except OSError:
-        title_font = prompt_font = hint_font = ImageFont.load_default()
-    title = "ALEXA  SPEED TYPE"
-    title_box = draw.textbbox((0, 0), title, font=title_font)
-    draw.text(((width - (title_box[2] - title_box[0])) / 2, 150), title, font=title_font, fill=(0, 245, 255), stroke_width=1, stroke_fill=(170, 35, 255))
-    draw.text((width / 2, 245), "HIDDEN CHALLENGE", font=hint_font, fill=(210, 180, 255), anchor="mm")
-    lines, line = [], ""
-    for word in challenge.split():
-        candidate = f"{line} {word}".strip()
-        if draw.textbbox((0, 0), candidate, font=prompt_font)[2] > width - 190 and line:
-            lines.append(line)
-            line = word
-        else:
-            line = candidate
-    if line:
-        lines.append(line)
-    line_height = 75
-    start_y = 400 - (len(lines) * line_height) // 2
-    for i, text_line in enumerate(lines):
-        draw.text((width / 2, start_y + i * line_height), text_line, font=prompt_font, fill=(255, 255, 255), anchor="mm", stroke_width=2, stroke_fill=(0, 160, 255))
-    draw.text((width / 2, 635), "TAP TO REVEAL - TYPE IT EXACTLY", font=hint_font, fill=(255, 70, 220), anchor="mm")
+        font = ImageFont.load_default()
+
+    text_box = draw.textbbox((0, 0), challenge, font=font)
+    text_width = text_box[2] - text_box[0]
+    if text_width > width - 120:
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 76)
+        except OSError:
+            font = ImageFont.load_default()
+        text_box = draw.textbbox((0, 0), challenge, font=font)
+        text_width = text_box[2] - text_box[0]
+    draw.text(
+        ((width - text_width) / 2, height / 2),
+        challenge,
+        font=font,
+        fill=(27, 35, 68),
+        anchor="lm",
+    )
     output = io.BytesIO()
     image.save(output, format="PNG", optimize=True)
     return BufferedInputFile(output.getvalue(), filename="alexa_speed_type_spoiler.png")
@@ -473,11 +561,9 @@ def _make_spoiler_image(challenge: str) -> BufferedInputFile:
 
 def _event_caption() -> str:
     return (
-        "⌨️ Type the exact word here.\n"
-        f"🏆 First correct answer wins <b>{WINNER_REWARD} coins</b>!\n"
-        f"⏳ You have {EVENT_DURATION_MINUTES // 60} hours. Good luck!"
+        "Be the first to write the word\n"
+        "Show in the photo to climb the mini game leaderboard"
     )
-
 
 
 def _normalize_text(value: str) -> str:
@@ -503,28 +589,42 @@ async def _has_active_event(session, chat_id: int, now: datetime) -> bool:
     ))
 
 
-async def _create_event(bot, chat_id: int, chat_title: str, created_by: int | None = None) -> bool:
+async def _create_event(
+    bot,
+    chat_id: int,
+    chat_title: str,
+    created_by: int | None = None,
+    reserved_words: set[str] | None = None,
+) -> bool:
     now = datetime.now(timezone.utc)
     async with async_session_maker() as session:
         if await _has_active_event(session, chat_id, now):
             return False
-        # Never reuse a word from any previous event, even after its event expires.
+        # Avoid repeating words in this group until its 500-word bank cycles.
         previous_challenges = (await session.scalars(
-            select(SpeedTypeEvent.challenge_text)
+            select(SpeedTypeEvent.challenge_text).where(
+                SpeedTypeEvent.chat_id == chat_id
+            )
         )).all()
         previously_used_words = {
             token.casefold()
             for previous in previous_challenges
             for token in re.findall(r"[A-Za-z]+", previous or "")
         }
+        reserved = reserved_words if reserved_words is not None else set()
         unused_challenges = [
             item for item in CHALLENGES
             if item.casefold() not in previously_used_words
+            and item.casefold() not in reserved
         ]
         if not unused_challenges:
-            # Never silently repeat words when the unique pool is exhausted.
+            unused_challenges = [
+                item for item in CHALLENGES if item.casefold() not in reserved
+            ]
+        if not unused_challenges:
             return False
         challenge = random.choice(unused_challenges)
+        reserved.add(challenge.casefold())
         event = SpeedTypeEvent(
             chat_id=chat_id,
             chat_title=(chat_title or "Group")[:256],
@@ -588,16 +688,23 @@ async def _close_expired_events(bot) -> None:
 
 
 async def _event_scheduler(bot) -> None:
-    # Create an event at startup and then every three hours for each active group.
+    # Send the first event immediately, then repeat every four hours for active groups.
     while True:
         try:
             await _close_expired_events(bot)
             async with async_session_maker() as session:
                 groups = (await session.scalars(select(Group).where(Group.is_active.is_(True)))).all()
                 targets = [(group.id, group.title) for group in groups]
+                active_words = (await session.scalars(
+                    select(SpeedTypeEvent.challenge_text).where(
+                        SpeedTypeEvent.status == "active",
+                        SpeedTypeEvent.ends_at > datetime.now(timezone.utc),
+                    )
+                )).all()
+            cycle_words: set[str] = {word.casefold() for word in active_words}
             for chat_id, title in targets:
                 try:
-                    await _create_event(bot, chat_id, title)
+                    await _create_event(bot, chat_id, title, reserved_words=cycle_words)
                 except Exception:
                     continue
         except asyncio.CancelledError:
@@ -686,7 +793,7 @@ async def submit_speed_type(message: Message, db_session, db_user, **kwargs):
         f"👑 {message.from_user.mention_html()} typed the challenge correctly first!\n"
         f"⚡ Typing time: <b>{elapsed_seconds:.2f} seconds</b>\n"
         f"🪙 Reward: <b>+{WINNER_REWARD} coins</b>\n"
-        "🎉 The challenge is now closed. Next event arrives in the next 3-hour cycle!",
+        "🎉 The challenge is now closed. Next event arrives in the next 4-hour cycle!",
         parse_mode="HTML",
     )
 
