@@ -112,9 +112,9 @@ async def capture_promotion_channel(message: Message, db_session: AsyncSession, 
         setting.value = str(channel.id)
     await db_session.commit()
     await message.answer(
-        "✅ <b>Promotion channel connected!</b>\\n\\n"
-        f"Channel: <b>{escape(getattr(channel, 'title', None) or 'Alexa Promotion Channel')}</b>\\n"
-        f"Channel ID: <code>{channel.id}</code>\\n\\n"
+        "✅ <b>Promotion channel connected!</b>\n\n"
+        f"Channel: <b>{escape(getattr(channel, 'title', None) or 'Alexa Promotion Channel')}</b>\n"
+        f"Channel ID: <code>{channel.id}</code>\n\n"
         "Approved group links will be posted only in this channel.",
         parse_mode="HTML",
     )
@@ -509,8 +509,8 @@ async def _process_owner_promotion_action(callback: CallbackQuery, db_session: A
             builder.button(text="🔗 Join Group", url=request.group_link)
             await callback.bot.send_message(
                 channel_id,
-                "📣 <b>VERIFIED GROUP — ALEXA FREE PROMOTION</b> 💜\\n\\n"
-                f"👥 <b>{escape(request.group_title)}</b>\\n\\n"
+                "📣 <b>VERIFIED GROUP — ALEXA FREE PROMOTION</b> 💜\n\n"
+                f"👥 <b>{escape(request.group_title)}</b>\n\n"
                 "Join this community using the link below. 🚀",
                 parse_mode="HTML",
                 reply_markup=builder.as_markup(),
@@ -530,11 +530,11 @@ async def _process_owner_promotion_action(callback: CallbackQuery, db_session: A
         try:
             await callback.bot.send_message(
                 request.user_id,
-                "🎉 <b>Your Group Link Verification Is Complete!</b>\\n\\n"
-                "💜 Your group has been successfully verified and approved by our team.\\n\\n"
-                "🚀 Your group link has been published on the Alexa Promotion Channel.\\n\\n"
-                "📢 Visit our channel:\\n"
-                "https://t.me/+tdfGw6ekfNA4OTNk\\n\\n"
+                "🎉 <b>Your Group Link Verification Is Complete!</b>\n\n"
+                "💜 Your group has been successfully verified and approved by our team.\n\n"
+                "🚀 Your group link has been published on the Alexa Promotion Channel.\n\n"
+                "📢 Visit our channel:\n"
+                "https://t.me/+tdfGw6ekfNA4OTNk\n\n"
                 "👑 Thank you for choosing Alexa Free Group Promotion!",
                 parse_mode="HTML",
                 disable_web_page_preview=True,
