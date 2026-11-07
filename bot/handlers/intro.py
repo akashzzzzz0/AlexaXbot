@@ -287,11 +287,11 @@ def _render_intro_card(profile: IntroProfile, user: User, photo_bytes=None):
 
     nickname = (profile.nickname or "").strip() or (user.first_name or "Member")
     sections = [
-        ("ABOUT ME", profile.about),
-        ("HOBBIES", profile.hobbies),
-        ("INTERESTS", profile.interests),
-        ("LANGUAGES", profile.languages),
-        ("FAVOURITE THINGS", profile.favourite),
+        ("✦  ABOUT ME", profile.about),
+        ("◆  HOBBIES", profile.hobbies),
+        ("♡  INTERESTS", profile.interests),
+        ("✧  LANGUAGES", profile.languages),
+        ("★  FAVOURITE THINGS", profile.favourite),
     ]
     sections = [(label, str(value).strip()) for label, value in sections if value and str(value).strip()]
 
