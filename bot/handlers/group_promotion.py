@@ -361,7 +361,7 @@ async def resolve_private_promotion_when_alexa_is_added(
     db_session: AsyncSession,
     **kwargs,
 ):
-    """Automatically resolve a pending private promotion when its requester adds Alexa."""
+    """Capture Alexa's real group ID on add and resolve a single pending private-link request."""
     if event.chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}:
         return
     if not event.from_user or event.from_user.is_bot:
@@ -396,8 +396,9 @@ async def resolve_private_promotion_when_alexa_is_added(
         detected_group.is_active = True
     await db_session.flush()
 
-    # Correlate only with one unresolved request submitted by the same user
-    # who added Alexa; never guess between multiple pending links.
+    # A private invite hash cannot be resolved by Telegram on its own. If there
+    # is exactly one unresolved pending link, safely attach this detected chat
+    # to it; never guess when multiple links are waiting.
     pending = (await db_session.scalars(
         select(GroupPromotionRequest)
         .where(
