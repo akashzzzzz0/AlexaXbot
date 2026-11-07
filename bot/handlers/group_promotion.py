@@ -117,8 +117,8 @@ async def _send_owner_request(
         f"📋 Request: <code>#{request.id}</code>\n\n"
         "🔎 <b>VERIFICATION SNAPSHOT</b>\n"
         f"{'✅' if group_resolved else '⚠️'} Group identity: <b>{'Resolved' if group_resolved else 'Not resolvable by Telegram Bot API'}</b>\n"
-        f"{'✅' if bot_status in {'administrator', 'creator'} else '❌' if group_resolved else '❔'} Alexa admin: <b>{'YES' if bot_status in {'administrator', 'creator'} else 'NO' if group_resolved else 'UNKNOWN'}</b>\n"
-        f"{'✅' if can_invite_users else '❌' if group_resolved else '❔'} Invite-link right: <b>{'YES' if can_invite_users else 'NO' if group_resolved else 'UNKNOWN'}</b>\n\n"
+        f"{'✅' if bot_status in {'administrator', 'creator'} else '❌' if group_resolved and bot_status != 'unknown' else '❔'} Alexa admin: <b>{'YES' if bot_status in {'administrator', 'creator'} else 'NO' if group_resolved and bot_status != 'unknown' else 'UNKNOWN'}</b>\n"
+        f"{'✅' if can_invite_users else '❌' if group_resolved and bot_status != 'unknown' else '❔'} Invite-link right: <b>{'YES' if can_invite_users else 'NO' if group_resolved and bot_status != 'unknown' else 'UNKNOWN'}</b>\n\n"
         "Tap <b>View Verification Proof</b> to refresh the live rights check. Approve & Publish appears only when both required rights are confirmed."
     )
     try:
@@ -173,6 +173,7 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
 
     group = None
     chat = None
+    known_private_group_id = None
     group_resolved = True
     bot_status = "unknown"
     can_invite_users = False
@@ -183,12 +184,13 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
         # reviewable request marked UNKNOWN instead of silently dropping it.
         group = await db_session.scalar(select(Group).where(Group.invite_link == group_link))
         if group is not None:
+            known_private_group_id = group.id
             try:
                 chat = await message.bot.get_chat(group.id)
             except Exception:
                 logger.exception("Known private invite group lookup failed for group_id=%s", group.id)
                 chat = None
-        if chat is None:
+        if chat is None and known_private_group_id is None:
             group_resolved = False
     else:
         slug = group_link.split("t.me/", 1)[1].split("?", 1)[0].strip("/")
@@ -254,6 +256,11 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
             if is_private_invite:
                 group.invite_link = group_link
             await db_session.flush()
+    elif known_private_group_id is not None:
+        # The exact invite link is mapped to a known group, even if get_chat
+        # temporarily failed. The owner proof callback can retry live membership.
+        group_id = known_private_group_id
+        group_title = group.title or "Known private Telegram group"
     else:
         # A stable synthetic key lets the owner see/reject an unresolved private
         # invite request. It is never eligible for approval or channel publishing.
@@ -501,9 +508,6 @@ async def _process_owner_promotion_action(callback: CallbackQuery, db_session: A
             if request.status != "pending":
                 await callback.answer("This request has already been reviewed.", show_alert=True)
                 return
-            request.status = "approved"
-            request.approved_at = datetime.now(timezone.utc)
-            await db_session.commit()
         elif request.status != "approved":
             await callback.answer("Only approved requests can be retried.", show_alert=True)
             return
@@ -523,6 +527,11 @@ async def _process_owner_promotion_action(callback: CallbackQuery, db_session: A
                 show_alert=True,
             )
             return
+
+        if action == "approve":
+            request.status = "approved"
+            request.approved_at = datetime.now(timezone.utc)
+            await db_session.commit()
 
         try:
             channel_id = int(channel_setting.value)
@@ -623,8 +632,8 @@ async def promotion_request_proof(callback: CallbackQuery, db_session: AsyncSess
         f"🔗 <code>{escape(request.group_link)}</code>\n"
         f"🆔 Group ID: <code>{'Not available' if group_unknown else request.group_id}</code>\n"
         f"🤖 Alexa membership: <b>{escape(status.title()) if resolved else 'UNKNOWN'}</b>\n"
-        f"👑 Alexa is administrator: <b>{'YES' if is_admin else 'NO' if resolved else 'UNKNOWN'}</b>\n"
-        f"🔗 Invite Users via Link right: <b>{'YES' if can_invite else 'NO' if resolved else 'UNKNOWN'}</b>\n\n"
+        f"👑 Alexa is administrator: <b>{'YES' if is_admin else 'UNKNOWN' if status == 'unknown' or not resolved else 'NO'}</b>\n"
+        f"🔗 Invite Users via Link right: <b>{'YES' if can_invite else 'UNKNOWN' if status == 'unknown' or not resolved else 'NO'}</b>\n\n"
         + (
             "✅ <b>Both required permissions are confirmed.</b> You can approve and publish."
             if is_admin and can_invite
