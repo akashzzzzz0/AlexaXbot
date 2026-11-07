@@ -1195,3 +1195,20 @@ class GuessPhraseEvent(Base):
     winner_name = Column(String(256), nullable=True)
     winning_answer = Column(String(256), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class IntroProfile(Base):
+    """A member's self-managed public introduction card."""
+    __tablename__ = "intro_profiles"
+
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    nickname = Column(String(128), nullable=False)
+    about = Column(Text, nullable=True)
+    hobbies = Column(Text, nullable=True)
+    interests = Column(Text, nullable=True)
+    languages = Column(Text, nullable=True)
+    favourite = Column(Text, nullable=True)
+    photo_file_id = Column(String(512), nullable=True)
+    field_entities = Column(JSON, default=dict, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())

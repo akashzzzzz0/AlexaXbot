@@ -1,6 +1,7 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart, Command
+from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 from bot.config import settings
 from bot.keyboards.main_menu import main_menu_kb, back_button_kb
@@ -102,11 +103,21 @@ async def _send_add_group_prompt(message: Message, db_user=None, user=None):
             await message.answer(safe_caption, parse_mode=None)
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, _: callable, db_session: AsyncSession = None, db_user=None, **kwargs):
+async def cmd_start(message: Message, _: callable, db_session: AsyncSession = None, db_user=None, state: FSMContext = None, **kwargs):
     if message.chat.type != "private":
         await message.answer("👋 ALEXA is active. Use /help to see available commands.")
         return
     args = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else ""
+    # Dedicated deep link opens the member's private introduction setup.
+    if args == "intro":
+        if db_user:
+            db_user.dm_started = True
+        from bot.handlers.intro import start_intro_setup
+        if state is not None:
+            await start_intro_setup(message, state)
+        else:
+            await message.answer("Please send /setintro again to start your profile.")
+        return
     # Dedicated Telegram deep link: https://t.me/<bot_username>?start=promotion
     # Opens the existing Free Group Promotion instructions directly, without
     # changing the normal /start welcome flow or any promotion verification logic.
