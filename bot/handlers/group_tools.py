@@ -8,8 +8,11 @@ from sqlalchemy import select, delete, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from html import escape
+import asyncio
+import logging
 import re
 import json
+from aiogram.exceptions import TelegramRetryAfter
 from bot.database.models import GroupRule, GroupFilter, SavedMessage, GroupBlocklist, GroupDisabledCommand, GroupMember, GroupMemberJoin, User, SecuritySettings, GroupSettings
 from bot.middlewares.admin_actions import AdminActionMiddleware
 from bot.config import settings
@@ -144,6 +147,41 @@ async def _send_mention_batches(message: Message, mentions: list[str], text: str
     for chunk in chunks:
         await message.answer(chunk, parse_mode="HTML", disable_web_page_preview=True)
 
+async def _send_member_tag_messages(message: Message, mentions: list[str], custom_text: str) -> int:
+    """Send one friendly, clickable mention per saved member with Telegram-safe pacing."""
+    greetings = (
+        "🌸 Hey {mention}! A little hello from Alexa 💖",
+        "✨ Hello {mention}! Hope your day is going beautifully.",
+        "💫 {mention}, Alexa is sending you a warm hello!",
+        "🌷 Hey {mention}! Glad you're part of this group.",
+        "💖 {mention}, wishing you a lovely day ahead!",
+    )
+    sent = 0
+    for index, mention in enumerate(mentions):
+        body = greetings[index % len(greetings)].format(mention=mention)
+        if custom_text:
+            body += "\n\n📣 " + escape(custom_text)
+        # Telegram limits bots to roughly 20 messages/minute in a group.
+        # Keep a small margin and honor explicit RetryAfter responses.
+        if sent:
+            await asyncio.sleep(3.1)
+        retries = 0
+        while True:
+            try:
+                await message.answer(body, parse_mode="HTML", disable_web_page_preview=True)
+                sent += 1
+                break
+            except TelegramRetryAfter as exc:
+                retries += 1
+                if retries > 3:
+                    logging.getLogger(__name__).warning(
+                        "Tag All stopped after Telegram flood control chat_id=%s sent=%s",
+                        message.chat.id, sent,
+                    )
+                    return sent
+                await asyncio.sleep(float(exc.retry_after) + 0.5)
+    return sent
+
 
 @router.message(Command("tagall"))
 async def tag_all_members(message: Message, db_session: AsyncSession, **kwargs):
@@ -179,7 +217,11 @@ async def tag_all_members(message: Message, db_session: AsyncSession, **kwargs):
             "Telegram does not let bots download the complete historical member list."
         )
         return
-    await _send_mention_batches(message, mentions, custom_text, "📣 <b>Tag All</b>")
+    sent = await _send_member_tag_messages(message, mentions, custom_text)
+    if sent == len(mentions):
+        await message.reply(f"✅ Tag All complete: {sent}/{len(mentions)} members were mentioned individually.")
+    else:
+        await message.reply(f"⚠️ Tag All paused: {sent}/{len(mentions)} members were mentioned. Please try again later.")
 
 
 @router.message(F.text.regexp(r"(?i)^@tagall(?:\s|$)"))
@@ -210,7 +252,11 @@ async def tag_all_members_alias(message: Message, db_session: AsyncSession, **kw
         name = " ".join(part for part in [user.first_name, user.last_name] if part).strip()
         mentions.append(_html_mention(row.user_id, name or user.username or str(row.user_id)))
     if mentions:
-        await _send_mention_batches(message, mentions, custom_text, "📣 <b>Tag All</b>")
+        sent = await _send_member_tag_messages(message, mentions, custom_text)
+        if sent == len(mentions):
+            await message.reply(f"✅ Tag All complete: {sent}/{len(mentions)} members were mentioned individually.")
+        else:
+            await message.reply(f"⚠️ Tag All paused: {sent}/{len(mentions)} members were mentioned. Please try again later.")
     else:
         await message.reply("No saved members found yet. Alexa will build this list as members are observed.")
 
