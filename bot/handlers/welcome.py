@@ -384,6 +384,7 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
                                     chat.id,
                                     f"🔇 {user_link} muted for {max(1, applied_duration // 60)} minute(s) after reaching the warning limit.",
                                     parse_mode="HTML",
+                                    reply_markup=_bio_admin_action_keyboard(chat.id, user.id),
                                 )
                                 return
                 except Exception as action_exc:
@@ -646,7 +647,7 @@ async def bio_link_admin_action(callback: CallbackQuery, db_session: AsyncSessio
     )
     details = (latest_mute.details or {}) if latest_mute else {}
     mute_reason = details.get("reason", "") if isinstance(details, dict) else ""
-    if not latest_mute or "bio" not in str(mute_reason).lower():
+    if not latest_mute or not ("bio" in str(mute_reason).lower() or "link warnings reached" in str(mute_reason).lower()):
         await callback.answer("This member's latest mute was not caused by Bio Link Protection.", show_alert=True)
         return
 
@@ -1087,12 +1088,19 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                             message.bot, db_session, db_group.id, db_user.id,
                             message.bot.id, 3600, "3 link warnings reached"
                         )
-                        notice = (
-                            ""
-                            if muted else
-                            f"⚠️ Link removed. Member reached {count}/3 warnings, but I couldn't apply the mute. "
-                            "Please check ALEXA's Restrict Members permission."
-                        )
+                        if muted:
+                            target_link = mention_user(
+                                db_user.id,
+                                getattr(db_user, "full_name", None) or getattr(db_user, "first_name", None) or f"User {db_user.id}",
+                            )
+                            notice = f"🔇 {target_link} was muted after reaching {count}/3 Bio Link Protection warnings."
+                            notice_markup = _bio_admin_action_keyboard(db_group.id, db_user.id)
+                        else:
+                            notice = (
+                                f"⚠️ Link removed. Member reached {count}/3 warnings, but I couldn't apply the mute. "
+                                "Please check ALEXA's Restrict Members permission."
+                            )
+                            notice_markup = None
                     else:
                         notice = (
                             f"⚠️ Link removed. Warning {count}/3. "
@@ -1100,7 +1108,7 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                         )
                     if notice:
                         try:
-                            await message.bot.send_message(message.chat.id, notice)
+                            await message.bot.send_message(message.chat.id, notice, parse_mode="HTML", reply_markup=notice_markup)
                         except Exception:
                             pass
                 return
@@ -1151,6 +1159,7 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                                 message.from_user.id,
                                 message.from_user.full_name or message.from_user.first_name or f"User {message.from_user.id}",
                             )
+                            notice_markup = None
                             if action in ("warn", "warn_mute", "warn_ban"):
                                 if db_user:
                                     count, reached = await warn_user(
@@ -1212,7 +1221,7 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                                         message.chat.id,
                                         notice,
                                         parse_mode="HTML",
-                                        reply_markup=locals().get("notice_markup"),
+                                        reply_markup=notice_markup,
                                     )
                                 except Exception:
                                     pass
