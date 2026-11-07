@@ -178,10 +178,6 @@ async def _send_member_tag_messages(message: Message, mentions: list[str], custo
                         "Tag All stopped after Telegram flood control chat_id=%s sent=%s",
                         message.chat.id, sent,
                     )
-                    await message.reply(
-                        f"⚠️ Tag All paused by Telegram after {sent} member messages. "
-                        "Run it again later to continue."
-                    )
                     return sent
                 await asyncio.sleep(float(exc.retry_after) + 0.5)
     return sent
@@ -222,7 +218,13 @@ async def tag_all_members(message: Message, db_session: AsyncSession, **kwargs):
         )
         return
     sent = await _send_member_tag_messages(message, mentions, custom_text)
-    await message.reply(f"✅ Tag All complete: {sent}/{len(mentions)} members were mentioned individually.")
+    if sent == len(mentions):
+        if sent == len(mentions):
+            await message.reply(f"✅ Tag All complete: {sent}/{len(mentions)} members were mentioned individually.")
+        else:
+            await message.reply(f"⚠️ Tag All paused: {sent}/{len(mentions)} members were mentioned. Please try again later.")
+    else:
+        await message.reply(f"⚠️ Tag All paused: {sent}/{len(mentions)} members were mentioned. Please try again later.")
 
 
 @router.message(F.text.regexp(r"(?i)^@tagall(?:\s|$)"))
