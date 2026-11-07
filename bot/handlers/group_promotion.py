@@ -577,7 +577,7 @@ async def _process_owner_promotion_action(callback: CallbackQuery, db_session: A
                 channel_id,
                 "📣 <b>VERIFIED GROUP — ALEXA FREE PROMOTION</b> 💜\n\n"
                 f"👥 <b>{escape(request.group_title)}</b>\n\n"
-                f"🔗 <a href=\"{escape(request.group_link, quote=True)}\">Open Group Link</a>\n\n"
+                f"🔗 <b>Group Link:</b> {escape(request.group_link)}\n\n"
                 "Join this community using the link above or the button below. 🚀",
                 parse_mode="HTML",
                 reply_markup=builder.as_markup(),
@@ -668,7 +668,7 @@ async def promotion_request_proof(callback: CallbackQuery, db_session: AsyncSess
         "🔎 <b>GROUP PROMOTION — VERIFICATION PROOF</b>\n"
         "━━━━━━━━━━━━━━━━━━\n"
         f"👥 <b>{escape(request.group_title)}</b>\n"
-        f"🔗 <a href=\"{escape(request.group_link, quote=True)}\">Open submitted group link</a>\n"
+        f"🔗 <b>Group Link:</b> {escape(request.group_link)}\n"
         f"🆔 Group ID: <code>{'Not available' if group_unknown else request.group_id}</code>\n"
         f"🤖 Alexa membership: <b>{escape(status.title()) if resolved else 'UNKNOWN'}</b>\n"
         f"👑 Alexa is administrator: <b>{'YES' if is_admin else 'UNKNOWN' if status == 'unknown' or not resolved else 'NO'}</b>\n"
