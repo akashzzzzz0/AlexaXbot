@@ -717,17 +717,11 @@ async def _process_owner_promotion_action(callback: CallbackQuery, db_session: A
 
         try:
             channel_id = int(channel_setting.value)
-            builder = InlineKeyboardBuilder()
-            builder.button(text="🔗 Join Group", url=request.group_link)
             await callback.bot.send_message(
                 channel_id,
-                "📣 <b>VERIFIED GROUP — ALEXA FREE PROMOTION</b> 💜\n\n"
-                f"👥 <b>{escape(request.group_title)}</b>\n\n"
-                f"🔗 <b>Group Link:</b> {escape(request.group_link)}\n\n"
-                "Join this community using the link above or the button below. 🚀",
-                parse_mode="HTML",
-                reply_markup=builder.as_markup(),
-                disable_web_page_preview=True,
+                "📣 VERIFIED GROUP — ALEXA FREE PROMOTION 💜\n"
+                f"{request.group_link}",
+                disable_web_page_preview=False,
             )
         except Exception:
             logger.exception("Failed to publish approved group promotion request_id=%s", request.id)
@@ -838,34 +832,3 @@ async def promotion_request_proof(callback: CallbackQuery, db_session: AsyncSess
         proof_text,
         parse_mode="HTML",
         reply_markup=builder.as_markup(),
-        disable_web_page_preview=True,
-    )
-    await callback.answer("Live verification proof refreshed.")
-
-
-@router.callback_query(F.data.startswith("owner:promo_request:approve:"))
-async def promotion_request_approve(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
-    if not _is_owner(callback.from_user.id) or not callback.message or callback.message.chat.type != "private":
-        await callback.answer("Owner only.", show_alert=True)
-        return
-    try:
-        request_id = int(callback.data.rsplit(":", 1)[1])
-    except (TypeError, ValueError):
-        await callback.answer("Invalid request.", show_alert=True)
-        return
-    await _process_owner_promotion_action(callback, db_session, request_id, "approve")
-
-
-@router.callback_query(F.data.startswith("owner:promo_request:reject:"))
-async def promotion_request_reject(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
-    if not _is_owner(callback.from_user.id) or not callback.message or callback.message.chat.type != "private":
-        await callback.answer("Owner only.", show_alert=True)
-        return
-    try:
-        request_id = int(callback.data.rsplit(":", 1)[1])
-    except (TypeError, ValueError):
-        await callback.answer("Invalid request.", show_alert=True)
-        return
-    await _process_owner_promotion_action(callback, db_session, request_id, "reject")
-
-
