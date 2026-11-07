@@ -113,7 +113,7 @@ async def _send_owner_request(
         f"👥 <b>{escape(request.group_title)}</b>\n"
         f"🔗 {escape(request.group_link)}\n"
         f"👤 Requester ID: <code>{request.user_id}</code>\n"
-        f"🆔 Group ID: <code>{request.group_id}</code>\n"
+        f"🆔 Group ID: <code>{'Not available' if request.group_id <= _UNRESOLVED_PRIVATE_ID_BASE else request.group_id}</code>\n"
         f"📋 Request: <code>#{request.id}</code>\n\n"
         "🔎 <b>VERIFICATION SNAPSHOT</b>\n"
         f"{'✅' if group_resolved else '⚠️'} Group identity: <b>{'Resolved' if group_resolved else 'Not resolvable by Telegram Bot API'}</b>\n"
@@ -168,9 +168,6 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
 
     group_link = _normalize_link(match.group(0))
     is_private_invite = "/+" in group_link or "/joinchat/" in group_link
-    group = None
-    chat = None
-
     group = None
     chat = None
     known_private_group_id = None
