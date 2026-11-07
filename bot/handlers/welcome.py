@@ -982,7 +982,7 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                         )
                     if notice:
                         try:
-                            await message.bot.send_message(message.chat.id, notice, parse_mode="HTML")
+                            await message.bot.send_message(message.chat.id, notice)
                         except Exception:
                             pass
                 return
@@ -1086,7 +1086,7 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                                 notice = "" if banned else f"⚠️ {user_link} — message removed, but ban failed. Check ALEXA's Ban Users permission."
                             if notice:
                                 try:
-                                    await message.bot.send_message(message.chat.id, notice)
+                                    await message.bot.send_message(message.chat.id, notice, parse_mode="HTML")
                                 except Exception:
                                     pass
                             return
