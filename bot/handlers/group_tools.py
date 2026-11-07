@@ -219,10 +219,7 @@ async def tag_all_members(message: Message, db_session: AsyncSession, **kwargs):
         return
     sent = await _send_member_tag_messages(message, mentions, custom_text)
     if sent == len(mentions):
-        if sent == len(mentions):
-            await message.reply(f"✅ Tag All complete: {sent}/{len(mentions)} members were mentioned individually.")
-        else:
-            await message.reply(f"⚠️ Tag All paused: {sent}/{len(mentions)} members were mentioned. Please try again later.")
+        await message.reply(f"✅ Tag All complete: {sent}/{len(mentions)} members were mentioned individually.")
     else:
         await message.reply(f"⚠️ Tag All paused: {sent}/{len(mentions)} members were mentioned. Please try again later.")
 
@@ -256,7 +253,10 @@ async def tag_all_members_alias(message: Message, db_session: AsyncSession, **kw
         mentions.append(_html_mention(row.user_id, name or user.username or str(row.user_id)))
     if mentions:
         sent = await _send_member_tag_messages(message, mentions, custom_text)
-        await message.reply(f"✅ Tag All complete: {sent}/{len(mentions)} members were mentioned individually.")
+        if sent == len(mentions):
+            await message.reply(f"✅ Tag All complete: {sent}/{len(mentions)} members were mentioned individually.")
+        else:
+            await message.reply(f"⚠️ Tag All paused: {sent}/{len(mentions)} members were mentioned. Please try again later.")
     else:
         await message.reply("No saved members found yet. Alexa will build this list as members are observed.")
 
