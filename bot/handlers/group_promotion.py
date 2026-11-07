@@ -16,7 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import settings
-from bot.database.models import Group, GroupPromotionRequest, GroupPromotionOptIn
+from bot.database.models import Group, GroupPromotionRequest, GroupPromotionOptIn, GlobalSetting
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +92,32 @@ async def _send_owner_request(bot, request: GroupPromotionRequest):
     except Exception:
         # The request remains available in Owner Panel → Promotion Requests.
         pass
+
+@router.message(StateFilter(None), F.chat.type == ChatType.PRIVATE, F.forward_origin)
+async def capture_promotion_channel(message: Message, db_session: AsyncSession, **kwargs):
+    """Save the channel ID from an owner-forwarded channel post."""
+    if not message.from_user or not _is_owner(message.from_user.id):
+        return
+    origin = message.forward_origin
+    origin_type = str(getattr(getattr(origin, "type", None), "value", getattr(origin, "type", ""))).lower()
+    channel = getattr(origin, "chat", None)
+    if origin_type != "channel" or channel is None:
+        await message.answer("Please forward a message directly from your Alexa Promotion Channel.")
+        return
+    setting = await db_session.get(GlobalSetting, "group_promotion_channel_id")
+    if setting is None:
+        setting = GlobalSetting(key="group_promotion_channel_id", value=str(channel.id))
+        db_session.add(setting)
+    else:
+        setting.value = str(channel.id)
+    await db_session.commit()
+    await message.answer(
+        "✅ <b>Promotion channel connected!</b>\n\n"
+        f"Channel: <b>{escape(getattr(channel, 'title', None) or 'Alexa Promotion Channel')}</b>\n"
+        f"Channel ID: <code>{channel.id}</code>\n\n"
+        "Approved group links will be posted only in this channel.",
+        parse_mode="HTML",
+    )
 
 
 @router.message(StateFilter(None), F.chat.type == ChatType.PRIVATE, F.text.regexp(_TRIGGER_RE))
@@ -469,39 +495,62 @@ async def _process_owner_promotion_action(callback: CallbackQuery, db_session: A
             await callback.answer("Only approved requests can be retried.", show_alert=True)
             return
 
-        sent, failed = await _run_promotion(request, callback.bot, db_session)
-        if sent:
-            request.status = "promoted"
-            request.promoted_at = datetime.now(timezone.utc)
-            await db_session.commit()
-            try:
-                await callback.bot.send_message(
-                    request.user_id,
-                    "🎉💜 The owner has approved your group promotion! Your group promotion has now started. "
-                    f"Alexa shared it with <b>{sent}</b> active groups. 🚀",
-                    parse_mode="HTML",
-                )
-            except Exception:
-                pass
-            await callback.answer(f"Promotion sent to {sent} groups. Failed: {failed}.")
-            nav = InlineKeyboardBuilder()
-            nav.button(text="🗂 Promotion Requests", callback_data="owner:promo_requests")
-            nav.button(text="👑 Owner Panel", callback_data="owner:menu")
-            nav.adjust(1)
-            await callback.message.edit_text(
-                f"✅ <b>Promotion #{request.id} processed</b>\n\n"
-                f"Sent to active groups: <b>{sent}</b>\nFailed: <b>{failed}</b>",
-                parse_mode="HTML",
-                reply_markup=nav.as_markup(),
+        channel_setting = await db_session.get(GlobalSetting, "group_promotion_channel_id")
+        if channel_setting is None or not channel_setting.value:
+            await callback.answer(
+                "Promotion channel is not connected. Forward a channel post to Alexa first.",
+                show_alert=True,
             )
             return
 
+        try:
+            channel_id = int(channel_setting.value)
+            builder = InlineKeyboardBuilder()
+            builder.button(text="🔗 Join Group", url=request.group_link)
+            await callback.bot.send_message(
+                channel_id,
+                "📣 <b>VERIFIED GROUP — ALEXA FREE PROMOTION</b> 💜\n\n"
+                f"👥 <b>{escape(request.group_title)}</b>\n\n"
+                "Join this community using the link below. 🚀",
+                parse_mode="HTML",
+                reply_markup=builder.as_markup(),
+                disable_web_page_preview=True,
+            )
+        except Exception:
+            logger.exception("Failed to publish approved group promotion request_id=%s", request.id)
+            await callback.answer(
+                "Could not post to the connected channel. Check Alexa's channel posting permission and retry.",
+                show_alert=True,
+            )
+            return
+
+        request.status = "promoted"
+        request.promoted_at = datetime.now(timezone.utc)
         await db_session.commit()
-        await callback.answer(
-            "No group received the promotion. Keep this request approved and retry when active groups are available.",
-            show_alert=True,
+        try:
+            await callback.bot.send_message(
+                request.user_id,
+                "🎉 <b>Your Group Link Verification Is Complete!</b>\n\n"
+                "💜 Your group has been successfully verified and approved by our team.\n\n"
+                "🚀 Your group link has been published on the Alexa Promotion Channel.\n\n"
+                "📢 Visit our channel:\n"
+                "https://t.me/+tdfGw6ekfNA4OTNk\n\n"
+                "👑 Thank you for choosing Alexa Free Group Promotion!",
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
+        except Exception:
+            logger.exception("Channel post succeeded but requester DM failed request_id=%s", request.id)
+        await callback.answer("Approved group link posted to the promotion channel.")
+        nav = InlineKeyboardBuilder()
+        nav.button(text="🗂 Promotion Requests", callback_data="owner:promo_requests")
+        nav.button(text="👑 Owner Panel", callback_data="owner:menu")
+        nav.adjust(1)
+        await callback.message.edit_text(
+            f"✅ <b>Promotion #{request.id} published to the configured channel.</b>",
+            parse_mode="HTML",
+            reply_markup=nav.as_markup(),
         )
-        return
 
     if action == "reject":
         if request.status != "pending":
