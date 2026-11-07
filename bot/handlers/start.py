@@ -110,6 +110,8 @@ async def cmd_start(message: Message, _: callable, db_session: AsyncSession = No
     args = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else ""
     # Dedicated deep link opens the member's private introduction setup.
     if args == "intro":
+        if db_user:
+            db_user.dm_started = True
         from bot.handlers.intro import start_intro_setup
         if state is not None:
             await start_intro_setup(message, state)
