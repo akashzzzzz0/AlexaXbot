@@ -1830,10 +1830,10 @@ async def start_group_promotion(callback: CallbackQuery, _: callable, state: FSM
         return
     await state.set_state(OwnerStates.waiting_group_promotion)
     await callback.message.answer(
-        "📣 <b>GLOBAL GROUP MESSAGE</b>\n\n"
-        "Send one message and ALEXA will copy it to groups whose admins have opted in. "
-        "This is a direct owner broadcast — not random group promotion.\n\n"
-        "Group admins enable delivery with /promotions on and can opt out using /promotions off. "
+        "📣 <b>OWNER GROUP PROMOTION</b>\n\n"
+        "Send one message and ALEXA will copy it to every active group where Alexa is present. "
+        "This owner promotion is separate from DM verification requests and channel publishing.\n\n"
+        ""
         "Text, photos, videos and supported Telegram media can be copied.\n"
         "Send /cancel to stop.",
         parse_mode="HTML",
@@ -1854,13 +1854,12 @@ async def process_group_promotion(message: Message, _: callable, db_session: Asy
 
     groups = (await db_session.scalars(
         select(Group)
-        .join(GroupPromotionOptIn, GroupPromotionOptIn.group_id == Group.id)
-        .where(Group.is_active.is_(True), GroupPromotionOptIn.enabled.is_(True))
+        .where(Group.is_active.is_(True))
         .order_by(Group.title.asc())
     )).all()
     if not groups:
         await state.clear()
-        await message.answer("No groups have opted in yet. Ask group admins to send /promotions on in their groups.")
+        await message.answer("Alexa is not currently recorded in any active groups.")
         return
 
     sent = 0

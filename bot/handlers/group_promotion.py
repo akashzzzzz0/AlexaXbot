@@ -79,6 +79,45 @@ async def _live_group_proof(bot, request: GroupPromotionRequest) -> tuple[str, b
         return "unknown", False, False, True
 
 
+
+async def _live_permission_report(bot, request: GroupPromotionRequest) -> str:
+    """Return all administrator permissions exposed by the current Telegram API."""
+    if request.group_id <= _UNRESOLVED_PRIVATE_ID_BASE:
+        return "⚠️ Permissions: UNKNOWN (private invite target is unresolved)."
+    try:
+        me = await bot.get_me()
+        member = await bot.get_chat_member(request.group_id, me.id)
+    except Exception:
+        logger.exception("Detailed permission check failed for request_id=%s", request.id)
+        return "⚠️ Permissions: UNKNOWN (live Telegram check failed)."
+    status = str(getattr(member.status, "value", member.status)).lower()
+    if status == "creator":
+        return "👑 <b>Creator:</b> YES — all administrator permissions"
+    if status != "administrator":
+        return "❌ <b>Administrator permissions:</b> Not available; Alexa is not an administrator."
+    checks = [
+        ("Change group info", "can_change_info"),
+        ("Delete messages", "can_delete_messages"),
+        ("Restrict / ban members", "can_restrict_members"),
+        ("Invite users / create invite links", "can_invite_users"),
+        ("Pin messages", "can_pin_messages"),
+        ("Promote administrators", "can_promote_members"),
+        ("Manage video chats", "can_manage_video_chats"),
+        ("Manage topics", "can_manage_topics"),
+        ("Post messages", "can_post_messages"),
+        ("Edit messages", "can_edit_messages"),
+        ("Post stories", "can_post_stories"),
+        ("Edit stories", "can_edit_stories"),
+        ("Delete stories", "can_delete_stories"),
+    ]
+    lines = ["<b>Alexa's current administrator permissions:</b>"]
+    for label, attribute in checks:
+        value = getattr(member, attribute, None)
+        if value is not None:
+            lines.append(f"{'✅' if value else '❌'} {label}: <b>{'YES' if value else 'NO'}</b>")
+    return "\n".join(lines)
+
+
 def _is_owner(user_id: int) -> bool:
     return bool(settings.effective_owner_id) and user_id == settings.effective_owner_id
 
@@ -538,7 +577,8 @@ async def _process_owner_promotion_action(callback: CallbackQuery, db_session: A
                 channel_id,
                 "📣 <b>VERIFIED GROUP — ALEXA FREE PROMOTION</b> 💜\n\n"
                 f"👥 <b>{escape(request.group_title)}</b>\n\n"
-                "Join this community using the link below. 🚀",
+                f"🔗 <a href=\"{escape(request.group_link, quote=True)}\">Open Group Link</a>\n\n"
+                "Join this community using the link above or the button below. 🚀",
                 parse_mode="HTML",
                 reply_markup=builder.as_markup(),
                 disable_web_page_preview=True,
@@ -622,6 +662,7 @@ async def promotion_request_proof(callback: CallbackQuery, db_session: AsyncSess
 
     status, is_admin, can_invite, resolved = await _live_group_proof(callback.bot, request)
     group_unknown = request.group_id <= _UNRESOLVED_PRIVATE_ID_BASE
+    permission_report = await _live_permission_report(callback.bot, request)
     proof_text = (
         "🔎 <b>GROUP PROMOTION — VERIFICATION PROOF</b>\n"
         "━━━━━━━━━━━━━━━━━━\n"
@@ -631,6 +672,7 @@ async def promotion_request_proof(callback: CallbackQuery, db_session: AsyncSess
         f"🤖 Alexa membership: <b>{escape(status.title()) if resolved else 'UNKNOWN'}</b>\n"
         f"👑 Alexa is administrator: <b>{'YES' if is_admin else 'UNKNOWN' if status == 'unknown' or not resolved else 'NO'}</b>\n"
         f"🔗 Invite Users via Link right: <b>{'YES' if can_invite else 'UNKNOWN' if status == 'unknown' or not resolved else 'NO'}</b>\n\n"
+        + permission_report + "\n\n"
         + (
             "✅ <b>Both required permissions are confirmed.</b> You can approve and publish."
             if is_admin and can_invite
