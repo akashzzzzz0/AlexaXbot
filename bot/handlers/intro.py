@@ -360,6 +360,56 @@ def _render_intro_card(profile: IntroProfile, user: User, photo_bytes=None):
     return output
 
 
+def _utf16_length(value: str) -> int:
+    """Telegram entity offsets are measured in UTF-16 code units."""
+    return len(value.encode("utf-16-le")) // 2
+
+
+def _build_intro_telegram_text(profile: IntroProfile, target: User):
+    """Build a Telegram-native copy so Premium custom emoji entities stay intact."""
+    nickname = (profile.nickname or "").strip() or (target.first_name or "Member")
+    lines = ["✨ PERSONAL INTRODUCTION ✨", f"👤 {nickname}"]
+    if target.username:
+        lines.append(f"🔗 Telegram: @{target.username}")
+    entities = []
+    saved_entities = profile.field_entities or {}
+    for field, label in (
+        ("about", "📝 About Me"),
+        ("hobbies", "🎮 Hobbies"),
+        ("interests", "💖 Interests"),
+        ("languages", "🌍 Languages"),
+        ("favourite", "⭐ Favourite Things"),
+    ):
+        value = getattr(profile, field, None)
+        if not value:
+            continue
+        prefix = f"{label}: "
+        current_text = "\n".join(lines) + "\n"
+        base_offset = _utf16_length(current_text + prefix)
+        lines.append(prefix + str(value))
+        for raw_entity in saved_entities.get(field, []) or []:
+            if not isinstance(raw_entity, dict):
+                continue
+            if raw_entity.get("type") != "custom_emoji" or not raw_entity.get("custom_emoji_id"):
+                continue
+            try:
+                entity_data = dict(raw_entity)
+                local_offset = int(entity_data.get("offset", 0))
+                local_length = int(entity_data.get("length", 0))
+                if local_offset < 0 or local_length <= 0:
+                    continue
+                if local_offset + local_length > _utf16_length(str(value)):
+                    continue
+                entity_data["offset"] = base_offset + local_offset
+                entity = MessageEntity.model_validate(entity_data)
+                if entity.offset >= base_offset and entity.length > 0:
+                    entities.append(entity)
+            except (TypeError, ValueError):
+                logger.warning("Skipping invalid saved intro custom-emoji entity")
+    lines.append("\n💜 Powered by ALEXA")
+    return "\n".join(lines), entities
+
+
 async def _show_intro(message: Message, target: User, db_session: AsyncSession):
     profile = await db_session.get(IntroProfile, target.id)
     if not profile:
@@ -373,32 +423,38 @@ async def _show_intro(message: Message, target: User, db_session: AsyncSession):
             await message.bot.download(profile.photo_file_id, destination=photo_bytes)
             photo_bytes.seek(0)
         except Exception as exc:
-            logger.info("Could not download saved intro photo: %s", exc)
+            logger.info("Saved intro photo download failed; trying Telegram profile photo: %s", exc)
+            photo_bytes = None
+
+    # A saved upload can expire or become unavailable. Retry with the user's
+    # current Telegram profile photo before rendering the card without an avatar.
+    if photo_bytes is None:
+        try:
+            photos = await message.bot.get_user_profile_photos(target.id, limit=1)
+            if photos.total_count and photos.photos:
+                fallback_file_id = photos.photos[0][-1].file_id
+                photo_bytes = io.BytesIO()
+                await message.bot.download(fallback_file_id, destination=photo_bytes)
+                photo_bytes.seek(0)
+        except Exception as exc:
+            logger.info("Telegram profile-photo fallback unavailable for intro: %s", exc)
             photo_bytes = None
 
     try:
         card = _render_intro_card(profile, target, photo_bytes)
         await message.answer_photo(photo=card)
+        # Pillow cannot draw Telegram Premium custom emoji. Send a Telegram-native
+        # companion only when such entities exist, preserving their original IDs.
+        telegram_text, telegram_entities = _build_intro_telegram_text(profile, target)
+        if telegram_entities:
+            await message.answer(telegram_text, entities=telegram_entities, disable_web_page_preview=True)
     except Exception as exc:
-        # Keep the existing text-card route as a safe fallback if image rendering
-        # or upload fails; no separate profile-photo message is sent.
         logger.exception("Could not render intro card image: %s", exc)
-        fallback_name = (profile.nickname or "").strip() or (target.first_name or "Member")
-        lines = [f"✨ PERSONAL INTRODUCTION ✨", f"👤 {fallback_name}"]
-        if target.username:
-            lines.append(f"🔗 Telegram: @{target.username}")
-        for field, label in (
-            ("about", "📝 About Me"),
-            ("hobbies", "🎮 Hobbies"),
-            ("interests", "💖 Interests"),
-            ("languages", "🌍 Languages"),
-            ("favourite", "⭐ Favourite Things"),
-        ):
-            value = getattr(profile, field, None)
-            if value:
-                lines.append(f"{label}: {value}")
-        lines.append("\n💜 Powered by ALEXA")
-        await message.answer("\n".join(lines), disable_web_page_preview=True)
+        fallback_text, fallback_entities = _build_intro_telegram_text(profile, target)
+        if fallback_entities:
+            await message.answer(fallback_text, entities=fallback_entities, disable_web_page_preview=True)
+        else:
+            await message.answer(fallback_text, disable_web_page_preview=True)
 
 
 @router.message(Command("intro"))
