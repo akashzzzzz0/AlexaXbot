@@ -599,7 +599,7 @@ async def cmd_unban(message: Message, bot: Bot, _: callable, db_session: AsyncSe
         return
     success = await unban_user(bot, db_session, message.chat.id, target.id, message.from_user.id if message.from_user else 0)
     if success:
-        await message.reply(_("user_unbanned").format(name=safe_username(target)))
+        await message.reply(_("user_unbanned").format(name=mention_user(target.id, safe_username(target))), parse_mode="HTML")
     else:
         await message.reply("❌ Unban failed. Check ALEXA's Ban Users permission and the target ID.")
 
@@ -703,7 +703,7 @@ async def cmd_unmute(message: Message, bot: Bot, _: callable, db_session: AsyncS
             message.from_user.id if message.from_user else 0,
         )
         if success:
-            response = f"✅ {escape(safe_username(target))} has been unmuted."
+            response = f"✅ {mention_user(target.id, safe_username(target))} has been unmuted."
         else:
             response = (
                 "❌ Unmute failed. Check ALEXA's admin status + Restrict Members permission, "
@@ -740,7 +740,7 @@ async def cmd_warn(message: Message, bot: Bot, _: callable, db_session: AsyncSes
 
     if reached_max:
         await message.reply(
-            _("max_warns_reached").format(name=safe_username(target), action=warn_action),
+            _("max_warns_reached").format(name=mention_user(target.id, safe_username(target)), action=warn_action),
             parse_mode="HTML",
         )
         if warn_action == "ban":
@@ -761,7 +761,7 @@ async def cmd_unwarn(message: Message, _: callable, db_session: AsyncSession, **
         return
     success = await unwarn_user(db_session, message.chat.id, target.id)
     if success:
-        await message.reply(_("user_unwarned").format(name=safe_username(target)))
+        await message.reply(_("user_unwarned").format(name=mention_user(target.id, safe_username(target))), parse_mode="HTML")
     else:
         await message.reply("No warning found for this member.")
 
@@ -781,7 +781,7 @@ async def cmd_warns(message: Message, _: callable, db_session: AsyncSession, **k
     if not target:
         return
     warnings = await get_user_warnings(db_session, message.chat.id, target.id)
-    text = f"⚠️ <b>Warnings for {safe_username(target)}</b>\n\n"
+    text = f"⚠️ <b>Warnings for {mention_user(target.id, safe_username(target))}</b>\n\n"
     if not warnings:
         text += "No warnings."
     else:
@@ -803,7 +803,7 @@ async def cmd_note(message: Message, _: callable, db_session: AsyncSession, **kw
         return
     note_text = parts[1]
     await add_note(db_session, message.chat.id, message.reply_to_message.from_user.id, message.from_user.id, note_text)
-    await message.reply(f"📝 Note added for {safe_username(message.reply_to_message.from_user)}")
+    await message.reply(f"📝 Note added for {mention_user(message.reply_to_message.from_user.id, safe_username(message.reply_to_message.from_user))}", parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("mute_duration:"))
