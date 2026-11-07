@@ -651,6 +651,10 @@ async def bio_link_admin_action(callback: CallbackQuery, db_session: AsyncSessio
         await callback.answer("This member's latest mute was not caused by Bio Link Protection.", show_alert=True)
         return
 
+    if action == "unmute" and not member.is_muted:
+        await callback.answer("This member is not currently muted.", show_alert=True)
+        return
+
     if action == "whitelist":
         try:
             member.is_whitelisted = True
@@ -1075,6 +1079,7 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                 except Exception as exc:
                     logger.warning("Could not delete link message", error=str(exc), group_id=message.chat.id)
                 if db_user:
+                    notice_markup = None
                     count, reached = await warn_user(
                         db_session, db_group.id, db_user.id, message.bot.id,
                         "Posting links (Bio Link Protection)", max_warns=3
