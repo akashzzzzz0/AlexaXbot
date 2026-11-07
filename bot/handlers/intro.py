@@ -394,7 +394,13 @@ def _build_intro_telegram_text(profile: IntroProfile, target: User):
                 continue
             try:
                 entity_data = dict(raw_entity)
-                entity_data["offset"] = base_offset + int(entity_data.get("offset", 0))
+                local_offset = int(entity_data.get("offset", 0))
+                local_length = int(entity_data.get("length", 0))
+                if local_offset < 0 or local_length <= 0:
+                    continue
+                if local_offset + local_length > _utf16_length(str(value)):
+                    continue
+                entity_data["offset"] = base_offset + local_offset
                 entity = MessageEntity.model_validate(entity_data)
                 if entity.offset >= base_offset and entity.length > 0:
                     entities.append(entity)
