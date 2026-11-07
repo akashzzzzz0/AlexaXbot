@@ -91,11 +91,8 @@ async def _live_permission_report(bot, request: GroupPromotionRequest) -> str:
         logger.exception("Detailed permission check failed for request_id=%s", request.id)
         return "⚠️ Permissions: UNKNOWN (live Telegram check failed)."
     status = str(getattr(member.status, "value", member.status)).lower()
-    if status == "creator":
-        return "👑 <b>Creator:</b> YES — all administrator permissions"
-    if status != "administrator":
-        return "❌ <b>Administrator permissions:</b> Not available; Alexa is not an administrator."
     checks = [
+        ("Manage chat", "can_manage_chat"),
         ("Change group info", "can_change_info"),
         ("Delete messages", "can_delete_messages"),
         ("Restrict / ban members", "can_restrict_members"),
@@ -109,11 +106,20 @@ async def _live_permission_report(bot, request: GroupPromotionRequest) -> str:
         ("Post stories", "can_post_stories"),
         ("Edit stories", "can_edit_stories"),
         ("Delete stories", "can_delete_stories"),
+        ("Manage direct messages", "can_manage_direct_messages"),
     ]
+    if status == "creator":
+        return "👑 <b>Alexa status: CREATOR</b>\n" + "\n".join(
+            f"✅ {label}: <b>YES (creator)</b>" for label, _ in checks
+        )
+    if status != "administrator":
+        return "❌ <b>Administrator permissions:</b> Not available; Alexa is not an administrator."
     lines = ["<b>Alexa's current administrator permissions:</b>"]
     for label, attribute in checks:
         value = getattr(member, attribute, None)
-        if value is not None:
+        if value is None:
+            lines.append(f"⚪ {label}: <b>NOT EXPOSED BY TELEGRAM</b>")
+        else:
             lines.append(f"{'✅' if value else '❌'} {label}: <b>{'YES' if value else 'NO'}</b>")
     return "\n".join(lines)
 
@@ -504,7 +510,7 @@ async def promotion_requests_panel(callback: CallbackQuery, db_session: AsyncSes
     )).all()
     if not requests:
         await callback.message.edit_text(
-            "🗂 <b>PROMOTION REQUESTS</b>\n\nNo pending or retryable promotion requests.",
+            "🗂 <b>PROMOTION REQUESTS</b>\n\nNo pending promotion requests.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                 {"text": "◀️ Owner Panel", "callback_data": "owner:menu"}
@@ -515,18 +521,15 @@ async def promotion_requests_panel(callback: CallbackQuery, db_session: AsyncSes
     builder = InlineKeyboardBuilder()
     lines = ["🗂 <b>PROMOTION REQUESTS</b>", "━━━━━━━━━━━━━━━━━━", ""]
     for req in requests:
-        status_label = "⏳ Pending owner approval" if req.status == "pending" else "🟡 Approved — retry if needed"
+        status_label = "⏳ Awaiting owner decision" if req.status == "pending" else "🟡 Previously approved — review status"
         lines.append(
             f"#{req.id} · <b>{escape(req.group_title)}</b>\n"
-            f"{escape(req.group_link)}\n"
-            "🔎 Tap View Proof to refresh Alexa's current admin and invite-link rights\n"
+            f"🔗 {escape(req.group_link)}\n"
+            "🔎 Open the proof to see Alexa's live status and every permission Telegram exposes\n"
             f"{status_label}\n"
         )
-        if req.status == "pending":
-            builder.button(text=f"🔎 View Proof #{req.id}", callback_data=f"owner:promo_request:proof:{req.id}")
-            builder.button(text=f"❌ Reject #{req.id}", callback_data=f"owner:promo_request:reject:{req.id}")
-        else:
-            builder.button(text=f"🚀 Retry promotion #{req.id}", callback_data=f"owner:promo_request:retry:{req.id}")
+        builder.button(text=f"🔎 View Permissions & Proof #{req.id}", callback_data=f"owner:promo_request:proof:{req.id}")
+        builder.button(text=f"❌ Reject #{req.id}", callback_data=f"owner:promo_request:reject:{req.id}")
     builder.button(text="🔄 Refresh", callback_data="owner:promo_requests")
     builder.button(text="◀️ Owner Panel", callback_data="owner:menu")
     builder.adjust(1)
@@ -539,13 +542,9 @@ async def _process_owner_promotion_action(callback: CallbackQuery, db_session: A
     if not request:
         await callback.answer("Promotion request not found.", show_alert=True)
         return
-    if action in {"approve", "retry"}:
-        if action == "approve":
-            if request.status != "pending":
-                await callback.answer("This request has already been reviewed.", show_alert=True)
-                return
-        elif request.status != "approved":
-            await callback.answer("Only approved requests can be retried.", show_alert=True)
+    if action == "approve":
+        if request.status not in {"pending", "approved"}:
+            await callback.answer("This request has already been completed or rejected.", show_alert=True)
             return
 
         proof_status, proof_is_admin, proof_can_invite, proof_resolved = await _live_group_proof(callback.bot, request)
@@ -564,10 +563,11 @@ async def _process_owner_promotion_action(callback: CallbackQuery, db_session: A
             )
             return
 
-        if action == "approve":
-            request.status = "approved"
-            request.approved_at = datetime.now(timezone.utc)
-            await db_session.commit()
+        # Mark approved before sending to prevent two simultaneous owner taps
+        # from publishing duplicate channel posts. On send failure, restore pending.
+        request.status = "approved"
+        request.approved_at = request.approved_at or datetime.now(timezone.utc)
+        await db_session.commit()
 
         try:
             channel_id = int(channel_setting.value)
@@ -585,8 +585,10 @@ async def _process_owner_promotion_action(callback: CallbackQuery, db_session: A
             )
         except Exception:
             logger.exception("Failed to publish approved group promotion request_id=%s", request.id)
+            request.status = "pending"
+            await db_session.commit()
             await callback.answer(
-                "Could not post to the connected channel. Check Alexa's channel posting permission and retry.",
+                "Channel post failed. The request is back to Pending, so you can safely review and approve again after fixing channel access.",
                 show_alert=True,
             )
             return
@@ -597,10 +599,9 @@ async def _process_owner_promotion_action(callback: CallbackQuery, db_session: A
         try:
             await callback.bot.send_message(
                 request.user_id,
-                "🎉 <b>Your Group Link Verification Is Complete!</b>\n\n"
-                "💜 Your group has been successfully verified and approved by our team.\n\n"
-                "🚀 Your group link has been published on the Alexa Promotion Channel.\n\n"
-                "📢 Visit our channel:\n"
+                "🎉 <b>Your Group Promotion Has Been Approved!</b>\n\n"
+                "💜 Your group has passed verification and its link is now published on our official promotion channel.\n\n"
+                "📢 <b>Open the channel to see your completed promotion:</b>\n"
                 "https://t.me/+tdfGw6ekfNA4OTNk\n\n"
                 "👑 Thank you for choosing Alexa Free Group Promotion!",
                 parse_mode="HTML",
@@ -620,8 +621,8 @@ async def _process_owner_promotion_action(callback: CallbackQuery, db_session: A
         )
 
     if action == "reject":
-        if request.status != "pending":
-            await callback.answer("Only pending requests can be rejected.", show_alert=True)
+        if request.status not in {"pending", "approved"}:
+            await callback.answer("This request can no longer be rejected.", show_alert=True)
             return
         request.status = "rejected"
         await db_session.commit()
@@ -656,8 +657,8 @@ async def promotion_request_proof(callback: CallbackQuery, db_session: AsyncSess
         await callback.answer("Invalid request.", show_alert=True)
         return
     request = await db_session.get(GroupPromotionRequest, request_id)
-    if not request or request.status != "pending":
-        await callback.answer("This request is no longer pending.", show_alert=True)
+    if not request or request.status not in {"pending", "approved"}:
+        await callback.answer("This request is no longer awaiting review.", show_alert=True)
         return
 
     status, is_admin, can_invite, resolved = await _live_group_proof(callback.bot, request)
@@ -667,7 +668,7 @@ async def promotion_request_proof(callback: CallbackQuery, db_session: AsyncSess
         "🔎 <b>GROUP PROMOTION — VERIFICATION PROOF</b>\n"
         "━━━━━━━━━━━━━━━━━━\n"
         f"👥 <b>{escape(request.group_title)}</b>\n"
-        f"🔗 <code>{escape(request.group_link)}</code>\n"
+        f"🔗 <a href=\"{escape(request.group_link, quote=True)}\">Open submitted group link</a>\n"
         f"🆔 Group ID: <code>{'Not available' if group_unknown else request.group_id}</code>\n"
         f"🤖 Alexa membership: <b>{escape(status.title()) if resolved else 'UNKNOWN'}</b>\n"
         f"👑 Alexa is administrator: <b>{'YES' if is_admin else 'UNKNOWN' if status == 'unknown' or not resolved else 'NO'}</b>\n"
@@ -722,14 +723,3 @@ async def promotion_request_reject(callback: CallbackQuery, db_session: AsyncSes
     await _process_owner_promotion_action(callback, db_session, request_id, "reject")
 
 
-@router.callback_query(F.data.startswith("owner:promo_request:retry:"))
-async def promotion_request_retry(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
-    if not _is_owner(callback.from_user.id) or not callback.message or callback.message.chat.type != "private":
-        await callback.answer("Owner only.", show_alert=True)
-        return
-    try:
-        request_id = int(callback.data.rsplit(":", 1)[1])
-    except (TypeError, ValueError):
-        await callback.answer("Invalid request.", show_alert=True)
-        return
-    await _process_owner_promotion_action(callback, db_session, request_id, "retry")
