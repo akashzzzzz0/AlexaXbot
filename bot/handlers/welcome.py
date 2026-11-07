@@ -1130,19 +1130,8 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
         ))
         approved_sticker_user = bool(member_row and member_row.approved_sticker)
 
-    # /approve remains a sticker-lock exemption for individual lock settings,
-    # but Lock All must apply every content lock to every regular member,
-    # including members previously approved for stickers.
-    if approved_sticker_user:
-        content_lock_fields = (
-            "lock_text", "lock_links", "lock_photos", "lock_videos", "lock_gifs",
-            "lock_audio", "lock_voice", "lock_documents", "lock_polls", "lock_games",
-            "lock_bots", "lock_forwards", "lock_contacts", "lock_locations",
-            "lock_stickers", "lock_inline", "lock_mentions", "lock_hashtags",
-        )
-        if all(bool(getattr(group_security, field, False)) for field in content_lock_fields):
-            approved_sticker_user = False
-
+    # Sticker approval remains valid even when Lock All is enabled; only the
+    # sticker lock is bypassed for this member. All other locks stay enforced.
     violations = await check_message_violations(message, group_security, approved_sticker_user=approved_sticker_user)
     # Group admins/creator are automatically exempt from link moderation,
     # including invite URLs and link-lock violations. When their message is a
