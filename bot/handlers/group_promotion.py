@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 import re
 from datetime import datetime, timezone
@@ -44,12 +45,38 @@ _PROMOTION_STATUS_RE = re.compile(
 )
 _PROMOTION_NOTICE = (
     "✅ <b>Your group link has been received successfully!</b>\n\n"
-    "✅ Alexa has verified your group membership and required admin permissions.\n"
-    "Your request has been sent to the owner for final approval. Once approved, your group will be published on our official channel.\n\n"
+    "🔍 Alexa will check its group membership and required admin permissions.\n"
+    "Your verification report will be reviewed by the owner. If approved, your group will be published on our official channel.\n\n"
     "📢 <b>Join our channel to view your group promotion:</b>\n"
     "https://t.me/+tdfGw6ekfNA4OTNk\n\n"
     "💜 Thank you for choosing Alexa Free Group Promotion!"
 )
+
+# Telegram chat IDs do not use this reserved range; it marks an invite link
+# whose target chat cannot be resolved through the Bot API.
+_UNRESOLVED_PRIVATE_ID_BASE = -(1 << 60)
+
+
+def _unresolved_private_group_id(link: str) -> int:
+    digest = hashlib.sha256(link.encode("utf-8")).hexdigest()[:14]
+    return _UNRESOLVED_PRIVATE_ID_BASE - int(digest, 16)
+
+
+async def _live_group_proof(bot, request: GroupPromotionRequest) -> tuple[str, bool, bool, bool]:
+    if request.group_id <= _UNRESOLVED_PRIVATE_ID_BASE:
+        return "unknown", False, False, False
+    try:
+        me = await bot.get_me()
+        member = await bot.get_chat_member(request.group_id, me.id)
+        status = str(getattr(member.status, "value", member.status)).lower()
+        is_admin = status in {"administrator", "creator"}
+        can_invite = is_admin and (
+            status == "creator" or bool(getattr(member, "can_invite_users", False))
+        )
+        return status, is_admin, can_invite, True
+    except Exception:
+        logger.exception("Could not refresh group-promotion proof for request_id=%s", request.id)
+        return "unknown", False, False, True
 
 
 def _is_owner(user_id: int) -> bool:
@@ -65,13 +92,19 @@ def _normalize_link(link: str) -> str:
 
 def _request_keyboard(request_id: int):
     builder = InlineKeyboardBuilder()
-    builder.button(text="🔎 Proof & Publish", callback_data=f"owner:promo_request:proof:{request_id}")
+    builder.button(text="🔎 View Verification Proof", callback_data=f"owner:promo_request:proof:{request_id}")
     builder.button(text="❌ Reject", callback_data=f"owner:promo_request:reject:{request_id}")
-    builder.adjust(1, 1)
+    builder.adjust(1)
     return builder.as_markup()
 
 
-async def _send_owner_request(bot, request: GroupPromotionRequest, bot_status: str = "administrator", can_invite_users: bool = True):
+async def _send_owner_request(
+    bot,
+    request: GroupPromotionRequest,
+    bot_status: str = "unknown",
+    can_invite_users: bool = False,
+    group_resolved: bool = True,
+):
     owner_id = settings.effective_owner_id
     if not owner_id:
         return
@@ -82,11 +115,11 @@ async def _send_owner_request(bot, request: GroupPromotionRequest, bot_status: s
         f"👤 Requester ID: <code>{request.user_id}</code>\n"
         f"🆔 Group ID: <code>{request.group_id}</code>\n"
         f"📋 Request: <code>#{request.id}</code>\n\n"
-        "🔎 <b>VERIFICATION PROOF</b>\n"
-        f"✅ Alexa membership: <b>{escape(bot_status.title())}</b>\n"
-        f"✅ Invite-link permission: <b>{'Enabled' if can_invite_users else 'Missing'}</b>\n"
-        "✅ Group link resolved and matched to this group.\n\n"
-        "Tap <b>Proof & Publish</b> to post this verified group only to the configured promotion channel."
+        "🔎 <b>VERIFICATION SNAPSHOT</b>\n"
+        f"{'✅' if group_resolved else '⚠️'} Group identity: <b>{'Resolved' if group_resolved else 'Not resolvable by Telegram Bot API'}</b>\n"
+        f"{'✅' if bot_status in {'administrator', 'creator'} else '❌' if group_resolved else '❔'} Alexa admin: <b>{'YES' if bot_status in {'administrator', 'creator'} else 'NO' if group_resolved else 'UNKNOWN'}</b>\n"
+        f"{'✅' if can_invite_users else '❌' if group_resolved else '❔'} Invite-link right: <b>{'YES' if can_invite_users else 'NO' if group_resolved else 'UNKNOWN'}</b>\n\n"
+        "Tap <b>View Verification Proof</b> to refresh the live rights check. Approve & Publish appears only when both required rights are confirmed."
     )
     try:
         await bot.send_message(owner_id, text, parse_mode="HTML", reply_markup=_request_keyboard(request.id), disable_web_page_preview=True)
@@ -138,46 +171,31 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
     group = None
     chat = None
 
+    group = None
+    chat = None
+    group_resolved = True
+    bot_status = "unknown"
+    can_invite_users = False
+
     if is_private_invite:
-        # Telegram Bot API cannot resolve an invite hash directly. If this invite
-        # link is already associated with a group Alexa knows, resolve that chat by
-        # its stored numeric ID and verify Alexa's current membership/admin status.
-        group = await db_session.scalar(
-            select(Group).where(Group.invite_link == group_link)
-        )
-        if group is None:
-            logger.info(
-                "Group promotion verification: private invite link is not mapped to a known group"
-            )
-            await message.answer(
-                "⚠️ <b>Private invite link could not be matched to a known group.</b>\n\n"
-                "Telegram does not let bots discover a group's ID from an arbitrary private invite link. "
-                "Alexa can verify this link only when that exact invite link is already mapped to a group Alexa knows. "
-                "This is not a public-link requirement.",
-                parse_mode="HTML",
-            )
-            return
-        try:
-            chat = await message.bot.get_chat(group.id)
-        except Exception:
-            logger.exception(
-                "Group promotion verification: get_chat failed for known private group id=%s",
-                group.id,
-            )
-            await message.answer(
-                "⚠️ <b>Group link could not be verified.</b>\n\n"
-                "Please make sure Alexa is added to the group as an administrator with invite-link permission, "
-                "then send the direct group link again.",
-                parse_mode="HTML",
-            )
-            return
+        # Bot API cannot turn an arbitrary invite hash into a chat ID. If Alexa
+        # already knows the exact link, use that chat ID; otherwise queue a
+        # reviewable request marked UNKNOWN instead of silently dropping it.
+        group = await db_session.scalar(select(Group).where(Group.invite_link == group_link))
+        if group is not None:
+            try:
+                chat = await message.bot.get_chat(group.id)
+            except Exception:
+                logger.exception("Known private invite group lookup failed for group_id=%s", group.id)
+                chat = None
+        if chat is None:
+            group_resolved = False
     else:
         slug = group_link.split("t.me/", 1)[1].split("?", 1)[0].strip("/")
         if not slug or "/" in slug:
             await message.answer(
-                "⚠️ <b>Group link could not be verified.</b>\n\n"
-                "Please make sure Alexa is added to the group as an administrator with invite-link permission, "
-                "then send the direct group link again.",
+                "⚠️ <b>This does not look like a supported direct group link.</b>\n\n"
+                "Please send a direct Telegram group link.",
                 parse_mode="HTML",
             )
             return
@@ -186,92 +204,66 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
         except Exception:
             logger.exception("Group promotion verification: get_chat failed for public group link %s", group_link)
             await message.answer(
-                "⚠️ <b>Group link could not be verified.</b>\n\n"
-                "Please make sure Alexa is added to the group as an administrator with invite-link permission, "
-                "then send the direct group link again.",
+                "⚠️ <b>Alexa could not resolve this group link.</b>\n\n"
+                "Please check the link and send it again.",
                 parse_mode="HTML",
             )
             return
 
-    chat_type = getattr(chat.type, "value", chat.type)
-    if chat_type not in {"group", "supergroup"}:
-        await message.answer(
-                "⚠️ <b>Group link could not be verified.</b>\n\n"
-                "Please make sure Alexa is added to the group as an administrator with invite-link permission, "
-                "then send the direct group link again.",
+    if chat is not None:
+        chat_type = getattr(chat.type, "value", chat.type)
+        if chat_type not in {"group", "supergroup"}:
+            await message.answer(
+                "⚠️ <b>This link does not point to a Telegram group.</b>",
                 parse_mode="HTML",
             )
-        return
-
-    try:
-        # Resolve the bot's actual Telegram ID from the active token rather than
-        # relying on a cached/optional Bot.id attribute in the runtime.
-        bot_identity = await message.bot.get_me()
-        bot_member = await message.bot.get_chat_member(chat.id, bot_identity.id)
-        bot_status = str(getattr(bot_member.status, "value", bot_member.status)).lower()
-        logger.info(
-            "Group promotion verification: chat_id=%s chat_type=%s bot_id=%s bot_status=%s",
-            chat.id, chat_type, bot_identity.id, bot_status,
-        )
-    except Exception:
-        logger.exception("Group promotion verification: get_chat_member failed for chat_id=%s", chat.id)
-        await message.answer(
-                "⚠️ <b>Group link could not be verified.</b>\n\n"
-                "Please make sure Alexa is added to the group as an administrator with invite-link permission, "
-                "then send the direct group link again.",
-                parse_mode="HTML",
+            return
+        try:
+            bot_identity = await message.bot.get_me()
+            bot_member = await message.bot.get_chat_member(chat.id, bot_identity.id)
+            bot_status = str(getattr(bot_member.status, "value", bot_member.status)).lower()
+            can_invite_users = bot_status == "creator" or (
+                bot_status == "administrator" and bool(getattr(bot_member, "can_invite_users", False))
             )
-        return
-    if bot_status not in {"administrator", "creator"}:
-        logger.warning(
-            "Group promotion verification denied: bot is not an admin; chat_id=%s status=%s",
-            chat.id, bot_status,
-        )
-        await message.answer(
-            "⚠️ <b>Alexa is not an administrator in this group.</b>\n\n"
-            "Please add Alexa as a group administrator and enable the required invite-link permission, then send the link again.",
-            parse_mode="HTML",
-        )
-        return
+        except Exception:
+            logger.exception("Group promotion verification: get_chat_member failed for chat_id=%s", chat.id)
+            bot_status = "unknown"
+            can_invite_users = False
 
-    can_invite_users = bot_status == "creator" or bool(getattr(bot_member, "can_invite_users", False))
-    if not can_invite_users:
-        logger.warning(
-            "Group promotion verification denied: bot lacks invite-link permission; chat_id=%s",
-            chat.id,
-        )
-        await message.answer(
-            "⚠️ <b>Alexa is an admin, but invite-link permission is missing.</b>\n\n"
-            "Please enable <b>Invite Users via Link</b> for Alexa, then send the group link again.",
-            parse_mode="HTML",
-        )
-        return
-
-    group = await db_session.get(Group, chat.id)
-    if not group:
-        group = await _insert_or_get_group(
-            db_session,
-            Group(
-                id=chat.id,
-                title=chat.title or "Telegram Group",
-                username=chat.username,
-                type=chat_type,
-                is_active=True,
-                invite_link=group_link if is_private_invite else None,
-            ),
-        )
-    group.title = chat.title or group.title
-    group.username = chat.username
-    group.type = chat_type
-    group.is_active = True
-    if is_private_invite:
-        group.invite_link = group_link
-    await db_session.flush()
+        group_id = chat.id
+        group_title = chat.title or "Telegram Group"
+        # Save/update known groups only when Alexa actually has admin rights.
+        if bot_status in {"administrator", "creator"}:
+            group = await db_session.get(Group, chat.id)
+            if not group:
+                group = await _insert_or_get_group(
+                    db_session,
+                    Group(
+                        id=chat.id,
+                        title=group_title,
+                        username=chat.username,
+                        type=chat_type,
+                        is_active=True,
+                        invite_link=group_link if is_private_invite else None,
+                    ),
+                )
+            group.title = group.title or group_title
+            group.username = chat.username
+            group.type = chat_type
+            group.is_active = True
+            if is_private_invite:
+                group.invite_link = group_link
+            await db_session.flush()
+    else:
+        # A stable synthetic key lets the owner see/reject an unresolved private
+        # invite request. It is never eligible for approval or channel publishing.
+        group_id = _unresolved_private_group_id(group_link)
+        group_title = "Unresolved private invite link"
 
     existing = await db_session.scalar(
         select(GroupPromotionRequest)
         .where(
-            GroupPromotionRequest.group_id == chat.id,
+            GroupPromotionRequest.group_id == group_id,
             GroupPromotionRequest.status.in_(["pending", "approved", "promoted"]),
         )
         .order_by(desc(GroupPromotionRequest.id))
@@ -279,16 +271,13 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
     )
     if existing:
         await db_session.commit()
-        if existing.status == "promoted":
-            await message.answer(_PROMOTION_NOTICE, parse_mode="HTML")
-        else:
-            await message.answer(_PROMOTION_NOTICE, parse_mode="HTML")
+        await message.answer(_PROMOTION_NOTICE, parse_mode="HTML")
         return
 
     request = GroupPromotionRequest(
         user_id=message.from_user.id,
-        group_id=chat.id,
-        group_title=chat.title or "Telegram Group",
+        group_id=group_id,
+        group_title=group_title,
         group_link=group_link,
         status="pending",
     )
@@ -303,8 +292,13 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
     await db_session.refresh(request)
 
     await message.answer(_PROMOTION_NOTICE, parse_mode="HTML")
-    await _send_owner_request(message.bot, request, bot_status=bot_status, can_invite_users=can_invite_users)
-
+    await _send_owner_request(
+        message.bot,
+        request,
+        bot_status=bot_status,
+        can_invite_users=can_invite_users,
+        group_resolved=group_resolved,
+    )
 
 @router.message(
     F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}),
@@ -482,11 +476,11 @@ async def promotion_requests_panel(callback: CallbackQuery, db_session: AsyncSes
         lines.append(
             f"#{req.id} · <b>{escape(req.group_title)}</b>\n"
             f"{escape(req.group_link)}\n"
-            "✅ Alexa admin + invite-link permission verified\n"
+            "🔎 Tap View Proof to refresh Alexa's current admin and invite-link rights\n"
             f"{status_label}\n"
         )
         if req.status == "pending":
-            builder.button(text=f"🔎 Proof & Publish #{req.id}", callback_data=f"owner:promo_request:proof:{req.id}")
+            builder.button(text=f"🔎 View Proof #{req.id}", callback_data=f"owner:promo_request:proof:{req.id}")
             builder.button(text=f"❌ Reject #{req.id}", callback_data=f"owner:promo_request:reject:{req.id}")
         else:
             builder.button(text=f"🚀 Retry promotion #{req.id}", callback_data=f"owner:promo_request:retry:{req.id}")
@@ -502,8 +496,8 @@ async def _process_owner_promotion_action(callback: CallbackQuery, db_session: A
     if not request:
         await callback.answer("Promotion request not found.", show_alert=True)
         return
-    if action in {"proof", "approve", "retry"}:
-        if action in {"proof", "approve"}:
+    if action in {"approve", "retry"}:
+        if action == "approve":
             if request.status != "pending":
                 await callback.answer("This request has already been reviewed.", show_alert=True)
                 return
@@ -512,6 +506,14 @@ async def _process_owner_promotion_action(callback: CallbackQuery, db_session: A
             await db_session.commit()
         elif request.status != "approved":
             await callback.answer("Only approved requests can be retried.", show_alert=True)
+            return
+
+        proof_status, proof_is_admin, proof_can_invite, proof_resolved = await _live_group_proof(callback.bot, request)
+        if not proof_resolved or not proof_is_admin or not proof_can_invite:
+            await callback.answer(
+                "Cannot publish: Alexa's group identity, admin status, and invite-link permission must all be confirmed.",
+                show_alert=True,
+            )
             return
 
         channel_setting = await db_session.get(GlobalSetting, "group_promotion_channel_id")
@@ -607,7 +609,43 @@ async def promotion_request_proof(callback: CallbackQuery, db_session: AsyncSess
     except (TypeError, ValueError):
         await callback.answer("Invalid request.", show_alert=True)
         return
-    await _process_owner_promotion_action(callback, db_session, request_id, "proof")
+    request = await db_session.get(GroupPromotionRequest, request_id)
+    if not request or request.status != "pending":
+        await callback.answer("This request is no longer pending.", show_alert=True)
+        return
+
+    status, is_admin, can_invite, resolved = await _live_group_proof(callback.bot, request)
+    group_unknown = request.group_id <= _UNRESOLVED_PRIVATE_ID_BASE
+    proof_text = (
+        "🔎 <b>GROUP PROMOTION — VERIFICATION PROOF</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"👥 <b>{escape(request.group_title)}</b>\n"
+        f"🔗 <code>{escape(request.group_link)}</code>\n"
+        f"🆔 Group ID: <code>{'Not available' if group_unknown else request.group_id}</code>\n"
+        f"🤖 Alexa membership: <b>{escape(status.title()) if resolved else 'UNKNOWN'}</b>\n"
+        f"👑 Alexa is administrator: <b>{'YES' if is_admin else 'NO' if resolved else 'UNKNOWN'}</b>\n"
+        f"🔗 Invite Users via Link right: <b>{'YES' if can_invite else 'NO' if resolved else 'UNKNOWN'}</b>\n\n"
+        + (
+            "✅ <b>Both required permissions are confirmed.</b> You can approve and publish."
+            if is_admin and can_invite
+            else "❌ <b>Required permissions are not confirmed.</b> Reject this request, or ask the user to add Alexa with the required rights."
+            if resolved
+            else "⚠️ <b>Telegram Bot API cannot resolve this arbitrary private invite link to a group.</b> Alexa cannot verify membership or rights from this link, so publishing is disabled."
+        )
+    )
+    builder = InlineKeyboardBuilder()
+    if is_admin and can_invite:
+        builder.button(text="✅ Approve & Publish to Channel", callback_data=f"owner:promo_request:approve:{request.id}")
+    builder.button(text="❌ Reject Request", callback_data=f"owner:promo_request:reject:{request.id}")
+    builder.button(text="◀️ Promotion Requests", callback_data="owner:promo_requests")
+    builder.adjust(1)
+    await callback.message.edit_text(
+        proof_text,
+        parse_mode="HTML",
+        reply_markup=builder.as_markup(),
+        disable_web_page_preview=True,
+    )
+    await callback.answer("Live verification proof refreshed.")
 
 
 @router.callback_query(F.data.startswith("owner:promo_request:approve:"))
