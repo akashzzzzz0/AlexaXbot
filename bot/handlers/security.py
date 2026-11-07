@@ -25,7 +25,7 @@ async def _insert_or_get(db_session: AsyncSession, candidate, model, *conditions
         return existing
 
 
-router.message.outer_middleware(AdminActionMiddleware(commands={"security", "lock", "unlock", "locks", "locktypes", "setflood", "flood", "setfloodmode", "clearflood", "approve", "unapprove"}))
+router.message.outer_middleware(AdminActionMiddleware(commands={"security", "lock", "unlock", "locks", "locktypes", "setflood", "flood", "setfloodmode", "clearflood", "approve", "free", "unapprove"}))
 router.callback_query.outer_middleware(AdminActionMiddleware(prefixes=("sec:", "lock:", "captcha:")))
 
 
@@ -304,7 +304,7 @@ async def toggle_captcha(callback: CallbackQuery, _: callable, db_session: Async
     await callback.message.edit_reply_markup(reply_markup=captcha_menu_kb(_, security))
 
 
-@router.message(Command("approve", "unapprove"))
+@router.message(Command("approve", "free", "unapprove"))
 async def cmd_sticker_approval(message: Message, db_session: AsyncSession = None, **kwargs):
     """Approve or revoke a member's exemption from the sticker lock."""
     if message.chat.type not in ("group", "supergroup"):
@@ -333,7 +333,7 @@ async def cmd_sticker_approval(message: Message, db_session: AsyncSession = None
             except Exception:
                 target = None
     if target is None or target.is_bot:
-        await message.reply("Reply to a member's message with /approve or /unapprove, or provide a numeric user ID.")
+        await message.reply("Reply to a member's message with /approve or /free to allow stickers, or /unapprove to revoke; a numeric user ID also works.")
         return
 
     # GroupMember.user_id references users.id, so ensure the target exists
@@ -372,7 +372,8 @@ async def cmd_sticker_approval(message: Message, db_session: AsyncSession = None
             GroupMember.group_id == message.chat.id,
             GroupMember.user_id == target.id,
         )
-    approved = (message.text or "").split()[0].split("@", 1)[0].lstrip("/").lower() == "approve"
+    command = (message.text or "").split()[0].split("@", 1)[0].lstrip("/").lower()
+    approved = command in {"approve", "free"}
     member.approved_sticker = approved
     try:
         await db_session.commit()
