@@ -79,6 +79,28 @@ class ContentLockTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("link", violations)
         self.assertIn("locked_bot", violations)
 
+    async def test_approved_member_can_send_sticker_even_when_all_locks_are_enabled(self):
+        for field in (
+            "lock_text", "lock_links", "lock_photos", "lock_videos", "lock_gifs",
+            "lock_audio", "lock_voice", "lock_documents", "lock_polls", "lock_games",
+            "lock_bots", "lock_forwards", "lock_contacts", "lock_locations",
+            "lock_stickers", "lock_inline", "lock_mentions", "lock_hashtags",
+        ):
+            setattr(self.security, field, True)
+        message = fake_message()
+        message.text = None
+        message.sticker = object()
+        violations = await check_message_violations(message, self.security, approved_sticker_user=True)
+        self.assertNotIn("locked_sticker", violations)
+
+    async def test_non_approved_member_still_cannot_send_sticker_when_locked(self):
+        self.security.lock_stickers = True
+        message = fake_message()
+        message.text = None
+        message.sticker = object()
+        violations = await check_message_violations(message, self.security, approved_sticker_user=False)
+        self.assertIn("locked_sticker", violations)
+
     async def test_anti_link_toggle_detects_regular_urls_only_when_enabled(self):
         message = fake_message("https://example.com")
         self.security.anti_link = False
