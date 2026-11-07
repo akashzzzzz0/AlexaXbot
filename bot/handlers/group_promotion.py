@@ -44,8 +44,8 @@ _PROMOTION_STATUS_RE = re.compile(
 )
 _PROMOTION_NOTICE = (
     "✅ <b>Your group link has been received successfully!</b>\n\n"
-    "🔍 Alexa is checking your group membership and admin permissions.\n"
-    "Once verification is complete and approved, your group will be promoted on our official channel.\n\n"
+    "✅ Alexa has verified your group membership and required admin permissions.\n"
+    "Your request has been sent to the owner for final approval. Once approved, your group will be published on our official channel.\n\n"
     "📢 <b>Join our channel to view your group promotion:</b>\n"
     "https://t.me/+tdfGw6ekfNA4OTNk\n\n"
     "💜 Thank you for choosing Alexa Free Group Promotion!"
@@ -150,9 +150,10 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
                 "Group promotion verification: private invite link is not mapped to a known group"
             )
             await message.answer(
-                "⚠️ <b>Group link could not be verified.</b>\n\n"
-                "Please make sure Alexa is added to the group as an administrator with invite-link permission, "
-                "then send the direct group link again.",
+                "⚠️ <b>Private invite link could not be matched to a known group.</b>\n\n"
+                "Telegram does not let bots discover a group's ID from an arbitrary private invite link. "
+                "Alexa can verify this link only when that exact invite link is already mapped to a group Alexa knows. "
+                "This is not a public-link requirement.",
                 parse_mode="HTML",
             )
             return
