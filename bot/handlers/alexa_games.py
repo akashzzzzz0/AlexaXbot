@@ -9,7 +9,7 @@ from sqlalchemy import select, desc, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from bot.config import settings
-from bot.database.models import User, Wallet, Economy, GameProfile, UserShopItem, ShopItem
+from bot.database.models import User, Wallet, Transaction, Economy, GameProfile, UserShopItem, ShopItem
 from bot.services.user_service import get_or_create_wallet, get_or_create_economy
 from bot.services.economy_service import add_coins, deduct_coins
 from bot.utils.helpers import parse_duration, format_number, format_duration
@@ -151,23 +151,35 @@ async def rob(message: Message, db_session: AsyncSession, db_user, **kwargs):
             return
 
     robber = await profile(db_session, db_user.id)
-    if robber.last_rob_at:
-        last_rob = robber.last_rob_at
-        if last_rob.tzinfo is None:
-            last_rob = last_rob.replace(tzinfo=timezone.utc)
-        remaining = 3600 - int((now - last_rob).total_seconds())
+
+    # Cooldown is per robber-target pair, not global: the same robber can
+    # immediately target another member, but must wait before robbing this one again.
+    victim_wallet = await get_or_create_wallet(db_session, target.id)
+    last_pair_rob = await db_session.scalar(
+        select(Transaction.created_at)
+        .where(
+            Transaction.wallet_id == victim_wallet.id,
+            Transaction.type == "robbed",
+            Transaction.description.like(f"Robbed by {db_user.id};%"),
+        )
+        .order_by(desc(Transaction.created_at))
+        .limit(1)
+    )
+    if last_pair_rob:
+        if last_pair_rob.tzinfo is None:
+            last_pair_rob = last_pair_rob.replace(tzinfo=timezone.utc)
+        remaining = 3600 - int((now - last_pair_rob).total_seconds())
         if remaining > 0:
-            await message.reply(f"⏳ Rob cooldown: try again in {format_duration(remaining)}.")
+            await message.reply(f"⏳ You already robbed this member. Try again in {format_duration(remaining)}.")
             return
 
-    # Check the target before starting cooldown; only successful robs consume it.
-    victim_wallet = await get_or_create_wallet(db_session, target.id)
     target_balance = max(0, victim_wallet.balance or 0)
-    if target_balance <= 0:
-        await message.reply("That player has no pocket coins.")
+    if target_balance <= 50:
+        await message.reply("That player needs to keep at least 50 coins, so there is nothing to rob.")
         return
 
-    amount = min(150, settings.MAX_ROB_AMOUNT, target_balance)
+    # Leave exactly 50 coins in the victim's wallet, regardless of their balance.
+    amount = target_balance - 50
     if amount <= 0:
         await message.reply("Robbing is currently disabled by the game settings.")
         return
