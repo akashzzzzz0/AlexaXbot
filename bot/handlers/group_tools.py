@@ -160,7 +160,7 @@ async def _send_member_tag_messages(message: Message, mentions: list[str], custo
     for index, mention in enumerate(mentions):
         body = greetings[index % len(greetings)].format(mention=mention)
         if custom_text:
-            body += "\\n\\n📣 " + escape(custom_text)
+            body += "\n\n📣 " + escape(custom_text)
         # Telegram limits bots to roughly 20 messages/minute in a group.
         # Keep a small margin and honor explicit RetryAfter responses.
         if sent:
