@@ -621,9 +621,22 @@ async def bio_link_admin_action(callback: CallbackQuery, db_session: AsyncSessio
     if admin.status not in {"administrator", "creator", "owner"}:
         await callback.answer("Only group admins can use these buttons.", show_alert=True)
         return
-    if action == "unmute" and admin.status != "creator" and not getattr(admin, "can_restrict_members", False):
-        await callback.answer("You need Restrict Members permission to unmute.", show_alert=True)
-        return
+    # The bot performs the Telegram unmute; the clicking admin only needs
+    # to be a group admin. Check the bot's own Restrict Members permission
+    # instead of incorrectly requiring that permission from the human admin.
+    if action == "unmute":
+        try:
+            bot_member = await callback.bot.get_chat_member(group_id, callback.bot.id)
+            bot_status = str(getattr(bot_member.status, "value", bot_member.status))
+            bot_can_restrict = (
+                bot_status in {"creator", "owner"}
+                or bool(getattr(bot_member, "can_restrict_members", False))
+            )
+        except Exception:
+            bot_can_restrict = False
+        if not bot_can_restrict:
+            await callback.answer("Alexa needs the Restrict Members permission to unmute this member.", show_alert=True)
+            return
 
     member = await db_session.scalar(
         select(GroupMember).where(
