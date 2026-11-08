@@ -2,7 +2,7 @@ import asyncio
 from aiogram import Router, F
 from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.types import Message, ChatMemberUpdated, ChatPermissions, CallbackQuery
-from aiogram.filters import ChatMemberUpdatedFilter, JOIN_TRANSITION, LEAVE_TRANSITION, Command
+from aiogram.filters import ChatMemberUpdatedFilter, JOIN_TRANSITION, LEAVE_TRANSITION, Command, Command
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, update, func, delete
 from sqlalchemy.exc import IntegrityError
@@ -836,6 +836,70 @@ async def group_service_message_welcome(message: Message, db_session: AsyncSessi
 
 
 _ADULT_STICKER_BLOCK_PREFIX = "__adult_sticker__:"
+
+
+async def _is_group_admin(message: Message) -> bool:
+    if not message.from_user:
+        return False
+    try:
+        member = await message.bot.get_chat_member(message.chat.id, message.from_user.id)
+        status = str(getattr(member.status, "value", member.status))
+        return status in ("administrator", "creator", "owner")
+    except Exception:
+        return False
+
+
+@router.message(Command("blockadultsticker"), F.chat.type.in_({"group", "supergroup"}))
+async def block_adult_sticker(message: Message, db_session: AsyncSession):
+    """Admin-only: reply to a sticker with /blockadultsticker to block that exact sticker in this group."""
+    if not await _is_group_admin(message):
+        return
+    replied = message.reply_to_message
+    if not replied or not replied.sticker:
+        await message.reply("Kisi sticker par reply karke /blockadultsticker bhejein.")
+        return
+    sticker_key = _ADULT_STICKER_BLOCK_PREFIX + replied.sticker.file_unique_id
+    existing = await db_session.scalar(
+        select(GroupBlocklist).where(
+            GroupBlocklist.group_id == message.chat.id,
+            GroupBlocklist.value == sticker_key,
+        )
+    )
+    if existing is None:
+        db_session.add(GroupBlocklist(
+            group_id=message.chat.id,
+            value=sticker_key,
+            added_by=message.from_user.id,
+        ))
+        await db_session.flush()
+    await message.reply("✅ Ye sticker is group ki adult-sticker blocklist mein add ho gaya.")
+
+
+@router.message(Command("unblockadultsticker"), F.chat.type.in_({"group", "supergroup"}))
+async def unblock_adult_sticker(message: Message, db_session: AsyncSession):
+    """Admin-only: reply to a blocked sticker with /unblockadultsticker to allow it again."""
+    if not await _is_group_admin(message):
+        return
+    replied = message.reply_to_message
+    if not replied or not replied.sticker:
+        await message.reply("Blocked sticker par reply karke /unblockadultsticker bhejein.")
+        return
+    sticker_key = _ADULT_STICKER_BLOCK_PREFIX + replied.sticker.file_unique_id
+    row = await db_session.scalar(
+        select(GroupBlocklist).where(
+            GroupBlocklist.group_id == message.chat.id,
+            GroupBlocklist.value == sticker_key,
+        )
+    )
+    if row is not None:
+        await db_session.delete(row)
+        await db_session.flush()
+        await message.reply("✅ Sticker blocklist se remove ho gaya; ab allowed hai.")
+    else:
+        await message.reply("Ye sticker adult-sticker blocklist mein nahi mila.")
+
+
+_ADULT_STICKER_BLOCK_PREFIX = "nsfw_sticker:"
 
 
 async def _is_group_admin(message: Message) -> bool:
