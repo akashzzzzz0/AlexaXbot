@@ -230,7 +230,20 @@ async def check_message_violations(
             entity_links.append("url_entity")
         elif entity_type == "text_link" and getattr(entity, "url", None):
             entity_links.append(entity.url)
-    link_scan_text = " ".join([text, *entity_links])
+    # Inline keyboard URL buttons are separate from message text/entities.
+    # Include their destinations so Anti-Link also catches button-only promotions.
+    button_links = []
+    reply_markup = getattr(message, "reply_markup", None)
+    for row in (getattr(reply_markup, "inline_keyboard", None) or []):
+        for button in row:
+            button_url = getattr(button, "url", None)
+            if button_url:
+                button_links.append(button_url)
+            login_url = getattr(button, "login_url", None)
+            login_destination = getattr(login_url, "url", None)
+            if login_destination:
+                button_links.append(login_destination)
+    link_scan_text = " ".join([text, *entity_links, *button_links])
 
     # ALEXA must not moderate its own outbound messages (for example, its
     # official referral/promotion links). Other bots remain subject to the
