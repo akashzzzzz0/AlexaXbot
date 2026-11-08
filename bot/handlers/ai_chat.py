@@ -442,24 +442,29 @@ def _smart_group_reply_fallback(user_text: str) -> str:
     return ""
 
 
+def _message_mentions_another_member(message: Message, text: str) -> bool:
+    """Detect visible and hidden Telegram mentions of anyone except Alexa."""
+    for entity in (message.entities or []):
+        entity_type = getattr(entity.type, "value", entity.type)
+        if entity_type == "text_mention" and entity.user:
+            if entity.user.id != message.bot.id:
+                return True
+
+    # Do not impose a minimum username length: short handles are still mentions.
+    for username in re.findall(r"(?<![\\w@])@([A-Za-z0-9_]+)", text or ""):
+        if username.casefold() != (_bot_username or "").casefold():
+            return True
+    return False
+
+
 def _should_smart_reply(message: Message, text: str) -> bool:
     """Join only quiet group moments; never interrupt member-to-member conversations."""
-    # If two or more different members have recently participated, Alexa stays
-    # silent. Explicitly addressing Alexa is handled separately and bypasses
-    # this opportunistic-reply gate.
     if _group_conversation_is_active(message.chat.id):
         return False
 
-    # A message directed at another member is not an invitation for Alexa.
-    if re.search(r"(?<![\\w@])@[A-Za-z0-9_]{5,}", text):
+    # A message addressed to another member is never an Alexa invitation.
+    if _message_mentions_another_member(message, text):
         return False
-    for entity in (message.entities or []):
-        if (
-            getattr(entity.type, "value", entity.type) == "text_mention"
-            and entity.user
-            and entity.user.id != message.bot.id
-        ):
-            return False
 
     if not _looks_like_smart_reply_candidate(text):
         return False
@@ -467,9 +472,6 @@ def _should_smart_reply(message: Message, text: str) -> bool:
     chat_id = message.chat.id
     user_id = message.from_user.id if message.from_user else 0
     user_key = (chat_id, user_id)
-    # Missing timestamps mean this is the first eligible message, not a cooldown.
-    # Using 0.0 as a default can suppress greetings during the first seconds after
-    # process startup because monotonic clocks are allowed to start near zero.
     last_group_check = _smart_reply_last_check.get(chat_id)
     if last_group_check is not None and now - last_group_check < _SMART_REPLY_GROUP_COOLDOWN_SECONDS:
         return False
@@ -479,7 +481,6 @@ def _should_smart_reply(message: Message, text: str) -> bool:
     _smart_reply_last_check[chat_id] = now
     _smart_reply_user_last_check[user_key] = now
     return True
-
 
 async def is_alexa_trigger(message: Message) -> bool:
     """Trigger every ordinary human text message in groups and private chats."""
@@ -500,6 +501,15 @@ async def is_alexa_trigger(message: Message) -> bool:
     if replied and replied.from_user and replied.from_user.id == message.bot.id:
         return True
 
+    # Replies to another member are not Alexa triggers.
+    if (
+        replied
+        and replied.from_user
+        and replied.from_user.id != message.bot.id
+        and message.chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}
+    ):
+        return False
+
     if _bot_username is None:
         try:
             me = await message.bot.get_me()
@@ -512,18 +522,9 @@ async def is_alexa_trigger(message: Message) -> bool:
     ):
         return True
 
-    # Do not answer messages directed at another member. Check this before
-    # greeting/session triggers (e.g. "hi @someone") so Alexa doesn't interrupt.
-    mentioned_usernames = re.findall(r"(?<!\w)@([A-Za-z0-9_]{5,})", text)
-    if any(name.casefold() != _bot_username for name in mentioned_usernames):
+    # Never treat a message mentioning another member as an Alexa trigger.
+    if _message_mentions_another_member(message, text):
         return False
-    for entity in (message.entities or []):
-        if (
-            getattr(entity.type, "value", entity.type) == "text_mention"
-            and entity.user
-            and entity.user.id != message.bot.id
-        ):
-            return False
 
     # Recognize Alexa's name anywhere in a group message, not only at the start.
     # This makes natural phrases like "yaar Alexa zara help" trigger reliably.
