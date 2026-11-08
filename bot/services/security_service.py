@@ -99,7 +99,7 @@ async def is_nsfw_sticker(bot: Bot, sticker) -> bool:
     # stickers are downloaded directly. If no preview exists, fail open.
     source_file = sticker
     if getattr(sticker, "is_animated", False) or getattr(sticker, "is_video", False):
-        source_file = getattr(sticker, "thumbnail", None)
+        source_file = getattr(sticker, "thumbnail", None) or getattr(sticker, "thumb", None)
         if source_file is None:
             logger.info("Sticker moderation skipped: animated sticker has no thumbnail")
             return False
