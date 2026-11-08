@@ -4,7 +4,7 @@ from aiogram.filters import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from bot.database.models import Group, SecuritySettings, GroupMember, User
+from bot.database.models import Group, SecuritySettings, GroupMember, User, GroupBlocklist
 from bot.keyboards.security import security_menu_kb, locks_menu_kb, captcha_menu_kb
 import structlog
 from bot.middlewares.admin_actions import AdminActionMiddleware
@@ -26,7 +26,7 @@ async def _insert_or_get(db_session: AsyncSession, candidate, model, *conditions
         return existing
 
 
-router.message.outer_middleware(AdminActionMiddleware(commands={"security", "lock", "unlock", "locks", "locktypes", "setflood", "flood", "setfloodmode", "clearflood", "approve", "free", "unapprove"}))
+router.message.outer_middleware(AdminActionMiddleware(commands={"security", "lock", "unlock", "locks", "locktypes", "setflood", "flood", "setfloodmode", "clearflood", "approve", "free", "unapprove", "blocksticker", "unblocksticker"}))
 router.callback_query.outer_middleware(AdminActionMiddleware(prefixes=("sec:", "lock:", "captcha:")))
 
 
@@ -53,6 +53,76 @@ async def _is_admin(message_or_callback, _) -> bool:
     except Exception:
         return False
     return True
+
+
+
+@router.message(Command("blocksticker", "unblocksticker"))
+async def cmd_nsfw_sticker_blocklist(message: Message, db_session: AsyncSession = None, **kwargs):
+    """Let group admins block/unblock a specific sticker by replying to it."""
+    if message.chat.type not in ("group", "supergroup"):
+        await message.reply("Use this command in a group.")
+        return
+    try:
+        admin = await message.bot.get_chat_member(message.chat.id, message.from_user.id)
+        status = str(getattr(admin.status, "value", admin.status))
+        if status not in ("administrator", "creator", "owner"):
+            await message.reply("Only group admins can manage the NSFW sticker blocklist.")
+            return
+    except Exception:
+        await message.reply("I couldn't verify your admin permissions.")
+        return
+    if db_session is None:
+        await message.reply("Database is unavailable. Please try again.")
+        return
+
+    target_message = message.reply_to_message
+    sticker = getattr(target_message, "sticker", None) if target_message else None
+    if sticker is None or not getattr(sticker, "file_unique_id", None):
+        await message.reply(
+            "Reply directly to a sticker with /blocksticker to block it, "
+            "or /unblocksticker to allow it again."
+        )
+        return
+
+    value = f"nsfw_sticker:{sticker.file_unique_id}"
+    existing = await db_session.scalar(
+        select(GroupBlocklist).where(
+            GroupBlocklist.group_id == message.chat.id,
+            GroupBlocklist.value == value,
+        )
+    )
+    command = (message.text or "").split()[0].split("@", 1)[0].lstrip("/").lower()
+    if command == "blocksticker":
+        if existing:
+            await message.reply("That sticker is already on this group's NSFW blocklist.")
+            return
+        db_session.add(
+            GroupBlocklist(
+                group_id=message.chat.id,
+                value=value,
+                added_by=message.from_user.id,
+            )
+        )
+        confirmation = "✅ Sticker added to this group's NSFW blocklist. Members' matching sticker messages will be deleted while Anti-NSFW is ON."
+    else:
+        if not existing:
+            await message.reply("That sticker is not on this group's NSFW blocklist.")
+            return
+        await db_session.delete(existing)
+        confirmation = "✅ Sticker removed from this group's NSFW blocklist. It is allowed again."
+    try:
+        await db_session.commit()
+    except Exception as exc:
+        await db_session.rollback()
+        logger.warning(
+            "Could not update NSFW sticker blocklist",
+            chat_id=message.chat.id,
+            user_id=message.from_user.id,
+            error=str(exc),
+        )
+        await message.reply("Couldn't save the sticker blocklist change. Please try again.")
+        return
+    await message.reply(confirmation)
 
 
 #  /security 
