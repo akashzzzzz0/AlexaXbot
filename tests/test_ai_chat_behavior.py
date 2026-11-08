@@ -57,6 +57,22 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
             ai_chat.is_alexa_trigger(_group_message("hello @someone123"))
         ))
 
+    def test_reply_to_another_member_never_triggers_alexa(self):
+        message = _group_message("kya haal hai?")
+        message.reply_to_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=222, is_bot=False),
+            text="hello",
+        )
+        self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(message)))
+
+    def test_reply_to_alexa_still_triggers_alexa(self):
+        message = _group_message("continue")
+        message.reply_to_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=99999, is_bot=True),
+            text="previous Alexa reply",
+        )
+        self.assertTrue(asyncio.run(ai_chat.is_alexa_trigger(message)))
+
     def test_slash_commands_do_not_trigger_casual_chat(self):
         self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(_group_message("/ban 123"))))
 
