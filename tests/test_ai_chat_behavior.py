@@ -57,6 +57,26 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
             ai_chat.is_alexa_trigger(_group_message("hello @someone123"))
         ))
 
+    def test_smart_reply_ignores_short_member_mentions(self):
+        self.assertFalse(asyncio.run(
+            ai_chat.is_alexa_trigger(_group_message("kya haal hai @ali"))
+        ))
+
+    def test_smart_reply_ignores_hidden_text_mention_of_member(self):
+        message = _group_message("kya haal hai")
+        message.entities = [SimpleNamespace(
+            type="text_mention",
+            user=SimpleNamespace(id=222, is_bot=False),
+        )]
+        self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(message)))
+
+    def test_reply_to_another_member_does_not_trigger_alexa(self):
+        message = _group_message("haan bilkul")
+        message.reply_to_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=222, is_bot=False)
+        )
+        self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(message)))
+
     def test_slash_commands_do_not_trigger_casual_chat(self):
         self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(_group_message("/ban 123"))))
 
