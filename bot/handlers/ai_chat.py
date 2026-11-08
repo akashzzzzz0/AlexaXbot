@@ -451,7 +451,7 @@ def _message_mentions_another_member(message: Message, text: str) -> bool:
                 return True
 
     # Do not impose a minimum username length: short handles are still mentions.
-    for username in re.findall(r"(?<![\\w@])@([A-Za-z0-9_]+)", text or ""):
+    for username in re.findall(r"(?<![\w@])@([A-Za-z0-9_]+)", text or ""):
         if username.casefold() != (_bot_username or "").casefold():
             return True
     return False
