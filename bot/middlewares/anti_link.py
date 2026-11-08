@@ -35,7 +35,7 @@ class AntiLinkEnforcementMiddleware(BaseMiddleware):
             security = await session.scalar(
                 select(SecuritySettings).where(SecuritySettings.group_id == event.chat.id)
             )
-            if security is None or not security.anti_link:
+            if security is None or not (security.anti_link or security.anti_forward_spam):
                 return await handler(event, data)
 
             member = await event.bot.get_chat_member(event.chat.id, sender.id)
@@ -44,15 +44,22 @@ class AntiLinkEnforcementMiddleware(BaseMiddleware):
                 return await handler(event, data)
 
             violations = await check_message_violations(event, security)
-            if "link" not in violations:
+            matched = []
+            if security.anti_link and "link" in violations:
+                matched.append("link")
+            if security.anti_forward_spam and "forward_spam" in violations:
+                matched.append("forward")
+
+            if not matched:
                 return await handler(event, data)
 
             await event.delete()
             logger.info(
-                "Anti-Link deleted a link message",
+                "Group security deleted a message",
                 group_id=event.chat.id,
                 user_id=sender.id,
                 message_id=event.message_id,
+                protections=matched,
             )
             return None
         except Exception as exc:
