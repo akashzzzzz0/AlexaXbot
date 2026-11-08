@@ -44,11 +44,12 @@ class SpeedTypeEventTests(unittest.TestCase):
             "Show in the photo to climb the mini game leaderboard",
         )
 
-    def test_speed_type_reminder_is_sent_after_30_seconds_with_expected_copy(self):
-        self.assertEqual(SPEED_TYPE_REMINDER_DELAY_SECONDS, 30)
-        self.assertIn("HURRY UP! TIME IS RUNNING OUT!", SPEED_TYPE_REMINDER_TEXT)
-        self.assertIn("The clock is ticking", SPEED_TYPE_REMINDER_TEXT)
-        self.assertIn("claim the first place on the leaderboard", SPEED_TYPE_REMINDER_TEXT)
+    def test_speed_type_reminder_is_sent_after_three_minutes_with_exact_copy(self):
+        self.assertEqual(SPEED_TYPE_REMINDER_DELAY_SECONDS, 3 * 60)
+        self.assertEqual(
+            SPEED_TYPE_REMINDER_TEXT,
+            "⚡ Hurry up! Time is running out! ⏳",
+        )
 
     def test_word_bank_has_500_unique_words(self):
         self.assertEqual(len(CHALLENGES), 500)
