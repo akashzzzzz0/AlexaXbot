@@ -168,56 +168,62 @@ async def security_section_back(callback: CallbackQuery, _: callable, db_session
 
 @router.callback_query(F.data.startswith('sec:'))
 async def security_section(callback: CallbackQuery, _: callable, db_session: AsyncSession = None, **kwargs):
-    action = callback.data.split('sec:', 1)[1]
-
+    if not callback.message or callback.message.chat.type not in ('group', 'supergroup'):
+        await callback.answer('Open Group Security inside the group.', show_alert=True)
+        return
     if not db_session:
         await callback.answer(_('error_generic'), show_alert=True)
         return
-
-    security = await _get_or_create_security(db_session, callback.message.chat.id)
-
-    # Toggle boolean security settings
-    toggle_map = {
-        'anti_spam': 'anti_spam',
-        'anti_flood': 'anti_flood',
-        'anti_raid': 'anti_raid',
-        'anti_bot': 'anti_bot',
-        'anti_fake': 'anti_fake',
-        'anti_ad': 'anti_advertisement',
-        'anti_link': 'anti_link',
-        'anti_mention': 'anti_mention_spam',
-        'anti_forward': 'anti_forward_spam',
-        'anti_emoji': 'anti_emoji_spam',
-        'anti_hashtag': 'anti_hashtag_spam',
-        'anti_phone': 'anti_phone',
-        'anti_scam': 'anti_scam',
-        'anti_crypto': 'anti_crypto_scam',
-        'anti_nsfw': 'anti_nsfw',
-        'anti_invite': 'anti_invite',
-        'anti_promo': 'anti_channel_promo',
-        'anti_mass_join': 'anti_mass_join',
-        'anti_mass_leave': 'anti_mass_leave',
-        'anti_username': 'anti_username_spam',
-        'captcha': 'captcha_enabled',
-        'emergency': 'emergency_mode',
-    }
-
-    if action in toggle_map:
-        field = toggle_map[action]
-        current = getattr(security, field, False)
-        setattr(security, field, not current)
-        status = _('enabled') if not current else _('disabled')
-        await callback.message.edit_reply_markup(reply_markup=security_menu_kb(_, security))
-    elif action == 'locks':
-        await callback.message.edit_text(_('locks_menu'), reply_markup=locks_menu_kb(_, security), parse_mode='HTML')
-    elif action in ('antiflood', 'antispam', 'advanced'):
-        await callback.message.edit_text('Use the Anti-spam and Anti-flood switches in this panel to configure these protections.', parse_mode='HTML')
-    else:
-        await callback.answer(_('feature_coming'), show_alert=True)
+    try:
+        actor = await callback.bot.get_chat_member(callback.message.chat.id, callback.from_user.id)
+        if actor.status not in ('administrator', 'creator'):
+            await callback.answer('Only group admins can change security settings.', show_alert=True)
+            return
+    except Exception:
+        await callback.answer('Could not verify your group-admin permissions.', show_alert=True)
         return
 
-    await callback.answer()
-
+    action = callback.data.split('sec:', 1)[1]
+    security = await _get_or_create_security(db_session, callback.message.chat.id)
+    toggle_map = {
+        'anti_spam': 'anti_spam', 'anti_flood': 'anti_flood', 'anti_raid': 'anti_raid',
+        'anti_bot': 'anti_bot', 'anti_fake': 'anti_fake', 'anti_ad': 'anti_advertisement',
+        'anti_link': 'anti_link', 'anti_mention': 'anti_mention_spam',
+        'anti_forward': 'anti_forward_spam', 'anti_emoji': 'anti_emoji_spam',
+        'anti_hashtag': 'anti_hashtag_spam', 'anti_phone': 'anti_phone',
+        'anti_scam': 'anti_scam', 'anti_crypto': 'anti_crypto_scam', 'anti_nsfw': 'anti_nsfw',
+        'anti_invite': 'anti_invite', 'anti_promo': 'anti_channel_promo',
+        'anti_mass_join': 'anti_mass_join', 'anti_mass_leave': 'anti_mass_leave',
+        'anti_username': 'anti_username_spam', 'captcha': 'captcha_enabled',
+        'emergency': 'emergency_mode',
+    }
+    if action in toggle_map:
+        field = toggle_map[action]
+        current = bool(getattr(security, field, False))
+        setattr(security, field, not current)
+        try:
+            # Persist before editing Telegram UI so a stale keyboard cannot roll back the setting.
+            await db_session.commit()
+        except Exception as exc:
+            await db_session.rollback()
+            logger.warning('Could not persist group security toggle', group_id=callback.message.chat.id, setting=field, error=str(exc))
+            await callback.answer('Could not save this setting. Please try again.', show_alert=True)
+            return
+        try:
+            await callback.message.edit_reply_markup(reply_markup=security_menu_kb(_, security))
+        except Exception as exc:
+            logger.warning('Security setting saved but panel refresh failed', group_id=callback.message.chat.id, setting=field, error=str(exc))
+            await callback.answer('Setting saved. Reopen /security to refresh the panel.', show_alert=True)
+            return
+        await callback.answer(field.replace('_', ' ').title() + (': ON' if not current else ': OFF'))
+        return
+    if action == 'locks':
+        await callback.message.edit_text(_('locks_menu'), reply_markup=locks_menu_kb(_, security), parse_mode='HTML')
+        await callback.answer()
+    elif action in ('antiflood', 'antispam', 'advanced'):
+        await callback.answer('Use the Anti-spam and Anti-flood switches in this panel.', show_alert=True)
+    else:
+        await callback.answer(_('feature_coming'), show_alert=True)
 
 @router.callback_query(F.data.startswith('lock:'))
 async def toggle_lock(callback: CallbackQuery, _: callable, db_session: AsyncSession = None, **kwargs):
@@ -281,28 +287,50 @@ async def toggle_lock(callback: CallbackQuery, _: callable, db_session: AsyncSes
 
 @router.callback_query(F.data.startswith('captcha:'))
 async def toggle_captcha(callback: CallbackQuery, _: callable, db_session: AsyncSession = None, **kwargs):
+    if not callback.message or callback.message.chat.type not in ('group', 'supergroup'):
+        await callback.answer('Open captcha settings inside the group.', show_alert=True)
+        return
     if not db_session:
         await callback.answer(_('error_generic'), show_alert=True)
+        return
+    try:
+        actor = await callback.bot.get_chat_member(callback.message.chat.id, callback.from_user.id)
+        if actor.status not in ('administrator', 'creator'):
+            await callback.answer('Only group admins can change captcha settings.', show_alert=True)
+            return
+    except Exception:
+        await callback.answer('Could not verify your group-admin permissions.', show_alert=True)
         return
     parts = callback.data.split(':', 2)
     action = parts[1] if len(parts) > 1 else ''
     security = await _get_or_create_security(db_session, callback.message.chat.id)
-
     if action == 'toggle':
-        security.captcha_enabled = not security.captcha_enabled
-        status = _('enabled') if security.captcha_enabled else _('disabled')
-        await callback.answer(f"Captcha: {status}")
+        security.captcha_enabled = not bool(security.captcha_enabled)
+        confirmation = 'Captcha: ' + ('ON' if security.captcha_enabled else 'OFF')
     elif action == 'type' and len(parts) > 2:
         captcha_type = parts[2].lower()
-        if captcha_type not in {"math", "button"}:
-            await callback.answer("Choose Math or Button captcha.", show_alert=True)
+        if captcha_type not in {'math', 'button'}:
+            await callback.answer('Choose Math or Button captcha.', show_alert=True)
             return
         security.captcha_type = captcha_type
-        await callback.answer(f"Captcha type: {captcha_type}")
+        confirmation = 'Captcha type: ' + captcha_type
     else:
         await callback.answer(_('feature_coming'), show_alert=True)
-
-    await callback.message.edit_reply_markup(reply_markup=captcha_menu_kb(_, security))
+        return
+    try:
+        await db_session.commit()
+    except Exception as exc:
+        await db_session.rollback()
+        logger.warning('Could not persist captcha settings', group_id=callback.message.chat.id, action=action, error=str(exc))
+        await callback.answer('Could not save captcha settings. Please try again.', show_alert=True)
+        return
+    try:
+        await callback.message.edit_reply_markup(reply_markup=captcha_menu_kb(_, security))
+    except Exception as exc:
+        logger.warning('Captcha setting saved but panel refresh failed', group_id=callback.message.chat.id, error=str(exc))
+        await callback.answer('Setting saved. Reopen /security to refresh the panel.', show_alert=True)
+        return
+    await callback.answer(confirmation)
 
 
 @router.message(Command("approve", "free", "unapprove"))
