@@ -43,6 +43,16 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
         # A second greeting in the same group is held by the 15-second group cooldown.
         self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(_group_message("hello"))))
 
+    def test_old_member_activity_does_not_block_new_greeting(self):
+        chat_id = -100556
+        ai_chat._group_recent_activity[chat_id].clear()
+        old_time = __import__("time").monotonic() - ai_chat._GROUP_ACTIVITY_WINDOW_SECONDS - 1
+        ai_chat._group_recent_activity[chat_id].append((old_time, 111))
+        ai_chat._group_recent_activity[chat_id].append((old_time, 222))
+        self.assertTrue(asyncio.run(
+            ai_chat.is_alexa_trigger(_group_message("hello", chat_id=chat_id))
+        ))
+
     def test_smart_reply_ignores_active_member_to_member_conversation(self):
         chat_id = -100555
         ai_chat._group_recent_activity[chat_id].clear()
