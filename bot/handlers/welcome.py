@@ -364,16 +364,16 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
                         )
                         await event.bot.send_message(chat.id, notice, parse_mode="HTML")
 
-                        if reached_limit:
-                            if action == "warn_ban":
-                                await event.bot.ban_chat_member(chat.id, user.id)
-                                await event.bot.unban_chat_member(chat.id, user.id)
-                                await event.bot.send_message(
-                                    chat.id,
-                                    f"🚫 {user_link} has been removed after reaching the warning limit.",
-                                    parse_mode="HTML",
-                                )
-                                return
+                        if reached_limit and action == "warn_ban":
+                            await event.bot.ban_chat_member(chat.id, user.id)
+                            await event.bot.unban_chat_member(chat.id, user.id)
+                            await event.bot.send_message(
+                                chat.id,
+                                f"🚫 {user_link} has been removed after reaching the warning limit.",
+                                parse_mode="HTML",
+                            )
+                            return
+                        if reached_limit and action == "warn_mute":
                             applied_duration = max(60, int(duration or 3600))
                             muted = await mute_user(
                                 event.bot, db_session, chat.id, user.id, event.bot.id,
@@ -1194,8 +1194,23 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                                             f"⚠️ {user_link} — bio-link warning limit reached (3/3), but ban failed. Check ALEXA's Ban Users permission."
                                         )
                                     else:
-                                        next_action = "muted" if action == "warn_mute" else "banned" if action == "warn_ban" else "moderated"
-                                        notice = f"⚠️ {user_link} — message removed. Bio-link warning {count}/3. At 3 warnings, the member will be {next_action}."
+                                        if action == "warn":
+                                            notice = (
+                                                "🚨 <b>Warning Issued</b> 🚨\n\n"
+                                                f"👤 User: {user_link}\n"
+                                                "❌ Reason: Link found in profile bio\n"
+                                                f"⚠️ Warning: {count}/3\n\n"
+                                                "Notice: Please remove any links from your bio."
+                                            )
+                                        else:
+                                            next_action = "muted" if action == "warn_mute" else "banned"
+                                            notice = (
+                                                "🚨 <b>Warning Issued</b> 🚨\n\n"
+                                                f"👤 User: {user_link}\n"
+                                                "❌ Reason: Link found in profile bio\n"
+                                                f"⚠️ Warning: {count}/3\n\n"
+                                                f"Notice: At 3 warnings, the member will be {next_action}."
+                                            )
                                 else:
                                     notice = f"⚠️ {user_link}, message removed because a link was found in your bio. Please remove it."
                             elif action == "mute":
