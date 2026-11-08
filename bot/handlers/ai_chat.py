@@ -451,7 +451,7 @@ def _should_smart_reply(message: Message, text: str) -> bool:
         return False
 
     # A message directed at another member is not an invitation for Alexa.
-    if re.search(r"(?<![\\w@])@[A-Za-z0-9_]{5,}", text):
+    if re.search(r"(?<![\w@])@[A-Za-z0-9_]{5,}", text):
         return False
     for entity in (message.entities or []):
         if (
@@ -497,7 +497,11 @@ async def is_alexa_trigger(message: Message) -> bool:
         return True
 
     replied = message.reply_to_message
-    if replied and replied.from_user and replied.from_user.id == message.bot.id:
+    # A reply to another member is part of their conversation, not an Alexa call.
+    # Only replies directly to Alexa may enter the group AI handler.
+    if replied is not None:
+        if not replied.from_user or replied.from_user.id != message.bot.id:
+            return False
         return True
 
     if _bot_username is None:
