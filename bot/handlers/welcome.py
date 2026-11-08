@@ -1293,6 +1293,26 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
     # Sticker approval remains valid even when Lock All is enabled; only the
     # sticker lock is bypassed for this member. All other locks stay enforced.
     violations = await check_message_violations(message, group_security, approved_sticker_user=approved_sticker_user)
+
+    # Sticker visuals are not sent to an external moderation service. Admins
+    # can explicitly block a confirmed inappropriate sticker by replying to it
+    # with /blocksticker; the saved Telegram file_unique_id is checked here.
+    # This runs only while Anti-NSFW is enabled and never blocks ordinary stickers.
+    if group_security.anti_nsfw and message.sticker and not sender_is_admin:
+        sticker_value = f"nsfw_sticker:{message.sticker.file_unique_id}"
+        blocked_sticker = await db_session.scalar(
+            select(GroupBlocklist).where(
+                GroupBlocklist.group_id == db_group.id,
+                GroupBlocklist.value == sticker_value,
+            )
+        )
+        if blocked_sticker:
+            violations.append("nsfw_sticker")
+
+    # Admins are exempt from NSFW/abuse screening, but all unrelated
+    # moderation rules continue to apply to their messages.
+    if sender_is_admin:
+        violations = [v for v in violations if v not in {"nsfw", "abuse", "nsfw_sticker"}]
     # Group admins/creator are automatically exempt from link moderation,
     # including invite URLs and link-lock violations. When their message is a
     # link, do not let the generic text lock re-delete it; all other violations
