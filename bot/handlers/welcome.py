@@ -12,7 +12,8 @@ from bot.database.models import (
 )
 from bot.services.security_service import (
     check_message_violations, is_raid_detected, create_captcha_challenge,
-    contains_link, contains_non_alexa_link, count_mentions, count_hashtags
+    contains_link, contains_non_alexa_link, count_mentions, count_hashtags,
+    is_nsfw_sticker
 )
 from bot.services.moderation_service import mute_user, ban_user, kick_user, warn_user, log_action
 from bot.services.user_service import add_xp
@@ -848,134 +849,6 @@ async def group_service_message_welcome(message: Message, db_session: AsyncSessi
         await _send_welcome_message(message.bot, db_session, message.chat, joined_user)
 
 
-_ADULT_STICKER_BLOCK_PREFIX = "__adult_sticker__:"
-
-
-async def _is_group_admin(message: Message) -> bool:
-    if not message.from_user:
-        return False
-    try:
-        member = await message.bot.get_chat_member(message.chat.id, message.from_user.id)
-        status = str(getattr(member.status, "value", member.status))
-        return status in ("administrator", "creator", "owner")
-    except Exception:
-        return False
-
-
-@router.message(Command("blockadultsticker"), F.chat.type.in_({"group", "supergroup"}))
-async def block_adult_sticker(message: Message, db_session: AsyncSession):
-    """Admin-only: reply to a sticker with /blockadultsticker to block that exact sticker in this group."""
-    if not await _is_group_admin(message):
-        return
-    replied = message.reply_to_message
-    if not replied or not replied.sticker:
-        await message.reply("Kisi sticker par reply karke /blockadultsticker bhejein.")
-        return
-    sticker_key = _ADULT_STICKER_BLOCK_PREFIX + replied.sticker.file_unique_id
-    existing = await db_session.scalar(
-        select(GroupBlocklist).where(
-            GroupBlocklist.group_id == message.chat.id,
-            GroupBlocklist.value == sticker_key,
-        )
-    )
-    if existing is None:
-        db_session.add(GroupBlocklist(
-            group_id=message.chat.id,
-            value=sticker_key,
-            added_by=message.from_user.id,
-        ))
-        await db_session.flush()
-    await message.reply("✅ Ye sticker is group ki adult-sticker blocklist mein add ho gaya.")
-
-
-@router.message(Command("unblockadultsticker"), F.chat.type.in_({"group", "supergroup"}))
-async def unblock_adult_sticker(message: Message, db_session: AsyncSession):
-    """Admin-only: reply to a blocked sticker with /unblockadultsticker to allow it again."""
-    if not await _is_group_admin(message):
-        return
-    replied = message.reply_to_message
-    if not replied or not replied.sticker:
-        await message.reply("Blocked sticker par reply karke /unblockadultsticker bhejein.")
-        return
-    sticker_key = _ADULT_STICKER_BLOCK_PREFIX + replied.sticker.file_unique_id
-    row = await db_session.scalar(
-        select(GroupBlocklist).where(
-            GroupBlocklist.group_id == message.chat.id,
-            GroupBlocklist.value == sticker_key,
-        )
-    )
-    if row is not None:
-        await db_session.delete(row)
-        await db_session.flush()
-        await message.reply("✅ Sticker blocklist se remove ho gaya; ab allowed hai.")
-    else:
-        await message.reply("Ye sticker adult-sticker blocklist mein nahi mila.")
-
-
-_ADULT_STICKER_BLOCK_PREFIX = "nsfw_sticker:"
-
-
-async def _is_group_admin(message: Message) -> bool:
-    if not message.from_user:
-        return False
-    try:
-        member = await message.bot.get_chat_member(message.chat.id, message.from_user.id)
-        status = str(getattr(member.status, "value", member.status))
-        return status in ("administrator", "creator", "owner")
-    except Exception:
-        return False
-
-
-@router.message(Command("blockadultsticker"), F.chat.type.in_({"group", "supergroup"}))
-async def block_adult_sticker(message: Message, db_session: AsyncSession):
-    """Admin-only: reply to a sticker with /blockadultsticker to block that exact sticker in this group."""
-    if not await _is_group_admin(message):
-        return
-    replied = message.reply_to_message
-    if not replied or not replied.sticker:
-        await message.reply("Kisi sticker par reply karke /blockadultsticker bhejein.")
-        return
-    sticker_key = _ADULT_STICKER_BLOCK_PREFIX + replied.sticker.file_unique_id
-    existing = await db_session.scalar(
-        select(GroupBlocklist).where(
-            GroupBlocklist.group_id == message.chat.id,
-            GroupBlocklist.value == sticker_key,
-        )
-    )
-    if existing is None:
-        db_session.add(GroupBlocklist(
-            group_id=message.chat.id,
-            value=sticker_key,
-            added_by=message.from_user.id,
-        ))
-        await db_session.flush()
-    await message.reply("✅ Ye sticker is group ki adult-sticker blocklist mein add ho gaya.")
-
-
-@router.message(Command("unblockadultsticker"), F.chat.type.in_({"group", "supergroup"}))
-async def unblock_adult_sticker(message: Message, db_session: AsyncSession):
-    """Admin-only: reply to a blocked sticker with /unblockadultsticker to allow it again."""
-    if not await _is_group_admin(message):
-        return
-    replied = message.reply_to_message
-    if not replied or not replied.sticker:
-        await message.reply("Blocked sticker par reply karke /unblockadultsticker bhejein.")
-        return
-    sticker_key = _ADULT_STICKER_BLOCK_PREFIX + replied.sticker.file_unique_id
-    row = await db_session.scalar(
-        select(GroupBlocklist).where(
-            GroupBlocklist.group_id == message.chat.id,
-            GroupBlocklist.value == sticker_key,
-        )
-    )
-    if row is not None:
-        await db_session.delete(row)
-        await db_session.flush()
-        await message.reply("✅ Sticker blocklist se remove ho gaya; ab allowed hai.")
-    else:
-        await message.reply("Ye sticker adult-sticker blocklist mein nahi mila.")
-
-
 @router.message(F.chat.type.in_({"group", "supergroup"}))
 async def group_message_handler(message: Message, db_session: AsyncSession, db_user=None, db_group=None, group_security=None, _=None, **kwargs):
     # This broad handler is registered before the command routers. Let slash
@@ -1434,32 +1307,10 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
     # Sticker approval remains valid even when Lock All is enabled; only the
     # sticker lock is bypassed for this member. All other locks stay enforced.
     violations = await check_message_violations(message, group_security, approved_sticker_user=approved_sticker_user)
-    # Only exact sticker IDs explicitly confirmed by a group admin are blocked.
-    # No visual/API guesswork is used, so ordinary stickers remain untouched.
+    # Automatically inspect sticker artwork while Anti-NSFW is enabled.
+    # Admins retain the existing exemption; API failures never trigger deletion.
     if group_security.anti_nsfw and message.sticker and not sender_is_admin:
-        sticker_key = _ADULT_STICKER_BLOCK_PREFIX + message.sticker.file_unique_id
-        blocked_sticker = await db_session.scalar(
-            select(GroupBlocklist.id).where(
-                GroupBlocklist.group_id == db_group.id,
-                GroupBlocklist.value == sticker_key,
-            )
-        )
-        if blocked_sticker is not None:
-            violations.append("nsfw_sticker")
-
-    # Sticker visuals are not sent to an external moderation service. Admins
-    # can explicitly block a confirmed inappropriate sticker by replying to it
-    # with /blocksticker; the saved Telegram file_unique_id is checked here.
-    # This runs only while Anti-NSFW is enabled and never blocks ordinary stickers.
-    if group_security.anti_nsfw and message.sticker and not sender_is_admin:
-        sticker_value = f"nsfw_sticker:{message.sticker.file_unique_id}"
-        blocked_sticker = await db_session.scalar(
-            select(GroupBlocklist).where(
-                GroupBlocklist.group_id == db_group.id,
-                GroupBlocklist.value == sticker_value,
-            )
-        )
-        if blocked_sticker:
+        if await is_nsfw_sticker(message.bot, message.sticker):
             violations.append("nsfw_sticker")
 
     # Admins are exempt from NSFW/abuse screening, but all unrelated

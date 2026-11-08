@@ -71,6 +71,92 @@ _join_windows = defaultdict(deque)
 _leave_windows = defaultdict(deque)
 
 
+# Cache completed sticker decisions so the same sticker is not sent to the
+# moderation API repeatedly. The cache is process-local and bounded.
+_sticker_moderation_cache: dict[str, bool] = {}
+
+
+async def is_nsfw_sticker(bot: Bot, sticker) -> bool:
+    """Use OpenAI image moderation to identify sexual content in Telegram stickers."""
+    import base64
+    import io
+    import os
+
+    from PIL import Image
+    import httpx
+    from bot.config import settings
+
+    sticker_key = getattr(sticker, "file_unique_id", None)
+    if sticker_key and sticker_key in _sticker_moderation_cache:
+        return _sticker_moderation_cache[sticker_key]
+
+    api_key = (settings.OPENAI_API_KEY or os.getenv("OPENAI_API_KEY", "")).strip()
+    if not api_key:
+        logger.warning("Automatic sticker moderation skipped: OPENAI_API_KEY is not configured")
+        return False
+
+    # Telegram animated/video stickers expose a static thumbnail. Static
+    # stickers are downloaded directly. If no preview exists, fail open.
+    source_file = sticker
+    if getattr(sticker, "is_animated", False) or getattr(sticker, "is_video", False):
+        source_file = getattr(sticker, "thumbnail", None) or getattr(sticker, "thumb", None)
+        if source_file is None:
+            logger.info("Sticker moderation skipped: animated sticker has no thumbnail")
+            return False
+
+    if (getattr(source_file, "file_size", None) or 0) > 5 * 1024 * 1024:
+        logger.info("Sticker moderation skipped: image exceeds 5 MB")
+        return False
+
+    try:
+        telegram_file = await bot.get_file(source_file.file_id)
+        raw = io.BytesIO()
+        await bot.download_file(telegram_file.file_path, destination=raw)
+        raw.seek(0)
+
+        # Normalize Telegram WEBP/thumbnail data into a compact JPEG data URL.
+        with Image.open(raw) as opened:
+            image = opened.convert("RGB")
+            image.thumbnail((768, 768))
+            encoded = io.BytesIO()
+            image.save(encoded, format="JPEG", quality=85, optimize=True)
+        image_data = base64.b64encode(encoded.getvalue()).decode("ascii")
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.post(
+                "https://api.openai.com/v1/moderations",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": "omni-moderation-latest",
+                    "input": [{
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{image_data}"},
+                    }],
+                },
+            )
+            response.raise_for_status()
+            result = response.json()["results"][0]
+            categories = result.get("categories", {})
+            detected = bool(
+                categories.get("sexual", False)
+                or categories.get("sexual/minors", False)
+            )
+
+        if sticker_key:
+            if len(_sticker_moderation_cache) >= 2000:
+                _sticker_moderation_cache.pop(next(iter(_sticker_moderation_cache)))
+            _sticker_moderation_cache[sticker_key] = detected
+        return detected
+    except Exception as exc:
+        # Do not delete a sticker merely because the API/network failed.
+        logger.warning(
+            "Automatic sticker moderation failed; sticker left untouched",
+            sticker_id=sticker_key,
+            error=str(exc),
+        )
+        return False
+
+
 def contains_invite_link(text: str) -> bool:
     return bool(INVITE_PATTERN.search(text))
 

@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     BOT_TOKEN: str = ""
     DATABASE_URL: str = "sqlite+aiosqlite:///./alexa.db"
 
+    # OpenAI key is supplied only through private host environment settings.
+    OPENAI_API_KEY: str = ""
+
     # Gemini key is loaded from private runtime config; never commit a real key.
     GEMINI_API_KEY: str = ""
     API_KEY: str = ""
