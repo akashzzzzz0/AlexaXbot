@@ -566,16 +566,14 @@ def _event_caption() -> str:
     )
 
 
-SPEED_TYPE_REMINDER_DELAY_SECONDS = 30
-SPEED_TYPE_REMINDER_TEXT = (
-    "⚡ <b>HURRY UP! TIME IS RUNNING OUT!</b>\n\n"
-    "Come on, everyone! The clock is ticking...\n\n"
-    "Type the hidden word as fast as you can and claim the first place on the leaderboard!"
-)
+SPEED_TYPE_REMINDER_DELAY_SECONDS = 3 * 60
+SPEED_TYPE_REMINDER_TEXT = "⚡ Hurry up! Time is running out! ⏳"
 
 
-async def _send_speed_type_reminder(bot, chat_id: int, event_id: int) -> None:
-    """Send one reminder after 30 seconds, only while this challenge is active."""
+async def _send_speed_type_reminder(
+    bot, chat_id: int, event_id: int, event_message_id: int
+) -> None:
+    """Reply to the event with one short reminder after three minutes."""
     await asyncio.sleep(SPEED_TYPE_REMINDER_DELAY_SECONDS)
     async with async_session_maker() as session:
         active = await session.scalar(
@@ -592,7 +590,7 @@ async def _send_speed_type_reminder(bot, chat_id: int, event_id: int) -> None:
         await bot.send_message(
             chat_id,
             SPEED_TYPE_REMINDER_TEXT,
-            parse_mode="HTML",
+            reply_to_message_id=event_message_id,
         )
     except Exception:
         # A reminder failure must never affect the active game.
@@ -680,7 +678,7 @@ async def _create_event(
         await session.commit()
         event_id = event.id
     try:
-        await bot.send_photo(
+        event_message = await bot.send_photo(
             chat_id=chat_id,
             photo=_make_spoiler_image(challenge),
             caption=_event_caption(),
@@ -695,7 +693,7 @@ async def _create_event(
                 await session.commit()
         return False
     asyncio.create_task(
-        _send_speed_type_reminder(bot, chat_id, event_id),
+        _send_speed_type_reminder(bot, chat_id, event_id, event_message.message_id),
         name=f"speed-type-reminder-{event_id}",
     )
     return True
