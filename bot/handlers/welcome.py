@@ -1359,7 +1359,7 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
     violations = await check_message_violations(message, group_security, approved_sticker_user=approved_sticker_user)
     # Sticker visuals are not sent to an external moderation service. Admins
     # can explicitly block a confirmed inappropriate sticker by replying to it
-    # with /blocksticker; the saved Telegram file_unique_id is checked here.
+    # with /blockadultsticker; the saved Telegram file_unique_id is checked here.
     # This runs only while Anti-NSFW is enabled and never blocks ordinary stickers.
     if group_security.anti_nsfw and message.sticker and not sender_is_admin:
         sticker_value = f"nsfw_sticker:{message.sticker.file_unique_id}"
