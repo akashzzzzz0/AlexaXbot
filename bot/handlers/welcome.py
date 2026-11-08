@@ -835,7 +835,7 @@ async def group_service_message_welcome(message: Message, db_session: AsyncSessi
         await _send_welcome_message(message.bot, db_session, message.chat, joined_user)
 
 
-_ADULT_STICKER_BLOCK_PREFIX = "__adult_sticker__:"
+_ADULT_STICKER_BLOCK_PREFIX = "nsfw_sticker:"
 
 
 async def _is_group_admin(message: Message) -> bool:
@@ -1357,19 +1357,6 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
     # Sticker approval remains valid even when Lock All is enabled; only the
     # sticker lock is bypassed for this member. All other locks stay enforced.
     violations = await check_message_violations(message, group_security, approved_sticker_user=approved_sticker_user)
-    # Only exact sticker IDs explicitly confirmed by a group admin are blocked.
-    # No visual/API guesswork is used, so ordinary stickers remain untouched.
-    if group_security.anti_nsfw and message.sticker and not sender_is_admin:
-        sticker_key = _ADULT_STICKER_BLOCK_PREFIX + message.sticker.file_unique_id
-        blocked_sticker = await db_session.scalar(
-            select(GroupBlocklist.id).where(
-                GroupBlocklist.group_id == db_group.id,
-                GroupBlocklist.value == sticker_key,
-            )
-        )
-        if blocked_sticker is not None:
-            violations.append("nsfw_sticker")
-
     # Sticker visuals are not sent to an external moderation service. Admins
     # can explicitly block a confirmed inappropriate sticker by replying to it
     # with /blocksticker; the saved Telegram file_unique_id is checked here.
