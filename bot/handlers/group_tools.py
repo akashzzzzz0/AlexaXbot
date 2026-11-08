@@ -293,9 +293,6 @@ async def _send_admin_report(message: Message, reason: str):
         await message.reply("Use /report or @admin in a group.")
         return
     replied = message.reply_to_message
-    if not replied or not replied.from_user:
-        await message.reply("Reply to the message you want to report, then use /report [reason] or @admin [reason].")
-        return
     try:
         admins = await message.bot.get_chat_administrators(message.chat.id)
     except Exception:
@@ -309,13 +306,21 @@ async def _send_admin_report(message: Message, reason: str):
         label = user.full_name or user.first_name or str(user.id)
         mentions.append(f'<a href="tg://user?id={user.id}">{escape(label)}</a>')
     admin_line = " ".join(mentions) if mentions else "No mentionable admins found."
-    target = replied.from_user
     reporter = message.from_user
+    target = replied.from_user if replied and replied.from_user else reporter
+    if replied:
+        reported_content = replied.text or replied.caption or "[Media message]"
+        report_reason = reason or "No reason provided"
+    else:
+        # A direct @admin request reports the requester's own message and still alerts every admin.
+        reported_content = message.text or message.caption or reason or "[Message]"
+        report_reason = "Direct @admin request"
     report_text = (
         "🚩 <b>Member Report</b>\n"
         + f'Reported: <a href="tg://user?id={target.id}">{escape(target.full_name or target.first_name or str(target.id))}</a> (<code>{target.id}</code>)\n'
         + f'Reported by: <a href="tg://user?id={reporter.id}">{escape(reporter.full_name or reporter.first_name or str(reporter.id))}</a> (<code>{reporter.id}</code>)\n'
-        + "Reason: " + escape(reason or "No reason provided") + "\n"
+        + "Message: " + escape(reported_content[:1500]) + "\n"
+        + "Reason: " + escape(report_reason) + "\n"
         + "📣 <b>Group admins:</b> " + admin_line
     )
     await message.reply(report_text, parse_mode="HTML")
