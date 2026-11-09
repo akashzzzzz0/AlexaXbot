@@ -21,7 +21,7 @@ from aiogram.enums import ChatType
 from aiogram.types import Message, ReactionTypeEmoji
 
 from bot.config import settings
-from bot.services.ollama_ai import ollama_chat
+from bot.services.ai_chat_provider import ai_chat_completion
 
 router = Router(name="alexa_ai_chat")
 logger = logging.getLogger(__name__)
@@ -614,7 +614,7 @@ async def _ask_ollama(
     ]
     messages.append({"role": "user", "content": user_text})
     try:
-        answer = await ollama_chat(
+        answer = await ai_chat_completion(
             messages,
             system=system_instruction,
             temperature=0.72,
@@ -622,7 +622,7 @@ async def _ask_ollama(
         )
     except RuntimeError as exc:
         if str(exc) == "ollama_not_configured":
-            logger.error("Alexa AI chat is disabled because OLLAMA_API_KEY is missing from runtime configuration")
+            logger.error("Alexa AI chat is disabled because neither OPENAI_API_KEY nor OLLAMA_API_KEY is configured")
             return ""
         raise
     answer = answer[:700].rsplit(" ", 1)[0] if answer else ""
