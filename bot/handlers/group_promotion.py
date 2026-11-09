@@ -106,7 +106,12 @@ async def _find_private_group_for_admin(bot, session: AsyncSession, user_id: int
     # use that recorded group as a first-class candidate even if an older
     # database row was not present in the active-group query.
     preferred_group_id = None
-    access_record = await session.get(GlobalSetting, f"promo_added_by:{user_id}")
+    # On Alexa's add/promotion event, save the group association for EVERY
+    # current admin, not only event.from_user (the person who performed the
+    # change). The admin who later sends the private link may be someone else.
+    access_record = await session.get(GlobalSetting, f"promo_admin_group:{user_id}")
+    if access_record is None or not access_record.value:
+        access_record = await session.get(GlobalSetting, f"promo_added_by:{user_id}")
     if access_record and access_record.value:
         try:
             preferred_group_id = int(access_record.value.split(":", 1)[0])
@@ -301,9 +306,11 @@ async def _resolve_private_request_from_recent_add(bot, session: AsyncSession, r
     use the recorded actor->group event, then independently verify that both Alexa
     and the request sender are still administrators in that exact group.
     """
-    setting = await session.get(GlobalSetting, f"promo_added_by:{request.user_id}")
+    setting = await session.get(GlobalSetting, f"promo_admin_group:{request.user_id}")
     if setting is None or not setting.value:
-        return False, "No recent group-add/admin-change event from this requester is recorded."
+        setting = await session.get(GlobalSetting, f"promo_added_by:{request.user_id}")
+    if setting is None or not setting.value:
+        return False, "No recent group-add/admin-change event for this group admin is recorded."
 
     try:
         raw_chat_id, raw_timestamp = setting.value.split(":", 1)
@@ -799,13 +806,37 @@ async def resolve_private_promotion_when_alexa_is_added(
 
     # Remember which group this requester most recently added/promoted Alexa in.
     # The owner can later verify a private invite request without a group command.
+    access_value = f"{event.chat.id}:{int(time.time())}"
+    # Keep the original actor mapping for backward compatibility.
     access_key = f"promo_added_by:{event.from_user.id}"
     access_record = await db_session.get(GlobalSetting, access_key)
-    access_value = f"{event.chat.id}:{int(time.time())}"
     if access_record is None:
         db_session.add(GlobalSetting(key=access_key, value=access_value))
     else:
         access_record.value = access_value
+
+    # Also associate all admins currently in the group. This fixes the case
+    # where one admin added Alexa but a different admin submits the private
+    # invite link. The Bot API returns numeric user IDs for these admins.
+    try:
+        current_admins = await event.bot.get_chat_administrators(event.chat.id)
+    except Exception:
+        current_admins = []
+        logger.warning(
+            "Could not capture current admins for private promotion matching; chat_id=%s actor_id=%s",
+            event.chat.id, event.from_user.id, exc_info=True,
+        )
+    for admin in current_admins:
+        admin_user = getattr(admin, "user", None)
+        if not admin_user or getattr(admin_user, "is_bot", False):
+            continue
+        admin_key = f"promo_admin_group:{admin_user.id}"
+        admin_record = await db_session.get(GlobalSetting, admin_key)
+        if admin_record is None:
+            db_session.add(GlobalSetting(key=admin_key, value=access_value))
+        else:
+            admin_record.value = access_value
+
     snapshot_key = _admin_snapshot_key(event.chat.id)
     snapshot_row = await db_session.get(GlobalSetting, snapshot_key)
     snapshot_value = _encode_admin_snapshot(event.new_chat_member, event.from_user.id)
