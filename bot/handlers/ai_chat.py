@@ -587,6 +587,12 @@ async def _ask_ai(
         "If corrected for sounding robotic, acknowledge it casually and adjust. "
         "Never use the word Allah or its Arabic/Urdu spellings (الله or اللّٰه); rephrase religious invocations neutrally. "
     )
+    if user_text.strip().casefold() == "alexa":
+        system_instruction += (
+            "The user has ONLY called your name to get your attention. Respond like a person casually acknowledging someone who called them: "
+            "use a very short, natural 1-5 word response, such as 'Haan bolo?', 'Ji?', 'Kya hua?', or 'Bolo, sun rahi hoon'. "
+            "Vary the wording naturally. Do NOT greet them, say 'Hello', ask 'kya chal raha hai', start a topic, or give a generic conversation opener. "
+        )
     if smart_mode:
         system_instruction += (
             "This is a SMART GROUP REPLY to an unaddressed message that has already passed relevance filters. "
@@ -647,7 +653,9 @@ async def alexa_ai_chat(message: Message) -> None:
         )
     prefix_match = _ALEXA_PREFIX_RE.match(text)
     if prefix_match:
-        text = prefix_match.group(1).strip() or "Say hello and start a friendly conversation."
+        # If the user only says "Alexa", preserve that exact intent so the
+        # model acknowledges the call instead of inventing a generic greeting.
+        text = prefix_match.group(1).strip() or "Alexa"
 
     username = _bot_username or ""
     if username:
