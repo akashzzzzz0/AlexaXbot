@@ -1,3 +1,4 @@
+import asyncio
 import re
 import random
 import string
@@ -108,53 +109,62 @@ async def is_nsfw_sticker(bot: Bot, sticker) -> bool:
         logger.info("Sticker moderation skipped: image exceeds 5 MB")
         return False
 
-    try:
-        telegram_file = await bot.get_file(source_file.file_id)
-        raw = io.BytesIO()
-        await bot.download_file(telegram_file.file_path, destination=raw)
-        raw.seek(0)
+    last_error = None
+    # Retry transient Telegram download/API/network failures once. Cache only
+    # completed moderation decisions, never temporary failures.
+    for attempt in range(2):
+        try:
+            telegram_file = await bot.get_file(source_file.file_id)
+            raw = io.BytesIO()
+            await bot.download_file(telegram_file.file_path, destination=raw)
+            raw.seek(0)
 
-        # Normalize Telegram WEBP/thumbnail data into a compact JPEG data URL.
-        with Image.open(raw) as opened:
-            image = opened.convert("RGB")
-            image.thumbnail((768, 768))
-            encoded = io.BytesIO()
-            image.save(encoded, format="JPEG", quality=85, optimize=True)
-        image_data = base64.b64encode(encoded.getvalue()).decode("ascii")
+            # Normalize Telegram WEBP/thumbnail data into a compact JPEG data URL.
+            with Image.open(raw) as opened:
+                image = opened.convert("RGB")
+                image.thumbnail((768, 768))
+                encoded = io.BytesIO()
+                image.save(encoded, format="JPEG", quality=85, optimize=True)
+            image_data = base64.b64encode(encoded.getvalue()).decode("ascii")
 
-        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
-            response = await client.post(
-                "https://api.openai.com/v1/moderations",
-                headers={"Authorization": f"Bearer {api_key}"},
-                json={
-                    "model": "omni-moderation-latest",
-                    "input": [{
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{image_data}"},
-                    }],
-                },
-            )
-            response.raise_for_status()
-            result = response.json()["results"][0]
-            categories = result.get("categories", {})
-            detected = bool(
-                categories.get("sexual", False)
-                or categories.get("sexual/minors", False)
-            )
+            async with httpx.AsyncClient(timeout=httpx.Timeout(20.0)) as client:
+                response = await client.post(
+                    "https://api.openai.com/v1/moderations",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    json={
+                        "model": "omni-moderation-latest",
+                        "input": [{
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{image_data}"},
+                        }],
+                    },
+                )
+                response.raise_for_status()
+                result = response.json()["results"][0]
+                categories = result.get("categories", {})
+                detected = bool(
+                    categories.get("sexual", False)
+                    or categories.get("sexual/minors", False)
+                )
 
-        if sticker_key:
-            if len(_sticker_moderation_cache) >= 2000:
-                _sticker_moderation_cache.pop(next(iter(_sticker_moderation_cache)))
-            _sticker_moderation_cache[sticker_key] = detected
-        return detected
-    except Exception as exc:
-        # Do not delete a sticker merely because the API/network failed.
-        logger.warning(
-            "Automatic sticker moderation failed; sticker left untouched",
-            sticker_id=sticker_key,
-            error=str(exc),
-        )
-        return False
+            if sticker_key:
+                if len(_sticker_moderation_cache) >= 2000:
+                    _sticker_moderation_cache.pop(next(iter(_sticker_moderation_cache)))
+                _sticker_moderation_cache[sticker_key] = detected
+            return detected
+        except Exception as exc:
+            last_error = exc
+            if attempt == 0:
+                await asyncio.sleep(0.5)
+
+    # Fail open rather than deleting every sticker during an upstream outage;
+    # the failure is visible in logs and the next message can retry the scan.
+    logger.warning(
+        "Automatic sticker moderation failed after retry; sticker left untouched",
+        sticker_id=sticker_key,
+        error=str(last_error),
+    )
+    return False
 
 
 def contains_invite_link(text: str) -> bool:
@@ -254,7 +264,11 @@ async def check_message_violations(
         return []
 
     now = time.monotonic()
-    key = (message.chat.id, message.from_user.id)
+    # Forwarded channel posts and anonymous senders may not have from_user.
+    # Use a stable per-chat fallback so optional spam checks cannot crash the
+    # whole security pipeline before link/forward/NSFW rules are evaluated.
+    sender_id = getattr(getattr(message, "from_user", None), "id", None) or 0
+    key = (message.chat.id, sender_id)
     if security.anti_spam and text.strip():
         q = _recent_texts[key]
         normalized = " ".join(text.lower().split())
@@ -290,7 +304,11 @@ async def check_message_violations(
     # channel mentions/text and must not duplicate Anti-Invite's responsibility.
     if security.anti_channel_promo and ("@" in text and any(word in text.lower() for word in ("subscribe", "join channel", "follow channel"))):
         violations.append("channel_promotion")
-    if security.anti_forward_spam and getattr(message, "forward_origin", None):
+    is_forwarded = bool(
+        getattr(message, "forward_origin", None)
+        or getattr(message, "is_automatic_forward", False)
+    )
+    if security.anti_forward_spam and is_forwarded:
         violations.append("forward_spam")
     if security.anti_username_spam and message.from_user.username and re.search(r"(.)\1{5,}", message.from_user.username.lower()):
         violations.append("suspicious_username")
@@ -339,7 +357,7 @@ async def check_message_violations(
         violations.append("locked_sticker")
     if security.lock_polls and message.poll:
         violations.append("locked_poll")
-    if security.lock_forwards and message.forward_origin:
+    if security.lock_forwards and is_forwarded:
         violations.append("locked_forward")
     if security.lock_locations and message.location:
         violations.append("locked_location")
