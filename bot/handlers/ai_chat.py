@@ -58,21 +58,21 @@ def _reaction_for_text(text: str) -> str | None:
         return None
 
     options = [
-        (r"\b(haha+|hehe+|lol|lmao|rofl|mazaak|mazak|funny)\b|😂|🤣|😹",
+        (r"\b(haha+|hehe+|lol|lmao|rofl|mazaak|mazak|majedaar|funny|hasi|hasna)\b|😂|🤣|😹",
          ("😂", "🤣", "😹", "😆")),
-        (r"\b(congrats?|congratulations|mubarak|well done|shabash|proud of you|jeet|won)\b|🎉|🏆",
+        (r"\b(congrats?|congratulations|mubarak|badhaai|badhai|well done|shabash|proud of you|jeet|jeeta|won|success|kamyaabi)\b|🎉|🏆",
          ("🎉", "🥳", "🏆", "👏")),
-        (r"\b(thanks?|thank you|shukriya|meherbani|jazakallah)\b",
+        (r"\b(thanks?|thank you|shukriya|dhanyavaad|meherbani)\b",
          ("❤️", "🥰", "🙏", "💖")),
-        (r"\b(sorry|maaf|forgive|my mistake|galti ho|afsos)\b",
+        (r"\b(sorry|maaf|maafi|forgive|my mistake|galti ho|afsos)\b",
          ("🤝", "❤️", "🙏")),
-        (r"\b(sad|upset|cry|miss you|bura lag|mood off|dukhi|udaas|udas)\b|😢|😭|🥺|💔",
+        (r"\b(sad|upset|cry|miss you|bura lag|mood off|dukhi|udaas|udas|pareshan|takleef)\b|😢|😭|🥺|💔",
          ("🥺", "🫂", "❤️", "😔")),
-        (r"\b(wow|seriously|really|no way|omg|shocked|hairan)\b|😮|😱|🤯",
+        (r"\b(wow|seriously|really|no way|omg|shocked|hairan|sach me|sach mein|kya baat)\b|😮|😱|🤯",
          ("😮", "😳", "🤯", "🙀")),
-        (r"\b(angry|gussa|ghussa|naraz|irritated)\b|😡|🤬|😤",
+        (r"\b(angry|gussa|ghussa|naraz|irritated|chidh)\b|😡|🤬|😤",
          ("😤", "😠", "🤨")),
-        (r"\b(love|cute|beautiful|awesome|amazing|zabardast|kamal)\b|😍|🥰|❤️",
+        (r"\b(love|cute|beautiful|awesome|amazing|zabardast|kamal|pyaar|pyar|pasand|dil se)\b|😍|🥰|❤️",
          ("🥰", "❤️", "✨", "🔥")),
     ]
     for pattern, emojis in options:
@@ -132,14 +132,12 @@ _REACTION_CHANCE = 0.22
 async def _maybe_react(message: Message) -> None:
     if not message.from_user or message.from_user.is_bot:
         return
-    if not await _explicitly_mentions_alexa(message):
-        return
 
-    # Even a mention is not enough: only high-signal messages qualify, and
-    # reactions remain occasional with a per-user cooldown.
+    # React to meaningful messages naturally; users do not need to mention Alexa.
+    # Neutral chat, greetings, commands, and ordinary one-word replies are ignored.
     text = message.text or message.caption or ""
     emoji = _reaction_for_text(text)
-    if not emoji or random.random() > _REACTION_CHANCE:
+    if not emoji:
         return
 
     reaction_key = (message.chat.id, message.from_user.id)
