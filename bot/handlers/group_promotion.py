@@ -420,12 +420,17 @@ async def _send_owner_request(
     owner_id = settings.effective_owner_id
     if not owner_id:
         return
-    permission_report = (
-        await _stored_admin_snapshot(session, request.group_id) if session is not None and group_resolved else None
-    )
-    if not permission_report and group_resolved:
-        permission_report = await _live_permission_report(bot, request)
-    if not group_resolved:
+    permission_report = None
+    if group_resolved:
+        stored_report = await _stored_admin_snapshot(session, request.group_id) if session is not None else None
+        live_report = await _live_permission_report(bot, request)
+        permission_report = "\n\n".join(part for part in (stored_report, live_report) if part)
+        if "/+" in request.group_link or "/joinchat/" in request.group_link:
+            permission_report += (
+                "\n\nℹ️ Private invite association uses Alexa's saved group/admin match; "
+                "Telegram Bot API cannot decode a private invite hash directly."
+            )
+    else:
         permission_report = "⚠️ <b>Detailed permissions:</b> Waiting for Alexa to be matched to the exact group."
     text = (
         "📣 <b>NEW FREE GROUP PROMOTION REQUEST</b>\n\n"
@@ -633,7 +638,10 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
                 f"👥 <b>{escape(existing.group_title)}</b>\n"
                 f"👑 Alexa administrator: <b>{'YES' if live_admin else 'NO' if live_resolved else 'UNKNOWN'}</b>\n"
                 f"🔗 Invite Users: <b>{'YES' if live_invite else 'NO' if live_resolved else 'UNKNOWN'}</b>\n\n"
-                + (stored_report or live_report) + "\n\nYour group is already in the owner's review queue.",
+                + "\n\n".join(part for part in (stored_report, live_report) if part)
+                + ("\n\nℹ️ Private invite hash was matched through Alexa's unique saved admin-group record; Telegram Bot API cannot decode it directly."
+                   if is_private_invite else "")
+                + "\n\nYour group is already in the owner's review queue.",
                 parse_mode="HTML", disable_web_page_preview=True,
             )
         else:
@@ -668,7 +676,9 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
             f"🆔 Group ID: <code>{request.group_id}</code>\n"
             f"👑 Alexa administrator: <b>{'YES' if live_admin else 'NO' if live_resolved else 'UNKNOWN'}</b>\n"
             f"🔗 Invite Users permission: <b>{'YES' if live_invite else 'NO' if live_resolved else 'UNKNOWN'}</b>\n\n"
-            + (stored_report or live_report)
+            + "\n\n".join(part for part in (stored_report, live_report) if part)
+            + ("\n\nℹ️ Private invite hash was matched through Alexa's unique saved admin-group record; Telegram Bot API cannot decode it directly."
+               if is_private_invite else "")
             + "\n\n✅ The verification result has also been sent to the bot owner for approval.",
             parse_mode="HTML", disable_web_page_preview=True,
         )
