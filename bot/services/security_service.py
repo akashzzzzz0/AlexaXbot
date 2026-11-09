@@ -167,6 +167,19 @@ async def is_nsfw_sticker(bot: Bot, sticker) -> bool:
     return False
 
 
+def is_forwarded_message(message: Message) -> bool:
+    """Detect current and legacy Telegram forward metadata consistently."""
+    return bool(
+        getattr(message, "forward_origin", None)
+        or getattr(message, "is_automatic_forward", False)
+        or getattr(message, "forward_from", None)
+        or getattr(message, "forward_from_chat", None)
+        or getattr(message, "forward_sender_name", None)
+        or getattr(message, "forward_signature", None)
+        or getattr(message, "forward_date", None)
+    )
+
+
 def contains_invite_link(text: str) -> bool:
     return bool(INVITE_PATTERN.search(text))
 
@@ -304,10 +317,7 @@ async def check_message_violations(
     # channel mentions/text and must not duplicate Anti-Invite's responsibility.
     if security.anti_channel_promo and ("@" in text and any(word in text.lower() for word in ("subscribe", "join channel", "follow channel"))):
         violations.append("channel_promotion")
-    is_forwarded = bool(
-        getattr(message, "forward_origin", None)
-        or getattr(message, "is_automatic_forward", False)
-    )
+    is_forwarded = is_forwarded_message(message)
     if security.anti_forward_spam and is_forwarded:
         violations.append("forward_spam")
     sender_username = getattr(getattr(message, "from_user", None), "username", None)

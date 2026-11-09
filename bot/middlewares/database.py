@@ -106,6 +106,11 @@ class DatabaseMiddleware(BaseMiddleware):
                     except Exception as e:
                         logger.warning("Could not get/create user or track mission progress", error=str(e))
                         data["db_user"] = None
+                        # A failed flush can leave SQLAlchemy's transaction unusable.
+                        # Recover only when required, so group moderation can still load
+                        # its own settings and process the incoming message.
+                        if not session.is_active:
+                            await session.rollback()
 
                 chat = None
                 if isinstance(event, Update):
@@ -216,6 +221,15 @@ class DatabaseMiddleware(BaseMiddleware):
                             data["db_member"] = member
                     except Exception as e:
                         logger.warning("Could not load group data from DB", error=str(e))
+                        # Do not pass a failed transaction into the broad group
+                        # moderation handler. Clear only injected DB objects so the
+                        # handler can safely reload them in the recovered session.
+                        if not session.is_active:
+                            await session.rollback()
+                            data.pop("db_group", None)
+                            data.pop("group_security", None)
+                            data.pop("db_member", None)
+                            data["db_user"] = None
 
                 # Save private messages from non-owner users for the owner-only inbox.
                 # Only metadata is stored; the original message stays in the user's chat.
