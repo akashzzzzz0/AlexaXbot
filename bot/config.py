@@ -10,6 +10,7 @@ class Settings(BaseSettings):
 
     # OpenAI key is supplied only through private host environment settings.
     OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4.1-mini"
 
     # Gemini key is loaded from private runtime config; never commit a real key.
     GEMINI_API_KEY: str = ""
