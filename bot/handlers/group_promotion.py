@@ -706,11 +706,23 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
     )
     if existing:
         await db_session.commit()
-        if group_resolved:
-            live_status, live_admin, live_invite, live_resolved = await _live_group_proof(message.bot, existing)
-            live_report = await _live_permission_report(message.bot, existing)
-            stored_report = await _stored_admin_snapshot(db_session, existing.group_id)
-            await message.answer(_PROMOTION_NOTICE, parse_mode="HTML")
+        if group_resolved and bot_status not in {"administrator", "creator"}:
+            # The exact link may still identify a previously known group, but
+            # membership must be checked live on every repeat submission.
+            await message.answer(
+                "⚠️ <b>Alexa is no longer an administrator in this group.</b>\n\n"
+                "The previous verification is not being reused. Add Alexa to the group "
+                "again, grant the required administrator permissions, and then resend the link.",
+                parse_mode="HTML",
+            )
+            await _send_owner_request(
+                message.bot,
+                existing,
+                bot_status=bot_status,
+                can_invite_users=False,
+                group_resolved=True,
+                session=db_session,
+            )
         else:
             await message.answer(_PROMOTION_NOTICE, parse_mode="HTML")
         return
@@ -769,6 +781,30 @@ async def resolve_private_promotion_when_alexa_is_added(
         getattr(event.new_chat_member.status, "value", event.new_chat_member.status)
     ).lower()
     if new_status in {"left", "kicked"}:
+        # Alexa has been removed: invalidate every saved admin->group match
+        # for this chat so a later private-link submission cannot reuse the
+        # previous add/admin event as fresh proof.
+        for prefix in ("promo_admin_group:", "promo_added_by:"):
+            stale_rows = (await db_session.scalars(
+                select(GlobalSetting).where(GlobalSetting.key.like(f"{prefix}%"))
+            )).all()
+            for stale_row in stale_rows:
+                try:
+                    mapped_group_id = int((stale_row.value or "").split(":", 1)[0])
+                except (TypeError, ValueError):
+                    continue
+                if mapped_group_id == event.chat.id:
+                    await db_session.delete(stale_row)
+
+        # Keep the known group/link for identification, but mark Alexa's
+        # membership as inactive and discard the old permission snapshot.
+        removed_group = await db_session.get(Group, event.chat.id)
+        if removed_group is not None:
+            removed_group.is_active = False
+        old_snapshot = await db_session.get(GlobalSetting, _admin_snapshot_key(event.chat.id))
+        if old_snapshot is not None:
+            await db_session.delete(old_snapshot)
+        await db_session.commit()
         raise SkipHandler
 
     # Telegram supplies the real chat ID whenever Alexa is added or its
