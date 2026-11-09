@@ -710,17 +710,7 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
             live_status, live_admin, live_invite, live_resolved = await _live_group_proof(message.bot, existing)
             live_report = await _live_permission_report(message.bot, existing)
             stored_report = await _stored_admin_snapshot(db_session, existing.group_id)
-            await message.answer(
-                "🔎 <b>ALEXA GROUP VERIFICATION</b>\n\n"
-                f"👥 <b>{escape(existing.group_title)}</b>\n"
-                f"👑 Alexa administrator: <b>{'YES' if live_admin else 'NO' if live_resolved else 'UNKNOWN'}</b>\n"
-                f"🔗 Invite Users: <b>{'YES' if live_invite else 'NO' if live_resolved else 'UNKNOWN'}</b>\n\n"
-                + "\n\n".join(part for part in (stored_report, live_report) if part)
-                + ("\n\nℹ️ Private invite hash was matched through Alexa's unique saved admin-group record; Telegram Bot API cannot decode it directly."
-                   if is_private_invite else "")
-                + "\n\nYour group is already in the owner's review queue.",
-                parse_mode="HTML", disable_web_page_preview=True,
-            )
+            await message.answer(_PROMOTION_NOTICE, parse_mode="HTML")
         else:
             await message.answer(_PROMOTION_NOTICE, parse_mode="HTML")
         return
