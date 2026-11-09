@@ -13,7 +13,7 @@ from bot.database.models import (
 from bot.services.security_service import (
     check_message_violations, is_raid_detected, create_captcha_challenge,
     contains_link, contains_non_alexa_link, count_mentions, count_hashtags,
-    is_nsfw_sticker
+    is_nsfw_sticker, is_forwarded_message
 )
 from bot.services.moderation_service import mute_user, ban_user, kick_user, warn_user, log_action
 from bot.services.user_service import add_xp
@@ -1009,7 +1009,7 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
             locked_reason = "polls"
         elif group_security.lock_games and (message.dice or message.game):
             locked_reason = "games"
-        elif group_security.lock_forwards and message.forward_origin:
+        elif group_security.lock_forwards and is_forwarded_message(message):
             locked_reason = "forwards"
         elif group_security.lock_contacts and message.contact:
             locked_reason = "contacts"
@@ -1366,8 +1366,14 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
         if action == "delete":
             try:
                 await message.delete()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "Moderation could not delete violating message; verify ALEXA has Delete Messages permission",
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    violations=violations,
+                    error=str(exc),
+                )
         elif action == "warn":
             gs = await db_session.scalar(select(GroupSettings).where(GroupSettings.group_id == db_group.id))
             max_warns = gs.max_warns if gs else 3
