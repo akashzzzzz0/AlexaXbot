@@ -310,9 +310,10 @@ async def check_message_violations(
     )
     if security.anti_forward_spam and is_forwarded:
         violations.append("forward_spam")
-    if security.anti_username_spam and message.from_user.username and re.search(r"(.)\1{5,}", message.from_user.username.lower()):
+    sender_username = getattr(getattr(message, "from_user", None), "username", None)
+    if security.anti_username_spam and sender_username and re.search(r"(.)\1{5,}", sender_username.lower()):
         violations.append("suspicious_username")
-    if security.anti_fake and not message.from_user.username and re.search(r"https?://|t\.me/|\+\d{7,}", text.lower()):
+    if security.anti_fake and not sender_username and re.search(r"https?://|t\.me/|\+\d{7,}", text.lower()):
         violations.append("suspicious_account")
     if security.anti_nsfw:
         if contains_nsfw(text):
