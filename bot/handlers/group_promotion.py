@@ -101,6 +101,24 @@ async def _find_private_group_for_admin(bot, session: AsyncSession, user_id: int
         .where(Group.is_active.is_(True))
         .order_by(desc(Group.updated_at))
     )).all()
+
+    # If this DM sender was the person who most recently added/promoted Alexa,
+    # use that recorded group as a first-class candidate even if an older
+    # database row was not present in the active-group query.
+    preferred_group_id = None
+    access_record = await session.get(GlobalSetting, f"promo_added_by:{user_id}")
+    if access_record and access_record.value:
+        try:
+            preferred_group_id = int(access_record.value.split(":", 1)[0])
+        except (TypeError, ValueError):
+            preferred_group_id = None
+    if preferred_group_id is not None:
+        preferred = await session.get(Group, preferred_group_id)
+        if preferred is not None and all(item.id != preferred.id for item in groups):
+            groups.insert(0, preferred)
+        elif preferred is not None:
+            groups.sort(key=lambda item: item.id != preferred_group_id)
+
     try:
         me = await bot.get_me()
     except Exception:
@@ -145,9 +163,13 @@ async def _find_private_group_for_admin(bot, session: AsyncSession, user_id: int
             continue
 
     if not matches:
+        logger.warning(
+            "Private invite verification found no live Alexa+sender admin match; sender_id=%s, active_group_candidates=%s, preferred_group_id=%s",
+            user_id, len(groups), preferred_group_id,
+        )
         return None, None, (
-            "No active group was found where both Alexa and this sender are currently administrators. "
-            "Confirm Alexa is still an admin and that the sender is a group admin."
+            "Alexa could not find a group where BOTH Alexa and the account sending this DM are currently administrators. "
+            "The group must already be saved in Alexa's database, and Telegram must confirm both admin statuses."
         )
 
     group, chat, bot_member = matches[0]
@@ -716,8 +738,9 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
         )
     else:
         await message.answer(
-            "⚠️ <b>Link received, but the exact private group is not identified yet.</b>\n\n"
-            "Telegram does not reveal a private invite link's chat ID directly. Alexa has saved the request and will only verify it after a safe database match.",
+            "⚠️ <b>Private link received, but verification could not identify its group.</b>\n\n"
+            + escape(match_error or "No unique saved group match was found.")
+            + "\n\nTelegram does not expose a private invite hash's group ID directly. Alexa will not guess the target group.",
             parse_mode="HTML",
         )
     await _send_owner_request(
