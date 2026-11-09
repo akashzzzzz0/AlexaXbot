@@ -52,10 +52,31 @@ def _detect_user_gender_style(history, current_text: str) -> str:
 
 
 def _reaction_for_text(text: str) -> str | None:
-    """React only to clear, high-signal emotional or celebratory messages."""
+    """Understand meaningful words and emojis before choosing a selective reaction."""
     value = re.sub(r"\s+", " ", text.casefold()).strip()
     if not value:
         return None
+
+    # Emoji-only messages and emojis embedded in sentences carry meaning too.
+    # Count clear emotional signals; neutral emojis are intentionally ignored.
+    emoji_groups = (
+        (("😂", "🤣", "😹", "😆", "😜", "🤪"), ("😂", "🤣", "😹", "😆")),
+        (("🎉", "🥳", "🏆", "🥇", "🎊", "💯"), ("🎉", "🥳", "🏆", "👏")),
+        (("😢", "😭", "🥺", "💔", "😔", "😞"), ("🥺", "🫂", "❤️", "😔")),
+        (("😮", "😱", "🤯", "😳", "🙀"), ("😮", "😳", "🤯")),
+        (("😡", "🤬", "😠", "😤"), ("😤", "😠", "🤨")),
+        (("❤️", "❤", "😍", "🥰", "😘", "💕", "💖", "💗", "💞"), ("🥰", "❤️", "💖")),
+        (("🔥", "👏", "🙌", "💪", "✨", "⚡"), ("🔥", "👏", "💯")),
+        (("🙏",), ("🙏", "❤️")),
+    )
+    emoji_scores = [
+        (sum(value.count(symbol) for symbol in symbols), reactions)
+        for symbols, reactions in emoji_groups
+    ]
+    strongest_score = max((score for score, _ in emoji_scores), default=0)
+    if strongest_score:
+        strongest = [reactions for score, reactions in emoji_scores if score == strongest_score]
+        return random.choice(random.choice(strongest))
 
     options = [
         (r"\b(haha+|hehe+|lol|lmao|rofl|mazaak|mazak|majedaar|funny|hasi|hasna)\b|😂|🤣|😹",
