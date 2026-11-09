@@ -114,10 +114,13 @@ async def _find_private_group_for_admin(bot, session: AsyncSession, user_id: int
             preferred_group_id = None
     if preferred_group_id is not None:
         preferred = await session.get(Group, preferred_group_id)
-        if preferred is not None and all(item.id != preferred.id for item in groups):
-            groups.insert(0, preferred)
-        elif preferred is not None:
-            groups.sort(key=lambda item: item.id != preferred_group_id)
+        if preferred is not None:
+            # This actor->group record comes from Telegram's my_chat_member
+            # update and identifies the exact group where this admin most
+            # recently added/promoted Alexa. Treat it as authoritative for
+            # this private-link submission instead of scanning every other
+            # group where the same person may also be an administrator.
+            groups = [preferred]
 
     try:
         me = await bot.get_me()
