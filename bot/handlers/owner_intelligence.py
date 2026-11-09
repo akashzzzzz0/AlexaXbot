@@ -61,17 +61,17 @@ FEATURE_ROUTERS = (
 
 def normalize_request(text: str) -> str:
     """Normalize mixed Roman Urdu/English text for deterministic report routing."""
-    return re.sub(r"\\s+", " ", (text or "").casefold()).strip()
+    return re.sub(r"\s+", " ", (text or "").casefold()).strip()
 
 
 def is_audit_request(text: str) -> bool:
     value = normalize_request(text)
     patterns = (
-        r"\\b(audit|self[- ]?audit|health check|feature check|features check|feature status|feature report)\\b",
-        r"\\b(konsa|kon sa|kaun sa|which|what)\\b.{0,70}\\b(feature|features|system|module)\\b.{0,50}\\b(working|work|kaam|failed|fail|issue|problem|status)\\b",
-        r"\\b(feature|features|module|modules)\\b.{0,60}\\b(working|work|kaam|fail|failed|check|status|issue|problem)\\b",
-        r"\\b(bot|alexa|system)\\b.{0,50}\\b(check|audit|test|scan)\\b.{0,50}\\b(feature|features|system|modules)\\b",
-        r"\\b(complete|full|poora|pura)\\b.{0,30}\\b(bot|system|feature)\\b.{0,30}\\b(report|audit|check)\\b",
+        r"\b(audit|self[- ]?audit|health check|feature check|features check|feature status|feature report)\b",
+        r"\b(konsa|kon sa|kaun sa|which|what)\b.{0,70}\b(feature|features|system|module)\b.{0,50}\b(working|work|kaam|failed|fail|issue|problem|status)\b",
+        r"\b(feature|features|module|modules)\b.{0,60}\b(working|work|kaam|fail|failed|check|status|issue|problem)\b",
+        r"\b(bot|alexa|system)\b.{0,50}\b(check|audit|test|scan)\b.{0,50}\b(feature|features|system|modules)\b",
+        r"\b(complete|full|poora|pura)\b.{0,30}\b(bot|system|feature)\b.{0,30}\b(report|audit|check)\b",
     )
     return any(re.search(pattern, value) for pattern in patterns)
 
@@ -79,10 +79,10 @@ def is_audit_request(text: str) -> bool:
 def is_24h_report_request(text: str) -> bool:
     value = normalize_request(text)
     has_window = bool(re.search(
-        r"\\b(24\\s*(hours?|hrs?|ghante|ghanta)|last\\s*day|past\\s*day|pichle\\s*24|guzre\\s*24|aakhri\\s*24)\\b",
+        r"\b(24\s*(hours?|hrs?|ghante|ghanta)|last\s*day|past\s*day|pichle\s*24|guzre\s*24|aakhri\s*24)\b",
         value,
     ))
-    has_report = bool(re.search(r"\\b(report|haal|stats|statistics|activity|summary)\\b", value))
+    has_report = bool(re.search(r"\b(report|haal|stats|statistics|activity|summary)\b", value))
     return has_window and has_report
 
 
@@ -92,14 +92,14 @@ def _is_owner(user_id: int | None) -> bool:
 
 def _owner_addressed(message: Message) -> bool:
     text = message.text or ""
-    if re.match(r"^\\s*(?:alexa\\b|@alexasuper_bot\\b)", text, re.I):
+    if re.match(r"^\s*(?:alexa\b|@alexasuper_bot\b)", text, re.I):
         return True
     reply = message.reply_to_message
     return bool(reply and reply.from_user and reply.from_user.id == message.bot.id)
 
 
 def _strip_address(text: str) -> str:
-    return re.sub(r"^\\s*(?:alexa\\b|@alexasuper_bot\\b)[\\s,!:.-]*", "", text or "", flags=re.I).strip()
+    return re.sub(r"^\s*(?:alexa\b|@alexasuper_bot\b)[\s,!:.-]*", "", text or "", flags=re.I).strip()
 
 
 async def _count(session: AsyncSession, statement) -> int:
@@ -173,7 +173,7 @@ async def build_24h_report(session: AsyncSession) -> str:
         f"💬 Messages recorded today (India date): <b>{today_messages}</b>",
         "<i>Note: the existing message counter stores calendar-day totals, not per-message timestamps, so this is not presented as an exact rolling 24h message count.</i>",
     ])
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def _router_registered(module_name: str) -> tuple[bool, str]:
@@ -280,7 +280,7 @@ async def build_feature_audit(message: Message, session: AsyncSession) -> str:
         "",
         "⚠️ <b>Important:</b> Green means the module/router or safe connectivity check is present—not that every feature has passed a real end-to-end test. Ban, mute, delete, locks, payments, and other live actions are never executed during this audit.",
     ])
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 @router.message(F.text)
