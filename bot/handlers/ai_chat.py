@@ -390,7 +390,7 @@ _SMART_REPLY_USER_COOLDOWN_SECONDS = 45.0
 
 # Track recent human participation so opportunistic replies never cut into
 # an active member-to-member conversation. Explicit Alexa calls bypass this.
-_GROUP_ACTIVITY_WINDOW_SECONDS = 90.0
+_GROUP_ACTIVITY_WINDOW_SECONDS = 25.0
 _group_recent_activity: dict[int, deque] = defaultdict(lambda: deque(maxlen=40))
 
 
