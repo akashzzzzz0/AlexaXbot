@@ -89,50 +89,82 @@ async def _stored_admin_snapshot(session: AsyncSession, group_id: int) -> str | 
 
 
 async def _find_private_group_for_admin(bot, session: AsyncSession, user_id: int):
-    """Resolve a private invite only if one saved Alexa-admin group uniquely matches its sender."""
-    rows = (await session.scalars(
-        select(GlobalSetting)
-        .where(GlobalSetting.key.like("alexa_admin_snapshot:%"))
-        .limit(100)
-    )).all()
-    matches = []
-    for row in rows:
-        try:
-            group_id = int(row.key.split(":", 1)[1])
-            parts = row.value.split("|", 4)
-            if len(parts) != 5 or parts[0] != "v1" or parts[1] not in {"administrator", "creator"}:
-                continue
-        except (TypeError, ValueError, AttributeError):
-            continue
-        group = await session.get(Group, group_id)
-        if group is None or not group.is_active:
-            continue
-        try:
-            sender_member = await bot.get_chat_member(group_id, user_id)
-            raw_status = sender_member.status
-            sender_status = str(getattr(raw_status, "value", raw_status)).lower()
-        except Exception:
-            continue
-        if sender_status in {"administrator", "creator"}:
-            matches.append(group)
-            if len(matches) > 1:
-                return None, None, "This admin is an administrator in more than one Alexa group, so the private invite link cannot be matched safely."
-    if not matches:
-        return None, None, "Alexa has no unique saved group match for this private invite link yet."
-    group = matches[0]
-    try:
-        chat = await bot.get_chat(group.id)
-        me = await bot.get_me()
-        bot_member = await bot.get_chat_member(group.id, me.id)
-        raw_status = bot_member.status
-        bot_status = str(getattr(raw_status, "value", raw_status)).lower()
-        if bot_status not in {"administrator", "creator"}:
-            return None, None, "Alexa is no longer an administrator in the matching group."
-        return group, chat, None
-    except Exception:
-        logger.exception("Could not confirm private invite candidate group_id=%s", group.id)
-        return None, None, "Telegram could not refresh the matching group's membership. Please retry."
+    """Find the one active Alexa group where the DM sender is also an admin.
 
+    Do not depend on a permission-snapshot row: older groups and Telegram
+    membership updates that were handled by the welcome router may have a
+    Group row without that auxiliary snapshot. Telegram's live membership
+    response is the source of truth for both Alexa and the submitting admin.
+    """
+    groups = (await session.scalars(
+        select(Group)
+        .where(Group.is_active.is_(True))
+        .order_by(desc(Group.updated_at))
+    )).all()
+    try:
+        me = await bot.get_me()
+    except Exception:
+        logger.exception("Could not identify Alexa while matching a private group invite")
+        return None, None, "Alexa's Telegram identity could not be checked. Please retry."
+
+    matches = []
+    for group in groups:
+        try:
+            bot_member = await bot.get_chat_member(group.id, me.id)
+            raw_bot_status = bot_member.status
+            bot_status = str(getattr(raw_bot_status, "value", raw_bot_status)).lower()
+            if bot_status not in {"administrator", "creator"}:
+                continue
+
+            sender_member = await bot.get_chat_member(group.id, user_id)
+            raw_sender_status = sender_member.status
+            sender_status = str(getattr(raw_sender_status, "value", raw_sender_status)).lower()
+            if sender_status not in {"administrator", "creator"}:
+                continue
+
+            chat = await bot.get_chat(group.id)
+            raw_chat_type = chat.type
+            chat_type = str(getattr(raw_chat_type, "value", raw_chat_type)).lower()
+            if chat_type not in {"group", "supergroup"}:
+                continue
+            matches.append((group, chat, bot_member))
+            if len(matches) > 1:
+                return None, None, (
+                    "This admin is an administrator in more than one active Alexa group. "
+                    "Telegram does not expose the target group ID from a private invite hash, "
+                    "so Alexa cannot safely choose between them."
+                )
+        except Exception:
+            # A stale/inaccessible group is not a valid candidate. Continue
+            # checking the remaining active groups rather than failing all.
+            logger.debug(
+                "Skipping private invite candidate group_id=%s after Telegram lookup failure",
+                group.id,
+                exc_info=True,
+            )
+            continue
+
+    if not matches:
+        return None, None, (
+            "No active group was found where both Alexa and this sender are currently administrators. "
+            "Confirm Alexa is still an admin and that the sender is a group admin."
+        )
+
+    group, chat, bot_member = matches[0]
+    snapshot_key = _admin_snapshot_key(group.id)
+    snapshot_row = await session.get(GlobalSetting, snapshot_key)
+    snapshot_value = _encode_admin_snapshot(bot_member, user_id)
+    if snapshot_row is None:
+        session.add(GlobalSetting(key=snapshot_key, value=snapshot_value))
+    else:
+        snapshot_row.value = snapshot_value
+
+    group.title = chat.title or group.title
+    group.username = chat.username
+    group.type = str(getattr(chat.type, "value", chat.type))
+    group.is_active = True
+    await session.flush()
+    return group, chat, None
 
 async def _insert_or_get_group(session: AsyncSession, candidate: Group) -> Group:
     try:
