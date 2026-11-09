@@ -583,7 +583,8 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
                 if match_error and "more than one" in match_error:
                     await message.answer(
                         "⚠️ <b>Private group link is ambiguous.</b>\n\n" + escape(match_error)
-                        + "\n\nSend the group's public link, or make sure Alexa has a unique saved match.",
+                        + "\n\n<b>How to fix it:</b> Open the exact target group using the same Telegram account that is sending this link. In Group Settings → Administrators, update/save Alexa's administrator permissions (you can change a permission and save it). Then send the private link here again.\n\n"
+                        + "This records the exact group from Telegram's membership update. Alexa will still verify that both you and Alexa are administrators before accepting it.",
                         parse_mode="HTML",
                     )
                     return
