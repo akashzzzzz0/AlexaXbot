@@ -1,4 +1,4 @@
-"""Open, all-member Ollama-backed chat and message reactions for ALEXA groups.
+"""Open, all-member AI chat and message reactions for ALEXA groups.
 
 ALEXA stays silent on missing configuration, API errors, or network failures.
 """
@@ -540,7 +540,7 @@ async def is_alexa_trigger(message: Message) -> bool:
     return _should_smart_reply(message, text)
 
 
-async def _ask_ollama_with_typing(
+async def _ask_ai_with_typing(
     message: Message, user_text: str, history: deque, *, smart_mode: bool = False,
     gender_style: str = "neutral"
 ) -> str:
@@ -562,18 +562,18 @@ async def _ask_ollama_with_typing(
 
     typing_task = asyncio.create_task(_typing_hint())
     try:
-        return await _ask_ollama(
+        return await _ask_ai(
             user_text, history, smart_mode=smart_mode, gender_style=gender_style
         )
     finally:
         typing_task.cancel()
 
 
-async def _ask_ollama(
+async def _ask_ai(
     user_text: str, history: deque, *, smart_mode: bool = False,
     gender_style: str = "neutral"
 ) -> str:
-    """Generate a casual reply through the shared Ollama provider."""
+    """Generate a casual reply through the configured AI provider."""
     system_instruction = (
         "You are Alexa, a lively feminine Telegram chat persona fluent in Pakistani Roman Urdu/Hinglish. "
         "Sound spontaneous, warm, playful, socially aware, and context-aware—not robotic or scripted. "
@@ -627,7 +627,7 @@ async def _ask_ollama(
         raise
     answer = answer[:700].rsplit(" ", 1)[0] if answer else ""
     if re.search(r"(?i)\ballah\b|الله|اللّٰه", answer):
-        logger.warning("Alexa Ollama response was rejected by the existing vocabulary filter")
+        logger.warning("Alexa AI response was rejected by the existing vocabulary filter")
         return ""
     return answer
 
@@ -694,7 +694,7 @@ async def alexa_ai_chat(message: Message) -> None:
             history.extend(persisted_history)
             _history_loaded.add(key)
         gender_style = _detect_user_gender_style(history, original_text or text)
-        answer = await _ask_ollama_with_typing(
+        answer = await _ask_ai_with_typing(
             message, text, history, smart_mode=smart_mode, gender_style=gender_style
         )
     except (httpx.HTTPError, ValueError, TypeError) as exc:
