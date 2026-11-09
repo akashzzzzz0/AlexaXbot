@@ -12,6 +12,7 @@ from aiogram.enums import ChatType
 from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, ChatMemberUpdated, InlineKeyboardMarkup, Message
+from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import desc, select
 from sqlalchemy.exc import IntegrityError
@@ -23,6 +24,115 @@ from bot.database.models import Group, GroupPromotionRequest, GroupPromotionOptI
 logger = logging.getLogger(__name__)
 
 router = Router(name="alexa_group_promotion")
+
+# Compact persistent snapshot of Telegram's reported administrator rights.
+# This uses the existing GlobalSetting table, so no schema migration is needed.
+_ADMIN_PERMISSION_FIELDS = (
+    ("Manage chat", "can_manage_chat"),
+    ("Change group info", "can_change_info"),
+    ("Delete messages", "can_delete_messages"),
+    ("Restrict / ban members", "can_restrict_members"),
+    ("Invite users / create invite links", "can_invite_users"),
+    ("Pin messages", "can_pin_messages"),
+    ("Promote administrators", "can_promote_members"),
+    ("Manage video chats", "can_manage_video_chats"),
+    ("Manage topics", "can_manage_topics"),
+    ("Post messages", "can_post_messages"),
+    ("Edit messages", "can_edit_messages"),
+    ("Post stories", "can_post_stories"),
+    ("Edit stories", "can_edit_stories"),
+    ("Delete stories", "can_delete_stories"),
+    ("Manage direct messages", "can_manage_direct_messages"),
+)
+
+
+def _admin_snapshot_key(group_id: int) -> str:
+    return f"alexa_admin_snapshot:{group_id}"
+
+
+def _encode_admin_snapshot(member, actor_id: int) -> str:
+    raw_status = getattr(member, "status", "unknown")
+    status = str(getattr(raw_status, "value", raw_status)).lower()
+    bits = "".join(
+        "?" if getattr(member, attr, None) is None else ("1" if bool(getattr(member, attr)) else "0")
+        for _, attr in _ADMIN_PERMISSION_FIELDS
+    )
+    return f"v1|{status}|{int(time.time())}|{int(actor_id)}|{bits}"[:256]
+
+
+def _format_admin_snapshot(value: str | None) -> str | None:
+    if not value:
+        return None
+    try:
+        version, status, stamp, actor_id, bits = value.split("|", 4)
+        if version != "v1" or len(bits) != len(_ADMIN_PERMISSION_FIELDS):
+            return None
+        observed = datetime.fromtimestamp(int(stamp), timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        lines = [
+            "<b>Permissions saved in Alexa database:</b>",
+            f"Status at capture: <b>{escape(status.title())}</b>",
+            f"Captured: <code>{observed}</code>",
+            f"Changed by Telegram user: <code>{actor_id}</code>",
+        ]
+        for (label, _), bit in zip(_ADMIN_PERMISSION_FIELDS, bits):
+            value_text = "YES" if bit == "1" else "NO" if bit == "0" else "NOT EXPOSED"
+            icon = "✅" if bit == "1" else "❌" if bit == "0" else "⚪"
+            lines.append(f"{icon} {label}: <b>{value_text}</b>")
+        return "\n".join(lines)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+async def _stored_admin_snapshot(session: AsyncSession, group_id: int) -> str | None:
+    row = await session.get(GlobalSetting, _admin_snapshot_key(group_id))
+    return _format_admin_snapshot(row.value if row else None)
+
+
+async def _find_private_group_for_admin(bot, session: AsyncSession, user_id: int):
+    """Resolve a private invite only if one saved Alexa-admin group uniquely matches its sender."""
+    rows = (await session.scalars(
+        select(GlobalSetting)
+        .where(GlobalSetting.key.like("alexa_admin_snapshot:%"))
+        .limit(100)
+    )).all()
+    matches = []
+    for row in rows:
+        try:
+            group_id = int(row.key.split(":", 1)[1])
+            parts = row.value.split("|", 4)
+            if len(parts) != 5 or parts[0] != "v1" or parts[1] not in {"administrator", "creator"}:
+                continue
+        except (TypeError, ValueError, AttributeError):
+            continue
+        group = await session.get(Group, group_id)
+        if group is None or not group.is_active:
+            continue
+        try:
+            sender_member = await bot.get_chat_member(group_id, user_id)
+            raw_status = sender_member.status
+            sender_status = str(getattr(raw_status, "value", raw_status)).lower()
+        except Exception:
+            continue
+        if sender_status in {"administrator", "creator"}:
+            matches.append(group)
+            if len(matches) > 1:
+                return None, None, "This admin is an administrator in more than one Alexa group, so the private invite link cannot be matched safely."
+    if not matches:
+        return None, None, "Alexa has no unique saved group match for this private invite link yet."
+    group = matches[0]
+    try:
+        chat = await bot.get_chat(group.id)
+        me = await bot.get_me()
+        bot_member = await bot.get_chat_member(group.id, me.id)
+        raw_status = bot_member.status
+        bot_status = str(getattr(raw_status, "value", raw_status)).lower()
+        if bot_status not in {"administrator", "creator"}:
+            return None, None, "Alexa is no longer an administrator in the matching group."
+        return group, chat, None
+    except Exception:
+        logger.exception("Could not confirm private invite candidate group_id=%s", group.id)
+        return None, None, "Telegram could not refresh the matching group's membership. Please retry."
+
 
 async def _insert_or_get_group(session: AsyncSession, candidate: Group) -> Group:
     try:
@@ -305,13 +415,18 @@ async def _send_owner_request(
     bot_status: str = "unknown",
     can_invite_users: bool = False,
     group_resolved: bool = True,
+    session: AsyncSession | None = None,
 ):
     owner_id = settings.effective_owner_id
     if not owner_id:
         return
-    permission_report = await _live_permission_report(bot, request) if group_resolved else (
-        "⚠️ <b>Detailed permissions:</b> Waiting for Alexa to be added to the group so Telegram can provide its chat ID."
+    permission_report = (
+        await _stored_admin_snapshot(session, request.group_id) if session is not None and group_resolved else None
     )
+    if not permission_report and group_resolved:
+        permission_report = await _live_permission_report(bot, request)
+    if not group_resolved:
+        permission_report = "⚠️ <b>Detailed permissions:</b> Waiting for Alexa to be matched to the exact group."
     text = (
         "📣 <b>NEW FREE GROUP PROMOTION REQUEST</b>\n\n"
         f"👥 <b>{escape(request.group_title)}</b>\n"
@@ -381,9 +496,9 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
     can_invite_users = False
 
     if is_private_invite:
-        # Bot API cannot turn an arbitrary invite hash into a chat ID. If Alexa
-        # already knows the exact link, use that chat ID; otherwise queue a
-        # reviewable request marked UNKNOWN instead of silently dropping it.
+        # Telegram cannot dereference an arbitrary private invite hash. First
+        # use an exact link saved in Alexa's DB; otherwise match only a unique
+        # known group where both Alexa and the sender are administrators.
         group = await db_session.scalar(select(Group).where(Group.invite_link == group_link))
         if group is not None:
             known_private_group_id = group.id
@@ -392,8 +507,24 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
             except Exception:
                 logger.exception("Known private invite group lookup failed for group_id=%s", group.id)
                 chat = None
-        if chat is None and known_private_group_id is None:
-            group_resolved = False
+        if chat is None:
+            matched_group, matched_chat, match_error = await _find_private_group_for_admin(
+                message.bot, db_session, message.from_user.id
+            )
+            if matched_group is not None and matched_chat is not None:
+                group, chat = matched_group, matched_chat
+                known_private_group_id = matched_group.id
+                group.invite_link = group_link
+                await db_session.flush()
+            else:
+                group_resolved = False
+                if match_error and "more than one" in match_error:
+                    await message.answer(
+                        "⚠️ <b>Private group link is ambiguous.</b>\n\n" + escape(match_error)
+                        + "\n\nSend the group's public link, or make sure Alexa has a unique saved match.",
+                        parse_mode="HTML",
+                    )
+                    return
     else:
         slug = group_link.split("t.me/", 1)[1].split("?", 1)[0].strip("/")
         if not slug or "/" in slug:
@@ -423,12 +554,25 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
             )
             return
         try:
+            requester_member = await message.bot.get_chat_member(chat.id, message.from_user.id)
+            raw_requester_status = requester_member.status
+            requester_status = str(getattr(raw_requester_status, "value", raw_requester_status)).lower()
+            if requester_status not in {"administrator", "creator"}:
+                await message.answer("⚠️ Only an administrator of this group can submit its link for verification.")
+                return
             bot_identity = await message.bot.get_me()
             bot_member = await message.bot.get_chat_member(chat.id, bot_identity.id)
             bot_status = str(getattr(bot_member.status, "value", bot_member.status)).lower()
             can_invite_users = bot_status == "creator" or (
                 bot_status == "administrator" and bool(getattr(bot_member, "can_invite_users", False))
             )
+            snapshot_key = _admin_snapshot_key(chat.id)
+            snapshot_row = await db_session.get(GlobalSetting, snapshot_key)
+            snapshot_value = _encode_admin_snapshot(bot_member, message.from_user.id)
+            if snapshot_row is None:
+                db_session.add(GlobalSetting(key=snapshot_key, value=snapshot_value))
+            else:
+                snapshot_row.value = snapshot_value
         except Exception:
             logger.exception("Group promotion verification: get_chat_member failed for chat_id=%s", chat.id)
             bot_status = "unknown"
@@ -480,7 +624,20 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
     )
     if existing:
         await db_session.commit()
-        await message.answer(_PROMOTION_NOTICE, parse_mode="HTML")
+        if group_resolved:
+            live_status, live_admin, live_invite, live_resolved = await _live_group_proof(message.bot, existing)
+            live_report = await _live_permission_report(message.bot, existing)
+            stored_report = await _stored_admin_snapshot(db_session, existing.group_id)
+            await message.answer(
+                "🔎 <b>ALEXA GROUP VERIFICATION</b>\n\n"
+                f"👥 <b>{escape(existing.group_title)}</b>\n"
+                f"👑 Alexa administrator: <b>{'YES' if live_admin else 'NO' if live_resolved else 'UNKNOWN'}</b>\n"
+                f"🔗 Invite Users: <b>{'YES' if live_invite else 'NO' if live_resolved else 'UNKNOWN'}</b>\n\n"
+                + (stored_report or live_report) + "\n\nYour group is already in the owner's review queue.",
+                parse_mode="HTML", disable_web_page_preview=True,
+            )
+        else:
+            await message.answer(_PROMOTION_NOTICE, parse_mode="HTML")
         return
 
     request = GroupPromotionRequest(
@@ -500,13 +657,34 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
     await db_session.commit()
     await db_session.refresh(request)
 
-    await message.answer(_PROMOTION_NOTICE, parse_mode="HTML")
+    if group_resolved:
+        live_status, live_admin, live_invite, live_resolved = await _live_group_proof(message.bot, request)
+        live_report = await _live_permission_report(message.bot, request)
+        stored_report = await _stored_admin_snapshot(db_session, request.group_id)
+        await message.answer(
+            "🔎 <b>ALEXA GROUP VERIFICATION</b>\n\n"
+            f"👥 <b>{escape(request.group_title)}</b>\n"
+            f"🔗 <b>Submitted link:</b> {escape(request.group_link)}\n"
+            f"🆔 Group ID: <code>{request.group_id}</code>\n"
+            f"👑 Alexa administrator: <b>{'YES' if live_admin else 'NO' if live_resolved else 'UNKNOWN'}</b>\n"
+            f"🔗 Invite Users permission: <b>{'YES' if live_invite else 'NO' if live_resolved else 'UNKNOWN'}</b>\n\n"
+            + (stored_report or live_report)
+            + "\n\n✅ The verification result has also been sent to the bot owner for approval.",
+            parse_mode="HTML", disable_web_page_preview=True,
+        )
+    else:
+        await message.answer(
+            "⚠️ <b>Link received, but the exact private group is not identified yet.</b>\n\n"
+            "Telegram does not reveal a private invite link's chat ID directly. Alexa has saved the request and will only verify it after a safe database match.",
+            parse_mode="HTML",
+        )
     await _send_owner_request(
         message.bot,
         request,
         bot_status=bot_status,
         can_invite_users=can_invite_users,
         group_resolved=group_resolved,
+        session=db_session,
     )
 
 @router.my_chat_member()
@@ -517,15 +695,15 @@ async def resolve_private_promotion_when_alexa_is_added(
 ):
     """Capture Alexa's real group ID on add and resolve a single pending private-link request."""
     if event.chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}:
-        return
+        raise SkipHandler
     if not event.from_user or event.from_user.is_bot:
-        return
+        raise SkipHandler
 
     new_status = str(
         getattr(event.new_chat_member.status, "value", event.new_chat_member.status)
     ).lower()
     if new_status in {"left", "kicked"}:
-        return
+        raise SkipHandler
 
     # Telegram supplies the real chat ID whenever Alexa is added or its
     # membership changes, even when Alexa is only a regular member. Capture
@@ -559,6 +737,13 @@ async def resolve_private_promotion_when_alexa_is_added(
         db_session.add(GlobalSetting(key=access_key, value=access_value))
     else:
         access_record.value = access_value
+    snapshot_key = _admin_snapshot_key(event.chat.id)
+    snapshot_row = await db_session.get(GlobalSetting, snapshot_key)
+    snapshot_value = _encode_admin_snapshot(event.new_chat_member, event.from_user.id)
+    if snapshot_row is None:
+        db_session.add(GlobalSetting(key=snapshot_key, value=snapshot_value))
+    else:
+        snapshot_row.value = snapshot_value
     await db_session.commit()
 
     # Resolve only a request submitted by the same Telegram account that added
@@ -580,7 +765,7 @@ async def resolve_private_promotion_when_alexa_is_added(
                 event.from_user.id,
                 event.chat.id,
             )
-        return
+        raise SkipHandler
 
     request = pending[0]
     try:
@@ -589,7 +774,7 @@ async def resolve_private_promotion_when_alexa_is_added(
         status = str(getattr(member.status, "value", member.status)).lower()
     except Exception:
         logger.exception("Automatic private promotion verification failed for chat_id=%s", event.chat.id)
-        return
+        raise SkipHandler
     can_invite = status == "creator" or (
         status == "administrator" and bool(getattr(member, "can_invite_users", False))
     )
@@ -623,41 +808,22 @@ async def resolve_private_promotion_when_alexa_is_added(
             "Automatic private promotion match conflicts with an existing request for chat_id=%s",
             event.chat.id,
         )
-        return
+        raise SkipHandler
 
     group.invite_link = request.group_link
     await db_session.commit()
     await db_session.refresh(request)
 
-    # No group button or command: Alexa posts the result and sends the owner proof.
-    try:
-        if can_invite:
-            notice = (
-                "✅ <b>Alexa group verification complete!</b>\n\n"
-                "🆔 Group ID: <code>" + str(event.chat.id) + "</code>\n"
-                "👑 Administrator status: <b>Confirmed</b>\n"
-                "🔗 Invite-link permission: <b>Confirmed</b>\n"
-                "📨 Verification proof has been sent to the owner."
-            )
-        else:
-            notice = (
-                "⚠️ <b>Alexa has joined and detected this group.</b>\n\n"
-                "🆔 Group ID: <code>" + str(event.chat.id) + "</code>\n"
-                "👑 Administrator status: <b>" + ("Confirmed" if status in {"administrator", "creator"} else "Not granted") + "</b>\n"
-                "🔗 Invite-link permission: <b>" + ("Confirmed" if can_invite else "Not granted") + "</b>\n"
-                "📨 Alexa's verification report has been sent to the owner."
-            )
-        await event.bot.send_message(event.chat.id, notice, parse_mode="HTML")
-    except Exception:
-        logger.exception("Could not post automatic verification notice in chat_id=%s", event.chat.id)
-
+    # Let the welcome router send the single canonical readiness message.
     await _send_owner_request(
         event.bot,
         request,
         bot_status=status,
         can_invite_users=can_invite,
         group_resolved=True,
+        session=db_session,
     )
+    raise SkipHandler
 
 
 @router.message(
