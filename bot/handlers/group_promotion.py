@@ -496,18 +496,30 @@ async def _send_owner_request(
             )
     else:
         permission_report = "⚠️ <b>Detailed permissions:</b> Waiting for Alexa to be matched to the exact group."
+
+    # Build the full live report for the OWNER only. The person submitting
+    # the link continues to receive the normal short acknowledgement.
+    live_status, live_admin, live_invite, live_resolved = await _live_group_proof(bot, request) if group_resolved else ("unknown", False, False, False)
+    live_report_text = (
+        "🔎 <b>GROUP PROMOTION — LIVE VERIFICATION REPORT</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"👥 <b>{escape(request.group_title)}</b>\n"
+        f"🔗 <b>Submitted link:</b> {escape(request.group_link)}\n"
+        f"🆔 <b>Group ID:</b> <code>{request.group_id if group_resolved else 'Not available'}</code>\n"
+        f"🤖 Alexa membership: <b>{escape(live_status.title()) if live_resolved else 'UNKNOWN'}</b>\n"
+        f"👑 Alexa administrator: <b>{'YES' if live_admin else 'NO' if live_resolved else 'UNKNOWN'}</b>\n"
+        f"🔗 Invite Users permission: <b>{'YES' if live_invite else 'NO' if live_resolved else 'UNKNOWN'}</b>\n\n"
+        f"{permission_report}\n\n"
+        + ("✅ <b>Verification successful. The group is eligible for owner approval.</b>"
+           if live_admin and live_invite
+           else "❌ <b>Verification did not pass.</b>" if live_resolved
+           else "⚠️ <b>Group identity is not yet confirmed.</b>")
+    )
     text = (
         "📣 <b>NEW FREE GROUP PROMOTION REQUEST</b>\n\n"
-        f"👥 <b>{escape(request.group_title)}</b>\n"
-        f"🔗 {escape(request.group_link)}\n"
+        f"{live_report_text}\n\n"
         f"👤 Requester ID: <code>{request.user_id}</code>\n"
-        f"🆔 Group ID: <code>{'Not available' if request.group_id <= _UNRESOLVED_PRIVATE_ID_BASE else request.group_id}</code>\n"
         f"📋 Request: <code>#{request.id}</code>\n\n"
-        "🔎 <b>VERIFICATION SNAPSHOT</b>\n"
-        f"{'✅' if group_resolved else '⚠️'} Group identity: <b>{'Resolved' if group_resolved else 'Not resolvable by Telegram Bot API'}</b>\n"
-        f"{'✅' if bot_status in {'administrator', 'creator'} else '❌' if group_resolved and bot_status != 'unknown' else '❔'} Alexa admin: <b>{'YES' if bot_status in {'administrator', 'creator'} else 'NO' if group_resolved and bot_status != 'unknown' else 'UNKNOWN'}</b>\n"
-        f"{'✅' if can_invite_users else '❌' if group_resolved and bot_status != 'unknown' else '❔'} Invite-link right: <b>{'YES' if can_invite_users else 'NO' if group_resolved and bot_status != 'unknown' else 'UNKNOWN'}</b>\n\n"
-        f"{permission_report}\n\n"
         "<b>Available owner actions:</b> Verify Group or Reject. After live verification succeeds, Alexa will post a verification notice in that group and show Approve & Publish."
     )
     try:
@@ -734,19 +746,7 @@ async def receive_group_promotion_link(message: Message, db_session: AsyncSessio
         live_status, live_admin, live_invite, live_resolved = await _live_group_proof(message.bot, request)
         live_report = await _live_permission_report(message.bot, request)
         stored_report = await _stored_admin_snapshot(db_session, request.group_id)
-        await message.answer(
-            "🔎 <b>ALEXA GROUP VERIFICATION</b>\n\n"
-            f"👥 <b>{escape(request.group_title)}</b>\n"
-            f"🔗 <b>Submitted link:</b> {escape(request.group_link)}\n"
-            f"🆔 Group ID: <code>{request.group_id}</code>\n"
-            f"👑 Alexa administrator: <b>{'YES' if live_admin else 'NO' if live_resolved else 'UNKNOWN'}</b>\n"
-            f"🔗 Invite Users permission: <b>{'YES' if live_invite else 'NO' if live_resolved else 'UNKNOWN'}</b>\n\n"
-            + "\n\n".join(part for part in (stored_report, live_report) if part)
-            + ("\n\nℹ️ Private invite hash was matched through Alexa's unique saved admin-group record; Telegram Bot API cannot decode it directly."
-               if is_private_invite else "")
-            + "\n\n✅ The verification result has also been sent to the bot owner for approval.",
-            parse_mode="HTML", disable_web_page_preview=True,
-        )
+        await message.answer(_PROMOTION_NOTICE, parse_mode="HTML")
     else:
         await message.answer(
             "⚠️ <b>Private link received, but verification could not identify its group.</b>\n\n"
