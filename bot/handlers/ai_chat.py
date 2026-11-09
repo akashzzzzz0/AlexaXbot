@@ -526,6 +526,16 @@ async def is_alexa_trigger(message: Message) -> bool:
     if _message_mentions_another_member(message, text):
         return False
 
+    # Continue a recent one-to-one Alexa conversation without requiring another
+    # mention, but only while the group is otherwise quiet. If multiple members
+    # are actively talking, do not mistake their conversation for Alexa's.
+    session_key = (message.chat.id, message.from_user.id)
+    if (
+        time.monotonic() < _active_until.get(session_key, 0.0)
+        and not _group_conversation_is_active(message.chat.id)
+    ):
+        return True
+
     # Recognize Alexa's name anywhere in a group message, not only at the start.
     # This makes natural phrases like "yaar Alexa zara help" trigger reliably.
     if re.search(r"(?i)(?<!\w)alexa(?!\w)", text):
@@ -590,6 +600,9 @@ async def _ask_ai(
         "Avoid chatbot clichés and filler such as 'Kya chal raha hai?', 'Aur batao?', 'Main ekdum fit!', 'How can I assist you today?', or repeated 'Hello!' unless the context genuinely calls for those exact words. " +
         "Do not reuse the same opening or sentence pattern in consecutive turns. Be conversational, relaxed, and specific—not excessively excited, flattering, formal, or theatrical. " +
         "Usually send one concise response, with no unnecessary second sentence or follow-up question. If the user asks something meaningful, answer it directly instead of prioritizing small talk. " +
+        "Treat short or incomplete messages such as 'nhi pta', 'acha', 'kyun', or 'dil mein kya?' as part of the ongoing conversation: carefully use the immediately preceding user and Alexa turns to understand what they refer to. " +
+        "Never label the user confused, upset, or joking unless their words clearly show it. Do not answer a follow-up with a random teasing line that ignores the previous turn. " +
+        "If the previous context still does not make the meaning clear, ask one simple, relevant clarification instead of inventing an interpretation or changing the topic. " +
         "If corrected for sounding robotic, acknowledge it casually and adjust. "
         "Never use the word Allah or its Arabic/Urdu spellings (الله or اللّٰه); rephrase religious invocations neutrally. "
     )
