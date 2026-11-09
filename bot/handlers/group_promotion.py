@@ -746,28 +746,41 @@ async def resolve_private_promotion_when_alexa_is_added(
         snapshot_row.value = snapshot_value
     await db_session.commit()
 
-    # Resolve only a request submitted by the same Telegram account that added
-    # or promoted Alexa; never attach another user's private invite request.
+    # A private invite submitted by any group admin can be resolved when
+    # Alexa becomes an administrator in that group. Do not attach it while
+    # Alexa is only a member; wait for the admin event and verify the sender.
+    if new_status not in {"administrator", "creator"}:
+        raise SkipHandler
+
     pending = (await db_session.scalars(
         select(GroupPromotionRequest)
         .where(
             GroupPromotionRequest.group_id <= _UNRESOLVED_PRIVATE_ID_BASE,
             GroupPromotionRequest.status == "pending",
-            GroupPromotionRequest.user_id == event.from_user.id,
         )
         .order_by(desc(GroupPromotionRequest.requested_at))
-        .limit(2)
+        .limit(30)
     )).all()
-    if len(pending) != 1:
-        if len(pending) > 1:
+    matching_requests = []
+    for candidate in pending:
+        try:
+            requester_member = await event.bot.get_chat_member(event.chat.id, candidate.user_id)
+            requester_status = str(getattr(requester_member.status, "value", requester_member.status)).lower()
+        except Exception:
+            continue
+        if requester_status in {"administrator", "creator"}:
+            matching_requests.append(candidate)
+            if len(matching_requests) > 1:
+                break
+    if len(matching_requests) != 1:
+        if len(matching_requests) > 1:
             logger.warning(
-                "Automatic private promotion match is ambiguous for requester_id=%s, chat_id=%s",
-                event.from_user.id,
+                "Private promotion link match is ambiguous among group admins for chat_id=%s",
                 event.chat.id,
             )
         raise SkipHandler
 
-    request = pending[0]
+    request = matching_requests[0]
     try:
         me = await event.bot.get_me()
         member = await event.bot.get_chat_member(event.chat.id, me.id)
