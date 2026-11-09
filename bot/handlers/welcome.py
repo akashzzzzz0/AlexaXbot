@@ -857,17 +857,10 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
     if message.text and message.text.lstrip().startswith("/"):
         raise SkipHandler
 
-    # Telegram's automatic forwards from a connected channel are not regular
-    # member posts. Exempt them before Bio Link Protection, Anti-Link, warning
-    # counters, and generic content locks so Alexa never deletes/mutes these
-    # channel announcements. Ordinary members' messages remain fully moderated.
-    if getattr(message, "is_automatic_forward", False):
-        logger.debug(
-            "Skipping moderation for automatic forward from connected channel",
-            chat_id=message.chat.id,
-            message_id=message.message_id,
-        )
-        return
+    # Do not blanket-exempt Telegram automatic channel forwards. When the
+    # group's Anti-Forward, Lock Forwards, Anti-Link, or Anti-NSFW controls are
+    # enabled, those channel-originated messages must pass through the same
+    # configured checks as other incoming content.
 
     # Resolve group/security directly as a fallback if middleware did not inject them.
     # This prevents the link-protection handler from silently skipping messages.
@@ -1310,8 +1303,17 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
     # Automatically inspect sticker artwork while Anti-NSFW is enabled.
     # Admins retain the existing exemption; API failures never trigger deletion.
     if group_security.anti_nsfw and message.sticker and not sender_is_admin:
-        if await is_nsfw_sticker(message.bot, message.sticker):
-            violations.append("nsfw_sticker")
+        try:
+            if await is_nsfw_sticker(message.bot, message.sticker):
+                violations.append("nsfw_sticker")
+        except Exception:
+            # Keep a media-scan failure from skipping the remaining moderation
+            # checks for this message.
+            logger.exception(
+                "Anti-NSFW sticker scan crashed; remaining moderation checks continue",
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+            )
 
     # Admins are exempt from NSFW/abuse screening, but all unrelated
     # moderation rules continue to apply to their messages.
