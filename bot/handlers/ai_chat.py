@@ -477,16 +477,26 @@ def _message_mentions_another_member(message: Message, text: str) -> bool:
 
 
 def _should_smart_reply(message: Message, text: str) -> bool:
-    """Join only quiet group moments; never interrupt member-to-member conversations."""
-    if _group_conversation_is_active(message.chat.id):
-        return False
-
+    """Reply to standalone greetings reliably; keep other smart replies selective."""
+    # A greeting is a clear conversation opener. Let it through even during
+    # recent group activity or smart-reply cooldowns. Replies to another member
+    # are rejected earlier by is_alexa_trigger, and explicit mentions of other
+    # members are still excluded below.
+    is_greeting = bool(_GREETING_RE.match((text or "").strip()))
+    
     # A message addressed to another member is never an Alexa invitation.
     if _message_mentions_another_member(message, text):
         return False
 
     if not _looks_like_smart_reply_candidate(text):
         return False
+
+    if is_greeting:
+        return True
+
+    if _group_conversation_is_active(message.chat.id):
+        return False
+
     now = time.monotonic()
     chat_id = message.chat.id
     user_id = message.from_user.id if message.from_user else 0
