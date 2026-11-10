@@ -16,6 +16,7 @@ from bot.database.models import User, Group, GroupMember, GroupSettings, ActionL
 from bot.keyboards.main_menu import back_button_kb
 from bot.config import settings
 from bot.utils.helpers import format_number
+from bot.services.economy_service import add_coins
 import structlog
 from html import escape
 
@@ -63,6 +64,8 @@ class OwnerStates(StatesGroup):
     waiting_purge_range = State()
     waiting_inbox_reply = State()
     waiting_inbox_direct = State()
+    waiting_coin_user = State()
+    waiting_coin_amount = State()
 
 
 def is_owner(user_id: int) -> bool:
@@ -85,6 +88,7 @@ def owner_kb(_=None) -> object:
     builder.button(text="🚀 Free Group Promotion Requests", callback_data="owner:promo_requests")
     builder.button(text="✉️ Message Selected Groups", callback_data="owner:group_message")
     builder.button(text="🎁 Referrals / Stars", callback_data="owner:referrals")
+    builder.button(text="💰 Manage Coins", callback_data="owner:coins")
     builder.button(text="🧠 Global AI Control", callback_data="owner:ai")
     builder.button(text="🌐 Global Controls", callback_data="owner:global_controls")
     builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
@@ -2218,6 +2222,97 @@ async def owner_inbox_direct_send(message: Message, state: FSMContext, db_sessio
     finally:
         await state.clear()
 
+
+
+@router.callback_query(F.data == "owner:coins")
+async def owner_coins_start(callback: CallbackQuery, state: FSMContext, **kwargs):
+    if not is_owner(callback.from_user.id) or not callback.message or callback.message.chat.type != "private":
+        await callback.answer("Not available.", show_alert=True)
+        return
+    await state.set_state(OwnerStates.waiting_coin_user)
+    await callback.message.answer(
+        "💰 <b>MANAGE USER COINS</b>\\n\\n"
+        "Send the registered user's Telegram ID or @username.\\n"
+        "Send /cancel to stop.",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(OwnerStates.waiting_coin_user)
+async def owner_coins_select_user(message: Message, state: FSMContext, db_session: AsyncSession, **kwargs):
+    if not is_owner(message.from_user.id) or message.chat.type != "private":
+        await state.clear()
+        return
+    raw = (message.text or "").strip()
+    if raw.lower() == "/cancel":
+        await state.clear()
+        await message.reply("Coin adjustment cancelled.")
+        return
+    if not raw:
+        await message.reply("Send a numeric Telegram ID or @username.")
+        return
+    if raw.lstrip("@").isdigit():
+        target = await db_session.get(User, int(raw.lstrip("@")))
+    else:
+        username = raw.lstrip("@").lower()
+        target = await db_session.scalar(select(User).where(func.lower(User.username) == username))
+    if not target:
+        await message.reply("❌ Registered user not found. Check the ID/username and try again, or send /cancel.")
+        return
+    await state.update_data(owner_coin_target_id=target.id)
+    await state.set_state(OwnerStates.waiting_coin_amount)
+    await message.reply(
+        f"👤 Selected: <b>{escape(target.first_name or 'User')}</b> (<code>{target.id}</code>)\\n"
+        "Now send the number of coins to add.",
+        parse_mode="HTML",
+    )
+
+
+@router.message(OwnerStates.waiting_coin_amount)
+async def owner_coins_add_amount(message: Message, state: FSMContext, db_session: AsyncSession, **kwargs):
+    if not is_owner(message.from_user.id) or message.chat.type != "private":
+        await state.clear()
+        return
+    raw = (message.text or "").strip()
+    if raw.lower() == "/cancel":
+        await state.clear()
+        await message.reply("Coin adjustment cancelled.")
+        return
+    try:
+        amount = int(raw)
+        if amount <= 0 or amount > 9223372036854775807:
+            raise ValueError
+    except (TypeError, ValueError):
+        await message.reply("❌ Send a positive whole number of coins, or /cancel.")
+        return
+    data = await state.get_data()
+    target_id = int(data.get("owner_coin_target_id") or 0)
+    target = await db_session.get(User, target_id)
+    if not target:
+        await state.clear()
+        await message.reply("❌ User no longer exists. Please start again from Owner Panel.")
+        return
+    try:
+        new_balance = await add_coins(
+            db_session, target.id, amount, "owner_adjustment",
+            f"Owner coin grant by {message.from_user.id}",
+        )
+        await db_session.commit()
+        await message.reply(
+            "✅ <b>COINS ADDED</b>\\n\\n"
+            f"👤 User: <b>{escape(target.first_name or 'User')}</b>\\n"
+            f"🆔 ID: <code>{target.id}</code>\\n"
+            f"➕ Added: <b>{format_number(amount)}</b> coins\\n"
+            f"💰 New balance: <b>{format_number(new_balance)}</b> coins",
+            parse_mode="HTML",
+        )
+    except Exception as exc:
+        await db_session.rollback()
+        logger.warning("Owner coin adjustment failed", user_id=target.id, error=str(exc))
+        await message.reply("❌ Could not add coins. No change was confirmed; please try again.")
+    finally:
+        await state.clear()
 
 
 @router.callback_query(F.data == "owner:referrals")
