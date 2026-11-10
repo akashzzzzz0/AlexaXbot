@@ -290,7 +290,13 @@ async def check_message_violations(
     # both kinds is still caught by both relevant controls.
     if security.anti_invite and contains_invite_link(text):
         violations.append("invite_link")
-    if security.anti_link and (contains_link(link_scan_text) or "url_entity" in entity_links):
+    # Any URL-bearing inline button is a link, even when its scheme or
+    # destination is not recognized by LINK_PATTERN (for example tg:// URLs).
+    if security.anti_link and (
+        contains_link(link_scan_text)
+        or "url_entity" in entity_links
+        or bool(button_links)
+    ):
         violations.append("link")
     if security.anti_phone and contains_phone_number(text):
         violations.append("phone_number")
@@ -304,10 +310,15 @@ async def check_message_violations(
     # channel mentions/text and must not duplicate Anti-Invite's responsibility.
     if security.anti_channel_promo and ("@" in text and any(word in text.lower() for word in ("subscribe", "join channel", "follow channel"))):
         violations.append("channel_promotion")
-    is_forwarded = bool(
-        getattr(message, "forward_origin", None)
-        or getattr(message, "is_automatic_forward", False)
-    )
+    # Telegram's current Bot API uses forward_origin. Keep the legacy
+    # fields as defensive fallbacks for older update payloads and test doubles.
+    is_forwarded = any((
+        getattr(message, "forward_origin", None),
+        getattr(message, "forward_from", None),
+        getattr(message, "forward_from_chat", None),
+        getattr(message, "forward_sender_name", None),
+        getattr(message, "is_automatic_forward", False),
+    ))
     if security.anti_forward_spam and is_forwarded:
         violations.append("forward_spam")
     sender_username = getattr(getattr(message, "from_user", None), "username", None)
