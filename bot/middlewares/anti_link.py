@@ -23,10 +23,15 @@ class AntiLinkEnforcementMiddleware(BaseMiddleware):
         if not isinstance(event, Message) or event.chat.type not in ("group", "supergroup"):
             return await handler(event, data)
 
-        # Do not moderate ALEXA's own messages. Channel posts and anonymous
-        # senders are intentionally not discarded just because from_user is absent.
+        # Exempt only ALEXA itself. Other bots can post spam too and must
+        # remain subject to the group's Anti-Link / Anti-Forward controls.
         sender = getattr(event, "from_user", None)
-        if sender is not None and getattr(sender, "is_bot", False):
+        own_bot = getattr(event, "bot", None)
+        if (
+            sender is not None
+            and own_bot is not None
+            and getattr(sender, "id", None) == getattr(own_bot, "id", None)
+        ):
             return await handler(event, data)
 
         # An anonymous administrator posts as the group itself. Telegram only
@@ -35,27 +40,34 @@ class AntiLinkEnforcementMiddleware(BaseMiddleware):
         if sender_chat is not None and sender_chat.id == event.chat.id:
             return await handler(event, data)
 
-        session = data.get("db_session")
-        if session is None:
-            logger.error(
-                "Group security could not run: database session missing",
-                group_id=event.chat.id,
-                message_id=event.message_id,
-            )
-            return await handler(event, data)
+        # DatabaseMiddleware already loads this group's settings for the
+        # current update. Reuse that exact ORM object first, avoiding a second
+        # query on the same async session before the moderation decision.
+        security = data.get("group_security")
+        if security is not None and getattr(security, "group_id", event.chat.id) != event.chat.id:
+            security = None
 
-        try:
-            security = await session.scalar(
-                select(SecuritySettings).where(SecuritySettings.group_id == event.chat.id)
-            )
-        except Exception as exc:
-            logger.exception(
-                "Group security settings lookup failed",
-                group_id=event.chat.id,
-                message_id=event.message_id,
-                error=str(exc),
-            )
-            return await handler(event, data)
+        if security is None:
+            session = data.get("db_session")
+            if session is None:
+                logger.error(
+                    "Group security could not run: database session and group settings missing",
+                    group_id=event.chat.id,
+                    message_id=event.message_id,
+                )
+                return await handler(event, data)
+            try:
+                security = await session.scalar(
+                    select(SecuritySettings).where(SecuritySettings.group_id == event.chat.id)
+                )
+            except Exception as exc:
+                logger.exception(
+                    "Group security settings lookup failed",
+                    group_id=event.chat.id,
+                    message_id=event.message_id,
+                    error=str(exc),
+                )
+                return await handler(event, data)
 
         if security is None or not (security.anti_link or security.anti_forward_spam):
             return await handler(event, data)
