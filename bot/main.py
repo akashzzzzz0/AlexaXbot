@@ -317,7 +317,7 @@ async def run_bot(bot, dp, runner):
     try:
         await dp.start_polling(
             bot,
-            allowed_updates=['message', 'callback_query', 'inline_query', 'chosen_inline_result', 'pre_checkout_query', 'chat_member', 'my_chat_member', 'chat_join_request'],
+            allowed_updates=['message', 'edited_message', 'callback_query', 'inline_query', 'chosen_inline_result', 'pre_checkout_query', 'chat_member', 'my_chat_member', 'chat_join_request'],
         )
     except asyncio.CancelledError:
         pass
@@ -408,6 +408,7 @@ async def main() -> None:
     from bot.middlewares.anti_link import AntiLinkEnforcementMiddleware
     # Apply group Anti-Link checks before feature handlers.
     dp.message.outer_middleware(AntiLinkEnforcementMiddleware())
+    dp.edited_message.outer_middleware(AntiLinkEnforcementMiddleware())
     dp.message.outer_middleware(AutoDeleteCommandMiddleware())
 
     # IMPORTANT: Middleware registration order in aiogram 3.
