@@ -117,7 +117,7 @@ async def _gemini_chat(
         },
     }
     if system_parts:
-        payload["systemInstruction"] = {"parts": [{"text": "\\n\\n".join(system_parts)}]}
+        payload["systemInstruction"] = {"parts": [{"text": "\n\n".join(system_parts)}]}
     if json_mode:
         payload["generationConfig"]["responseMimeType"] = "application/json"
 
