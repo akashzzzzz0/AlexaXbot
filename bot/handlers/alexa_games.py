@@ -5,7 +5,7 @@ from html import escape
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import Command
-from sqlalchemy import select, desc, func
+from sqlalchemy import select, desc, func, and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from bot.config import settings
@@ -66,12 +66,19 @@ async def legacy_balance(message: Message, _: callable, db_session: AsyncSession
     account = target or db_user
     wallet = await get_or_create_wallet(db_session, account.id)
     game_profile = await profile(db_session, account.id)
-    higher_kill_scores = await db_session.scalar(
-        select(func.count()).select_from(GameProfile).where(
-            GameProfile.kills > (game_profile.kills or 0)
+    # Match /leaders exactly: richest wallet first, then lower Telegram user ID.
+    richer_players = await db_session.scalar(
+        select(func.count()).select_from(Wallet).where(
+            or_(
+                Wallet.balance > (wallet.balance or 0),
+                and_(
+                    Wallet.balance == (wallet.balance or 0),
+                    Wallet.user_id < account.id,
+                ),
+            )
         )
     )
-    rank_position = int(higher_kill_scores or 0) + 1
+    rank_position = int(richer_players or 0) + 1
     status = "Dead 💀" if (game_profile.deaths or 0) > 0 else "Alive 💚"
     name = escape(account.first_name or "User")
     await message.reply(
@@ -228,7 +235,7 @@ async def rank(message: Message, db_session: AsyncSession, db_user, **kwargs):
 
 @router.message(Command("leaders"))
 async def leaders(message: Message, db_session: AsyncSession, **kwargs):
-    rows = (await db_session.execute(select(User, Wallet).join(Wallet, Wallet.user_id == User.id).order_by(desc(Wallet.balance)).limit(10))).all()
+    rows = (await db_session.execute(select(User, Wallet).join(Wallet, Wallet.user_id == User.id).order_by(desc(Wallet.balance), Wallet.user_id.asc()).limit(10))).all()
     text = "🏆 <b>Richest Players</b>\n\n" + ("\n".join(f"{i}. {escape(u.first_name)} — {format_number(w.balance or 0)} coins" for i,(u,w) in enumerate(rows,1)) if rows else "No players yet.")
     await message.reply(text, parse_mode="HTML")
 
