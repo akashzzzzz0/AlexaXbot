@@ -102,30 +102,12 @@ async def _find_private_group_for_admin(bot, session: AsyncSession, user_id: int
         .order_by(desc(Group.updated_at))
     )).all()
 
-    # If this DM sender was the person who most recently added/promoted Alexa,
-    # use that recorded group as a first-class candidate even if an older
-    # database row was not present in the active-group query.
-    preferred_group_id = None
-    # On Alexa's add/promotion event, save the group association for EVERY
-    # current admin, not only event.from_user (the person who performed the
-    # change). The admin who later sends the private link may be someone else.
-    access_record = await session.get(GlobalSetting, f"promo_admin_group:{user_id}")
-    if access_record is None or not access_record.value:
-        access_record = await session.get(GlobalSetting, f"promo_added_by:{user_id}")
-    if access_record and access_record.value:
-        try:
-            preferred_group_id = int(access_record.value.split(":", 1)[0])
-        except (TypeError, ValueError):
-            preferred_group_id = None
-    if preferred_group_id is not None:
-        preferred = await session.get(Group, preferred_group_id)
-        if preferred is not None:
-            # This actor->group record comes from Telegram's my_chat_member
-            # update and identifies the exact group where this admin most
-            # recently added/promoted Alexa. Treat it as authoritative for
-            # this private-link submission instead of scanning every other
-            # group where the same person may also be an administrator.
-            groups = [preferred]
+    # Never trust an old actor->group shortcut to identify a newly generated
+    # private invite link. Telegram does not expose a private invite hash's
+    # target chat ID. Search every active Alexa group and accept only one
+    # unique live match where BOTH Alexa and the submitting admin are admins.
+    # This remains valid days later and does not depend on the invite hash
+    # being saved before the user regenerated it.
 
     try:
         me = await bot.get_me()

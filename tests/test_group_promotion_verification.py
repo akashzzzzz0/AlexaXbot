@@ -60,7 +60,11 @@ def test_private_invite_match_uses_live_active_group_admins_without_snapshot_row
         async def scalars(self, _query):
             return FakeScalars()
 
-        async def get(self, _model, _key):
+        async def get(self, _model, key):
+            if key == "promo_admin_group:123":
+                # A four-day-old add/admin event must not expire a valid
+                # live membership match for a newly generated invite link.
+                return SimpleNamespace(value=f"{group.id}:0")
             return None
 
         def add(self, value):
@@ -123,6 +127,12 @@ def test_private_invite_match_rejects_multiple_live_admin_group_candidates():
     class FakeSession:
         async def scalars(self, _query):
             return FakeScalars()
+
+        async def get(self, _model, key):
+            if key == "promo_admin_group:123":
+                # A preferred old group must not bypass ambiguity checks.
+                return SimpleNamespace(value=f"{groups[0].id}:0")
+            return None
 
     class FakeBot:
         async def get_me(self):
