@@ -57,7 +57,7 @@ async def _send_add_group_prompt(message: Message, db_user=None, user=None):
             InlineKeyboardButton(text="📢 Updates Channel", url="https://t.me/+X5aelUHksVRlODQ8"),
         ],
         [InlineKeyboardButton(text="⭐ Get Telegram Premium + Stars", callback_data="affiliate:promo")],
-        [InlineKeyboardButton(text="📣 Free Group Promotion", callback_data="start:promotion")],
+        [InlineKeyboardButton(text="📢 Promotion Channel", url="https://t.me/+tdfGw6ekfNA4OTNk")],
     ])
     user = user or message.from_user
     first_name = escape(user.first_name or "there") if user else "there"
@@ -68,13 +68,17 @@ async def _send_add_group_prompt(message: Message, db_user=None, user=None):
         else None
     )
     caption = (
-        f"👋 Hey {first_name}! Welcome to ALEXA 💜\n\n"
-        "🛡️ Smart Moderation • 🎮 Fun Games\n"
-        "🤖 AI Chat • 🎁 Rewards & Referrals\n"
-        "📢 Free Group Promotion\n\n"
+        "💜 ALEXA — YOUR GROUP'S VIP COMPANION\n\n"
+        f"👋 Hey {first_name}!\n"
+        "Welcome to ALEXA ✨\n\n"
+        "🛡️ Smart Group Protection\n"
+        "🎮 Fun Games & Rewards\n"
+        "🤖 Smart AI Conversations\n\n"
+        "🚀 FREE GROUP PROMOTION\n"
+        "Want more people to discover your group?\n"
+        "Add ALEXA to your group, make her an admin, and send your group link here for free promotion.\n\n"
         + (f"🔗 Your personal referral link:\n{referral_link}\n\n" if referral_link else "")
-        + "🎁 Invite friends with your link and earn Stars toward a 3-month Telegram Premium reward!\n\n"
-        "🚀 Add ALEXA to your group and grant admin permissions to unlock the full experience.\n\n"
+        + "🎁 Invite friends and earn Stars toward a 3-month Telegram Premium reward!\n\n"
         "👇 Choose an option below to get started."
     )
     # Use ordinary Unicode emoji and plain text. This avoids invalid custom-emoji
