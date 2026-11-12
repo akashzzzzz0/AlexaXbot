@@ -266,6 +266,14 @@ async def on_startup(bot) -> None:
     except Exception as exc:
         logger.warning('Alexa World Events scheduler could not start', error=str(exc))
 
+    try:
+        from bot.services.daily_group_promotion import start_daily_promotion_scheduler
+        if db_ok:
+            start_daily_promotion_scheduler(bot)
+            logger.info('Alexa daily group promotion scheduler started (10:00 and 19:00 Asia/Karachi)')
+    except Exception as exc:
+        logger.warning('Alexa daily group promotion scheduler could not start', error=str(exc))
+
     # Notify the configured owner privately whenever ALEXA starts successfully.
     owner_id = settings.effective_owner_id
     if owner_id:
@@ -288,6 +296,11 @@ async def on_shutdown(bot, runner) -> None:
     try:
         from bot.handlers.world_events import stop_event_scheduler
         await stop_event_scheduler()
+    except Exception:
+        pass
+    try:
+        from bot.services.daily_group_promotion import stop_daily_promotion_scheduler
+        await stop_daily_promotion_scheduler()
     except Exception:
         pass
     try:
