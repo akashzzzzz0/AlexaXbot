@@ -237,7 +237,7 @@ async def rank(message: Message, db_session: AsyncSession, db_user, **kwargs):
 @router.message(Command("leaders"))
 async def leaders(message: Message, db_session: AsyncSession, **kwargs):
     rows = (await db_session.execute(select(User, Wallet).join(Wallet, Wallet.user_id == User.id).order_by(desc(Wallet.balance)).limit(10))).all()
-    text = "🏆 <b>Richest Players</b>\n\n" + ("\n".join(f"{i}. {escape(u.first_name)} — {format_number(w.balance or 0)} coins" for i,(u,w) in enumerate(rows,1)) if rows else "No players yet.")
+    text = "🏆 <b>Richest Players</b>\n\n" + ("\n".join((f'<tg-emoji emoji-id="6095957657145840116">👑</tg-emoji> {escape(u.first_name)} — {format_number(w.balance or 0)} coins' if i == 1 else f"{i}. {escape(u.first_name)} — {format_number(w.balance or 0)} coins") for i,(u,w) in enumerate(rows,1)) if rows else "No players yet.")
     await message.reply(text, parse_mode="HTML")
 
 @router.message(Command("toprich"))
