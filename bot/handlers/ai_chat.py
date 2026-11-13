@@ -744,7 +744,8 @@ async def alexa_ai_chat(message: Message) -> None:
     # Group reactions are handled independently for all suitable messages.
     try:
         mood_emoji = await _chat_mood_emoji(message.bot, original_text or text)
-        await message.reply(f"{html.escape(answer)}{(\" \" + mood_emoji) if mood_emoji else \"\"}", parse_mode="HTML")
+        mood_suffix = f" {mood_emoji}" if mood_emoji else ""
+        await message.reply(f"{html.escape(answer)}{mood_suffix}", parse_mode="HTML")
     except Exception as exc:
         # Telegram reply failures should not interrupt bot polling, but must be visible in host logs.
         logger.warning("Telegram rejected Alexa AI reply for chat_id=%s: %s", message.chat.id, type(exc).__name__)
