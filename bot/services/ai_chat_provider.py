@@ -3,6 +3,7 @@
 Provider keys are read only from private runtime settings/environment. The
 existing chat handlers, prompts, history, and reply formatting remain unchanged.
 """
+import asyncio
 import os
 
 import httpx
@@ -153,43 +154,31 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
     """Try Ollama first, OpenAI second, and Gemini last when earlier providers fail."""
     provider_errors = []
 
-    try:
-        return await ollama_chat(
-            messages,
-            system=system,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            json_mode=json_mode,
-        )
-    except Exception as exc:
-        provider_errors.append(f"ollama:{type(exc).__name__}")
-
-    if _openai_api_key():
+    # Bound each provider attempt so a slow cloud endpoint cannot leave Alexa
+    # typing indefinitely. A timed-out request is cancelled before fallback.
+    providers = [
+        ("ollama", ollama_chat, True, 14.0),
+        ("openai", _openai_chat, bool(_openai_api_key()), 14.0),
+        ("gemini", _gemini_chat, bool(get_gemini_api_key()), 14.0),
+    ]
+    for name, provider, configured, timeout_seconds in providers:
+        if not configured:
+            provider_errors.append(f"{name}:not_configured")
+            continue
         try:
-            return await _openai_chat(
-                messages,
-                system=system,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                json_mode=json_mode,
+            return await asyncio.wait_for(
+                provider(
+                    messages,
+                    system=system,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    json_mode=json_mode,
+                ),
+                timeout=timeout_seconds,
             )
+        except asyncio.TimeoutError:
+            provider_errors.append(f"{name}:timeout")
         except Exception as exc:
-            provider_errors.append(f"openai:{type(exc).__name__}")
-    else:
-        provider_errors.append("openai:not_configured")
-
-    if get_gemini_api_key():
-        try:
-            return await _gemini_chat(
-                messages,
-                system=system,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                json_mode=json_mode,
-            )
-        except Exception as exc:
-            provider_errors.append(f"gemini:{type(exc).__name__}")
-    else:
-        provider_errors.append("gemini:not_configured")
+            provider_errors.append(f"{name}:{type(exc).__name__}")
 
     raise RuntimeError("all_ai_providers_failed:" + ",".join(provider_errors))
