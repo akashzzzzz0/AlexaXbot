@@ -1,6 +1,5 @@
-"""Private acknowledgements and activation for Telegram group join requests.
+"""Private acknowledgements and owner-only auto-approval for group join requests.
 
-This handler never posts to the group and never approves/rejects a request.
 The existing welcome handler remains responsible for greeting a member only
 after Telegram reports the actual JOIN_TRANSITION.
 """
@@ -29,8 +28,7 @@ def consume_join_request_dm(chat_id: int, user_id: int) -> bool:
 
 @router.chat_join_request()
 async def acknowledge_join_request(request: ChatJoinRequest, **kwargs):
-    """DM the requester using Telegram's temporary user_chat_id permission."""
-    """Auto-approve only the configured bot owner; preserve normal member verification."""
+    """Auto-approve the configured owner; DM other requesters for verification."""
     owner_id = settings.effective_owner_id
     if owner_id and request.from_user.id == owner_id:
         try:
