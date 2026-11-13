@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from bot.config import settings
 from bot.database.models import User, Wallet, Transaction, Economy, GameProfile, UserShopItem, ShopItem
-from bot.services.user_service import get_or_create_wallet, get_or_create_economy
+from bot.services.user_service import get_or_create_wallet, get_or_create_economy, add_xp
 from bot.services.economy_service import add_coins, deduct_coins
 from bot.utils.helpers import parse_duration, format_number, format_duration, calculate_level, xp_for_level
 
@@ -136,7 +136,24 @@ async def kill(message: Message, db_session: AsyncSession, db_user, **kwargs):
     killer.kills = (killer.kills or 0) + 1
     victim.deaths = (victim.deaths or 0) + 1
     killer.last_kill_at = now
-    await message.reply(f"🎮 {escape(target.first_name)} was defeated in the virtual game. Kill score +1.")
+
+    # Reward only a valid, successful kill; protected/invalid attempts never pay.
+    await add_coins(
+        db_session, db_user.id, 125, "kill_reward",
+        f"Virtual kill reward for defeating user {target.id}",
+    )
+    await add_xp(db_session, db_user.id, 7)
+
+    killer_name = escape(db_user.first_name or "Player")
+    victim_name = escape(target.first_name or "Player")
+    await message.reply(
+        f'<tg-emoji emoji-id="5974048815789903111">👤</tg-emoji> '
+        f'<b>{killer_name}</b> killed <b>{victim_name}</b> 🤭!\\n'
+        f'<tg-emoji emoji-id="6325444137797554944">💰</tg-emoji> '
+        f'<b>Earned:</b> 125 coins, '
+        f'<tg-emoji emoji-id="5264923082128127803">⚪</tg-emoji> <b>+7 XP</b>',
+        parse_mode="HTML",
+    )
 
 @router.message(Command("rob"))
 async def rob(message: Message, db_session: AsyncSession, db_user, **kwargs):
