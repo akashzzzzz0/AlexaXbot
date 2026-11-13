@@ -5,6 +5,7 @@ existing chat handlers, prompts, history, and reply formatting remain unchanged.
 """
 import asyncio
 import os
+import re
 
 import httpx
 
@@ -225,6 +226,19 @@ async def _gemini_chat(
     return answer
 
 
+def _safe_provider_error(name: str, exc: Exception) -> str:
+    """Keep HTTP diagnostics useful without logging credentials or request URLs."""
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    detail = str(exc).splitlines()[0][:220]
+    detail = re.sub(r"(?i)(api[_-]?key|authorization|bearer)" + chr(92) + "s*[:=]" + chr(92) + "s*[^ ,;]+", "[REDACTED]", detail)
+    detail = re.sub(r"AIza[0-9A-Za-z_-]{20,}", "[REDACTED]", detail)
+    detail = re.sub(r"(?i)https?://\S+", "[URL]", detail)
+    if status is not None:
+        return f"{name}:HTTP_{status}:{detail}"
+    return f"{name}:{type(exc).__name__}:{detail}"
+
+
 async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False):
     """Try Groq first, then Gemini; retain Ollama/OpenAI as later fallbacks."""
     provider_errors = []
@@ -261,6 +275,6 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
         except asyncio.TimeoutError:
             provider_errors.append(f"{name}:timeout")
         except Exception as exc:
-            provider_errors.append(f"{name}:{type(exc).__name__}")
+            provider_errors.append(_safe_provider_error(name, exc))
 
     raise RuntimeError("all_ai_providers_failed:" + ",".join(provider_errors))
