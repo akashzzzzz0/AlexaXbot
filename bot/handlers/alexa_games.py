@@ -270,12 +270,12 @@ async def leaders(message: Message, db_session: AsyncSession, **kwargs):
         if i in medal_ids:
             fallback = {1: "🥇", 2: "🥈", 3: "🥉"}[i]
             position = f'<tg-emoji emoji-id="{medal_ids[i]}">{fallback}</tg-emoji>'
-            entries.append(f'{position} ㅤ{name} _ {amount} {coin}')
+            entries.append(f'{position} ㅤ{name}' + (' <tg-emoji emoji-id="6093786598422353987">👑</tg-emoji>' if i == 1 else '') + f' _ {amount} {coin}')
         else:
             entries.append(f'{i:02d}. ㅤ{name} _ {amount} {coin}')
 
     heading = (
-        '<b>ㅤㅤ👑 𝗔𝗟𝗘𝗫𝗔 𝗪𝗘𝗔𝗟𝗧𝗛 𝗟𝗘𝗚𝗘𝗡𝗗𝗦 👑ㅤㅤ</b>\n'
+        '<b>ㅤㅤ<tg-emoji emoji-id="6095957657145840116">👑</tg-emoji> 𝗔𝗟𝗘𝗫𝗔 𝗪𝗘𝗔𝗟𝗧𝗛 𝗟𝗘𝗚𝗘𝗡𝗗𝗦 <tg-emoji emoji-id="6095957657145840116">👑</tg-emoji>ㅤㅤ</b>\n'
         '<b>ㅤㅤㅤㅤ𝗧𝗢𝗣 𝟭𝟬 𝗣𝗟𝗔𝗬𝗘𝗥𝗦ㅤㅤㅤㅤ</b>'
     )
     body = "\n\n".join(entries) if entries else "No players yet."
