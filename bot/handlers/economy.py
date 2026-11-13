@@ -139,7 +139,7 @@ async def process_withdraw(message: Message, _: callable, db_session: AsyncSessi
 
 
 #  /transfer 
-@router.message(Command('transfer'))
+@router.message(Command('transfer', 'give'))
 async def cmd_transfer(message: Message, _: callable, state: FSMContext, **kwargs):
     await state.set_state(EconomyStates.waiting_transfer_user)
     await message.reply(_('transfer_enter_user'), parse_mode='HTML')

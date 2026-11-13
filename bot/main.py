@@ -94,7 +94,7 @@ async def configure_command_visibility(bot) -> None:
         ("roulette", "Play roulette"), ("rullet", "Play roulette"),
         ("ludo", "Play Ludo race"), ("bingo", "Play Bingo"),
         ("duel", "Challenge a player"),
-        ("bal", "View game balance"), ("kill", "Virtual game action"),
+        ("bal", "View game balance"), ("give", "Send coins to a user"), ("kill", "Virtual game action"),
         ("rob", "Try a virtual robbery"), ("revive", "Revive game profile"),
         ("protect", "Buy virtual protection"), ("unprotect", "Remove protection"),
         ("rank", "View your rank"), ("leaders", "View player leaderboard"),
