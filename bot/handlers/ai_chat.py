@@ -438,7 +438,7 @@ def _looks_like_smart_reply_candidate(text: str) -> bool:
 
     # Questions and direct requests are strong candidates.
     if re.search(
-        r"[?؟]|\\b(?:kya|kyun|kaise|kaisa|kaisi|kab|kahan|kon|kaun|who|what|why|how|when|where|which|anyone|suggest|opinion|batao|help|madad|guide)\\b",
+        r"[?؟]|\b(?:kya|kyun|kaise|kaisa|kaisi|kab|kahan|kon|kaun|who|what|why|how|when|where|which|anyone|suggest|opinion|batao|help|madad|guide)\b",
         value,
         re.IGNORECASE,
     ):
@@ -446,8 +446,8 @@ def _looks_like_smart_reply_candidate(text: str) -> bool:
 
     # Allow meaningful standalone updates and statements when the group is quiet.
     # Existing activity guards and cooldowns prevent Alexa from flooding chats.
-    words = re.findall(r"[\\w'-]+", value, flags=re.UNICODE)
-    return len(words) >= 4 and bool(re.search(r"[a-zA-Z\\u0900-\\u097F]", value))
+    words = re.findall(r"[\w'-]+", value, flags=re.UNICODE)
+    return len(words) >= 4 and bool(re.search(r"[a-zA-Z\u0900-\u097F]", value))
 
 
 def _smart_group_reply_fallback(user_text: str) -> str:
