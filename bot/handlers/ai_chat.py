@@ -485,7 +485,7 @@ async def is_alexa_trigger(message: Message) -> bool:
     if await _explicitly_mentions_alexa(message):
         return True
 
-    return bool(re.search(r"(?i)(?<!\\w)alexa(?!\\w)", text))
+    return bool(re.search(r"(?i)(?<!\w)alexa(?!\w)", text))
 
 
 async def _ask_ai_with_typing(
