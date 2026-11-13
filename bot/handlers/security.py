@@ -435,6 +435,16 @@ async def cmd_sticker_approval(message: Message, db_session: AsyncSession = None
         await message.reply("Reply to a member's message with /approve or /free to allow stickers, or /unapprove to revoke; a numeric user ID also works.")
         return
 
+    # Admins and the group owner are already exempt from member sticker approval.
+    try:
+        target_membership = await message.bot.get_chat_member(message.chat.id, target.id)
+        if target_membership.status in ("administrator", "creator"):
+            await message.reply("👑 <b>ADMIN EXEMPT</b>\n\nThis user is already an admin. No approval needed! ⚜️", parse_mode="HTML")
+            return
+    except Exception:
+        # Keep the existing member flow if Telegram cannot verify the target role.
+        pass
+
     # GroupMember.user_id references users.id, so ensure the target exists
     # before creating or updating the sticker approval record.
     db_target = await db_session.get(User, target.id)
