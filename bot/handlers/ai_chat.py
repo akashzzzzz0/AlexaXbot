@@ -1,6 +1,7 @@
 """Open, all-member AI chat and message reactions for ALEXA groups.
 
-ALEXA stays silent on missing configuration, API errors, or network failures.
+Provider outages are reported briefly to the sender instead of silently
+ending an otherwise active conversation.
 """
 import asyncio
 import html
@@ -25,6 +26,12 @@ from bot.services.ai_chat_provider import ai_chat_completion
 
 router = Router(name="alexa_ai_chat")
 logger = logging.getLogger(__name__)
+
+
+class AIProviderUnavailable(RuntimeError):
+    """Raised when every configured AI provider fails for a chat turn."""
+
+
 _missing_key_logged = False
 _conversations = defaultdict(lambda: deque(maxlen=12))
 _HISTORY_DB = Path("alexa_chat_history.db")
@@ -620,11 +627,12 @@ async def _ask_ai(
             temperature=0.72,
             max_tokens=64,
         )
-    except RuntimeError as exc:
-        if str(exc) == "ollama_not_configured":
-            logger.error("Alexa AI chat is disabled because OLLAMA_API_KEY is missing from runtime configuration")
-            return ""
-        raise
+    except Exception as exc:
+        logger.warning(
+            "Alexa AI provider chain failed for this turn",
+            extra={"error_type": type(exc).__name__},
+        )
+        raise AIProviderUnavailable("all_ai_providers_failed") from exc
     # Truncate without dropping the final complete word on every response.
     answer = answer[:700].strip() if answer else ""
     if re.search(r"(?i)\ballah\b|الله|اللّٰه", answer):
@@ -688,6 +696,7 @@ async def alexa_ai_chat(message: Message) -> None:
     if message.chat.type != ChatType.PRIVATE and not smart_mode:
         _active_until[key] = time.monotonic() + _SESSION_SECONDS
     history = _conversations[key]
+    provider_failed = False
     try:
         # Reload from disk every turn: previous chats survive restarts and deployments.
         if key not in _history_loaded:
@@ -700,6 +709,12 @@ async def alexa_ai_chat(message: Message) -> None:
         answer = await _ask_ai_with_typing(
             message, text, history, smart_mode=smart_mode, gender_style=gender_style
         )
+    except AIProviderUnavailable:
+        provider_failed = True
+        answer = random.choice((
+            "Mera connection abhi slow hai—thodi der baad dobara bolo.",
+            "Abhi reply generate nahi ho paaya. Ek baar phir message karna.",
+        ))
     except (httpx.HTTPError, ValueError, TypeError) as exc:
         logger.warning("Alexa AI reply failed for chat_id=%s: %s", message.chat.id, type(exc).__name__)
         # Basic greetings should never be silently ignored just because Ollama is
@@ -732,15 +747,16 @@ async def alexa_ai_chat(message: Message) -> None:
     if answer.strip().casefold() == "__ignore__":
         return
 
-    history.append(("user", text))
-    history.append(("model", answer))
-    try:
-        await asyncio.to_thread(
-            _history_db_save, message.chat.id, message.from_user.id, text, answer
-        )
-    except Exception:
-        # Chat should still work if the history file is temporarily unavailable.
-        pass
+    if not provider_failed:
+        history.append(("user", text))
+        history.append(("model", answer))
+        try:
+            await asyncio.to_thread(
+                _history_db_save, message.chat.id, message.from_user.id, text, answer
+            )
+        except Exception:
+            # Chat should still work if the history file is temporarily unavailable.
+            pass
     # Group reactions are handled independently for all suitable messages.
     try:
         # The model sometimes adds ordinary Unicode emojis despite the prompt.
