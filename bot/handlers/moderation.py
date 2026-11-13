@@ -640,7 +640,7 @@ async def cmd_kickme(message: Message, bot: Bot, db_session: AsyncSession, **kwa
     )
     if success:
         name = mention_user(user.id, safe_username(user))
-        await message.answer(f"😂 As your wish, {name}!\\n🚪 <b>GET OUT!</b>", parse_mode="HTML")
+        await message.answer(f"😂 As your wish, {name}!\n🚪 <b>GET OUT!</b>", parse_mode="HTML")
     else:
         await message.reply("❌ Couldn't remove you. Alexa may need Ban Users permission.")
 
