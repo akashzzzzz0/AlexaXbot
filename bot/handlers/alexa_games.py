@@ -12,7 +12,7 @@ from bot.config import settings
 from bot.database.models import User, Wallet, Transaction, Economy, GameProfile, UserShopItem, ShopItem
 from bot.services.user_service import get_or_create_wallet, get_or_create_economy
 from bot.services.economy_service import add_coins, deduct_coins
-from bot.utils.helpers import parse_duration, format_number, format_duration
+from bot.utils.helpers import parse_duration, format_number, format_duration, calculate_level, xp_for_level
 
 router = Router()
 
@@ -65,6 +65,13 @@ async def legacy_balance(message: Message, _: callable, db_session: AsyncSession
         return
     account = target or db_user
     wallet = await get_or_create_wallet(db_session, account.id)
+    economy = await get_or_create_economy(db_session, account.id)
+    total_xp = int(economy.total_xp or 0)
+    level, _, _ = calculate_level(total_xp)
+    level_start_xp = 0 if level == 1 else xp_for_level(level)
+    next_level_xp = xp_for_level(level + 1)
+    level_progress = max(0, total_xp - level_start_xp)
+    level_required = max(1, next_level_xp - level_start_xp)
     game_profile = await profile(db_session, account.id)
     higher_kill_scores = await db_session.scalar(
         select(func.count()).select_from(GameProfile).where(
@@ -78,6 +85,7 @@ async def legacy_balance(message: Message, _: callable, db_session: AsyncSession
         f"👤 <b>Name:</b> {name}\n"
         f"💰 <b>Balance:</b> {format_number(wallet.balance or 0)} coins\n"
         f"🏆 <b>Rank:</b> {rank_position}\n"
+        f"⚪ <b>Level {level}:</b> {format_number(level_progress)}/{format_number(level_required)} XP\n"
         f"⚔️ <b>Kills:</b> {game_profile.kills or 0}\n"
         f"💜 <b>Status:</b> {status}",
         parse_mode="HTML",
