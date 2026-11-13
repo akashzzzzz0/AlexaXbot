@@ -1,6 +1,7 @@
 from typing import Any, Awaitable, Callable
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Message, CallbackQuery
+from bot.config import settings
 
 
 class AdminActionMiddleware(BaseMiddleware):
@@ -34,6 +35,12 @@ class AdminActionMiddleware(BaseMiddleware):
             command = text.split(None, 1)[0].split("@", 1)[0].lstrip("/").lower()
             protected = command in self.commands
         if not protected:
+            return await handler(event, data)
+
+        # The configured bot owner may issue protected moderation commands and
+        # use moderation controls without being a Telegram admin in each group.
+        # Telegram still enforces ALEXA's own permissions when an action runs.
+        if settings.effective_owner_id and actor.id == settings.effective_owner_id:
             return await handler(event, data)
 
         # Telegram represents an anonymous group admin as sender_chat == the group.
