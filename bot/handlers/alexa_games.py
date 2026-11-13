@@ -239,35 +239,41 @@ async def leaders(message: Message, db_session: AsyncSession, **kwargs):
     rows = (await db_session.execute(select(User, Wallet).join(Wallet, Wallet.user_id == User.id).order_by(desc(Wallet.balance)).limit(10))).all()
 
     medal_ids = {
-        1: ("6265004494719816749", "🥇"),
-        2: ("5447203607294265305", "🥈"),
-        3: ("5453902265922376865", "🥉"),
+        1: "6265004494719816749",
+        2: "5447203607294265305",
+        3: "5453902265922376865",
     }
     entries = []
     for i, (u, w) in enumerate(rows, 1):
         name = escape(u.first_name or "Player")
         coins = format_number(w.balance or 0)
         coin = '<tg-emoji emoji-id="6267068789146260253">💰</tg-emoji>'
+
         if i == 1:
             crown = '<tg-emoji emoji-id="6095957657145840116">👑</tg-emoji>'
-            gold_medal = '<tg-emoji emoji-id="6265004494719816749">🥇</tg-emoji>'
+            medal = f'<tg-emoji emoji-id="{medal_ids[1]}">🥇</tg-emoji>'
             entries.append(
-                f'<b>{crown} KING OF COINS</b>\\n'
-                f'{gold_medal} <b>{name}</b>\\n'
+                f'<b>{crown} KING OF COINS</b>\n'
+                f'{medal} <b>{name}</b>\n'
                 f'{coin} <b>{coins} coins</b>'
             )
-        elif i in medal_ids:
-            medal_id, fallback = medal_ids[i]
-            medal = f'<tg-emoji emoji-id="{medal_id}">{fallback}</tg-emoji>'
-            entries.append(f'{medal} <b>{name}</b>\\n{coin} {coins} coins')
+        elif i in (2, 3):
+            fallback = "🥈" if i == 2 else "🥉"
+            medal = f'<tg-emoji emoji-id="{medal_ids[i]}">{fallback}</tg-emoji>'
+            entries.append(
+                f'{medal} <b>{name}</b>\n'
+                f'{coin} <b>{coins} coins</b>'
+            )
         else:
-            entries.append(f'<b>{i:02d}. {name}</b>\\n{coin} {coins} coins')
+            entries.append(
+                f'<b>{i:02d}.</b> {name}  ·  {coin} <b>{coins}</b>'
+            )
 
     sparkle = '<tg-emoji emoji-id="6325413811033477368">✨</tg-emoji>'
-    heading = f'{sparkle} <b>ALEXA ROYALS</b> {sparkle}\\n<i>THE RICHEST PLAYERS</i>'
-    body = "\\n\\n".join(entries) if entries else "No players yet."
-    footer = '\\n\\n<tg-emoji emoji-id="6086954744268460848">🔥</tg-emoji> <i>RULE THE LEADERBOARD</i>'
-    await message.reply(f"{heading}\\n\\n{body}{footer}", parse_mode="HTML")
+    heading = f'{sparkle} <b>ALEXA ROYALS</b> {sparkle}\n<i>THE RICHEST PLAYERS</i>'
+    body = "\n\n".join(entries) if entries else "No players yet."
+    footer = '\n\n<tg-emoji emoji-id="6086954744268460848">🔥</tg-emoji> <i>RULE THE LEADERBOARD</i>'
+    await message.reply(f"{heading}\n\n{body}{footer}", parse_mode="HTML")
 
 @router.message(Command("toprich"))
 async def toprich(message: Message, db_session: AsyncSession, **kwargs):
