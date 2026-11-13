@@ -148,7 +148,7 @@ async def kill(message: Message, db_session: AsyncSession, db_user, **kwargs):
     victim_name = escape(target.first_name or "Player")
     await message.reply(
         f'<tg-emoji emoji-id="5974048815789903111">👤</tg-emoji> '
-        f'<b>{killer_name}</b> killed <b>{victim_name}</b> 🤭!\\n'
+        f'<b>{killer_name}</b> killed <b>{victim_name}</b> 🤭!\n'
         f'<tg-emoji emoji-id="6325444137797554944">💰</tg-emoji> '
         f'<b>Earned:</b> 125 coins, '
         f'<tg-emoji emoji-id="5264923082128127803">⚪</tg-emoji> <b>+7 XP</b>',
