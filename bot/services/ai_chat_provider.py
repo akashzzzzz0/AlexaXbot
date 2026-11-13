@@ -231,7 +231,7 @@ def _safe_provider_error(name: str, exc: Exception) -> str:
     response = getattr(exc, "response", None)
     status = getattr(response, "status_code", None)
     detail = str(exc).splitlines()[0][:220]
-    detail = re.sub(r"(?i)(api[_-]?key|authorization|bearer)\\s*[:=]\\s*[^ ,;]+", r"\\1=[REDACTED]", detail)
+    detail = re.sub(r"(?i)(api[_-]?key|authorization|bearer)" + chr(92) + "s*[:=]" + chr(92) + "s*[^ ,;]+", "[REDACTED]", detail)
     detail = re.sub(r"AIza[0-9A-Za-z_-]{20,}", "[REDACTED]", detail)
     detail = re.sub(r"(?i)https?://\S+", "[URL]", detail)
     if status is not None:
