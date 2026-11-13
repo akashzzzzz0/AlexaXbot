@@ -320,7 +320,7 @@ _bot_username = None
 # Opportunistic group replies are deliberately rate-limited to avoid flooding chats.
 _smart_reply_last_check: dict[int, float] = {}
 _smart_reply_user_last_check: dict[tuple[int, int], float] = {}
-_SMART_REPLY_GROUP_COOLDOWN_SECONDS = 15.0
+_SMART_REPLY_GROUP_COOLDOWN_SECONDS = 60.0
 _SMART_REPLY_USER_COOLDOWN_SECONDS = 45.0
 
 # Track recent human participation so opportunistic replies never cut into
@@ -425,37 +425,33 @@ def _message_mentions_another_member(message: Message, text: str) -> bool:
 
 
 def _should_smart_reply(message: Message, text: str) -> bool:
-    """Reply to standalone greetings reliably; keep other smart replies selective."""
-    # A greeting is a clear conversation opener. Let it through even during
-    # recent group activity or smart-reply cooldowns. Replies to another member
-    # are rejected earlier by is_alexa_trigger, and explicit mentions of other
-    # members are still excluded below.
+    """Allow unaddressed smart replies at most once per group cooldown window."""
     is_greeting = bool(_GREETING_RE.match((text or "").strip()))
-    
+
     # A message addressed to another member is never an Alexa invitation.
     if _message_mentions_another_member(message, text):
         return False
-
     if not _looks_like_smart_reply_candidate(text):
-        return False
-
-    if is_greeting:
-        return True
-
-    if _group_conversation_is_active(message.chat.id):
         return False
 
     now = time.monotonic()
     chat_id = message.chat.id
     user_id = message.from_user.id if message.from_user else 0
     user_key = (chat_id, user_id)
-    last_group_check = _smart_reply_last_check.get(chat_id)
-    if last_group_check is not None and now - last_group_check < _SMART_REPLY_GROUP_COOLDOWN_SECONDS:
+
+    # The cooldown is independent for each group. During it, only a direct
+    # Alexa call/mention/reply can reach the AI handler; smart replies stay silent.
+    last_group_reply = _smart_reply_last_check.get(chat_id)
+    if last_group_reply is not None and now - last_group_reply < _SMART_REPLY_GROUP_COOLDOWN_SECONDS:
         return False
+
+    # Greetings may open a quiet conversation, but never bypass the group cooldown.
+    if not is_greeting and _group_conversation_is_active(chat_id):
+        return False
+
     last_user_check = _smart_reply_user_last_check.get(user_key)
     if last_user_check is not None and now - last_user_check < _SMART_REPLY_USER_COOLDOWN_SECONDS:
         return False
-    _smart_reply_last_check[chat_id] = now
     _smart_reply_user_last_check[user_key] = now
     return True
 
@@ -774,9 +770,11 @@ async def alexa_ai_chat(message: Message) -> None:
         # Telegram reply failures should not interrupt bot polling, but must be visible in host logs.
         logger.warning("Telegram rejected Alexa AI reply for chat_id=%s: %s", message.chat.id, type(exc).__name__)
         return
-    # A successful unaddressed group reply starts a short sender-specific
-    # conversation window, so the member can continue naturally without tags.
+    # Every successful group reply starts a per-group 60-second cooldown.
+    # Explicit calls still bypass this gate; unaddressed smart replies do not.
     if message.chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}:
-        _active_until[key] = time.monotonic() + _SESSION_SECONDS
+        replied_at = time.monotonic()
+        _smart_reply_last_check[message.chat.id] = replied_at
+        _active_until[key] = replied_at + _SESSION_SECONDS
     asyncio.create_task(_maybe_send_sticker(message, text))
 
