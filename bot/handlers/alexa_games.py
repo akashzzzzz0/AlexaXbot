@@ -107,7 +107,7 @@ async def protect(message: Message, _: callable, db_session: AsyncSession, db_us
         return
     row = await profile(db_session, db_user.id)
     row.protection_until = datetime.now(timezone.utc) + duration
-    await message.reply(f"🛡 Protection enabled for {format_duration(duration_seconds)}. Cost: {cost} coins (per started day).")
+    await message.reply(f'<tg-emoji emoji-id="6086672466132865380">🛡</tg-emoji> Protection enabled for {format_duration(duration_seconds)}. Cost: {cost} coins (per started day).', parse_mode="HTML")
 
 @router.message(Command("unprotect"))
 async def unprotect(message: Message, db_session: AsyncSession, db_user, **kwargs):
