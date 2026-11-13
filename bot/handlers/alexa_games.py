@@ -113,7 +113,7 @@ async def protect(message: Message, _: callable, db_session: AsyncSession, db_us
 async def unprotect(message: Message, db_session: AsyncSession, db_user, **kwargs):
     row = await profile(db_session, db_user.id)
     row.protection_until = None
-    await message.reply("🛡 Protection disabled.")
+    await message.reply('<tg-emoji emoji-id="6086672466132865380">🛡</tg-emoji> Protection disabled.', parse_mode="HTML")
 
 @router.message(Command("kill"))
 async def kill(message: Message, db_session: AsyncSession, db_user, **kwargs):
@@ -128,7 +128,7 @@ async def kill(message: Message, db_session: AsyncSession, db_user, **kwargs):
     now = datetime.now(timezone.utc)
     protected = victim.protection_until and (victim.protection_until.replace(tzinfo=timezone.utc) > now)
     if protected:
-        await message.reply("🛡 That player is protected.")
+        await message.reply('<tg-emoji emoji-id="6086672466132865380">🛡</tg-emoji> That player is protected.', parse_mode="HTML")
         return
     killer = await profile(db_session, db_user.id)
     # A valid /kill action should register consistently; the previous 50% random
@@ -155,7 +155,7 @@ async def rob(message: Message, db_session: AsyncSession, db_user, **kwargs):
         if protected_until.tzinfo is None:
             protected_until = protected_until.replace(tzinfo=timezone.utc)
         if protected_until > now:
-            await message.reply("🛡 That player is protected.")
+            await message.reply('<tg-emoji emoji-id="6086672466132865380">🛡</tg-emoji> That player is protected.', parse_mode="HTML")
             return
 
     robber = await profile(db_session, db_user.id)
