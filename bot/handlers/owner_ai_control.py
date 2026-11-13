@@ -186,8 +186,8 @@ def _parse_model_json(raw: str) -> dict:
     """Parse a JSON object even when a model wraps it in Markdown or brief prose."""
     value = str(raw or "").strip()
     if value.startswith("```"):
-        value = re.sub(r"^\`\`\`(?:json)?\s*", "", value, count=1, flags=re.IGNORECASE)
-        value = re.sub(r"\s*\`\`\`$", "", value, count=1)
+        value = re.sub(r"^```(?:json)?\s*", "", value, count=1, flags=re.IGNORECASE)
+        value = re.sub(r"\s*```$", "", value, count=1)
     try:
         parsed = json.loads(value)
     except json.JSONDecodeError:
