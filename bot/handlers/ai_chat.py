@@ -444,10 +444,19 @@ def _looks_like_smart_reply_candidate(text: str) -> bool:
     ):
         return True
 
-    # Allow meaningful standalone updates and statements when the group is quiet.
-    # Existing activity guards and cooldowns prevent Alexa from flooding chats.
+    # First-person introductions and personal updates are strong conversation
+    # openers, including common Romanized Bangla, Hindi/Urdu, and English forms.
+    if re.search(
+        r"\b(?:i am|i'm|im|my name is|i live in|i am from|i'm from|"
+        r"main|mai|mein|mera|meri|mere|ami|aami|amar|amader)\b",
+        value,
+        re.IGNORECASE,
+    ):
+        return True
+
+    # Allow meaningful standalone updates when the group is otherwise quiet.
     words = re.findall(r"[\w'-]+", value, flags=re.UNICODE)
-    return len(words) >= 4 and bool(re.search(r"[a-zA-Z\u0900-\u097F]", value))
+    return len(words) >= 4 and bool(re.search(r"[a-zA-Z\u0900-\u097F\u0980-\u09FF]", value))
 
 
 def _smart_group_reply_fallback(user_text: str) -> str:
@@ -559,14 +568,11 @@ async def is_alexa_trigger(message: Message) -> bool:
     if _message_mentions_another_member(message, text):
         return False
 
-    # Continue a recent one-to-one Alexa conversation without requiring another
-    # mention, but only while the group is otherwise quiet. If multiple members
-    # are actively talking, do not mistake their conversation for Alexa's.
+    # Continue a recent one-to-one Alexa conversation without requiring
+    # another mention. The session is scoped to this sender, so other members'
+    # messages do not erase the conversation they already started with Alexa.
     session_key = (message.chat.id, message.from_user.id)
-    if (
-        time.monotonic() < _active_until.get(session_key, 0.0)
-        and not _group_conversation_is_active(message.chat.id)
-    ):
+    if time.monotonic() < _active_until.get(session_key, 0.0):
         return True
 
     # Recognize Alexa's name anywhere in a group message, not only at the start.
@@ -620,7 +626,7 @@ async def _ask_ai(
     system_instruction = (
         "You are Alexa, a lively feminine Telegram chat persona fluent in natural Indian Hindi written in Roman script (Roman Hindi). "
         "Sound like a naturally expressive, friendly Indian girl-style chat persona—not like a scripted assistant. Keep a consistent feminine voice and refer to yourself as Alexa. Never claim to be a real human girl or invent a human identity. "
-        "Match the user's language, slang, energy, and message length. Use everyday Indian Hindi in Roman script naturally, with familiar Indian Hinglish where it fits, casual phrasing where it fits, and avoid formal textbook wording. "
+        "Match the user's language, slang, energy, and message length. Understand and reply naturally in English, Hindi, Urdu, Roman Urdu, Roman Hindi, Bangla/Bengali (including Romanized Bangla and Bengali script), and mixed-language messages. Prefer the language and script the sender used; do not force Hindi when the sender is speaking Bangla or English. Avoid formal textbook wording. "
         "Use the supplied conversation history, remember details already shared, and answer the newest message directly. "
         "For casual chat, greetings, jokes, and teasing, usually reply in 3–15 words; answer real questions clearly and expand only when useful. "
         "Vary openings and phrasing; do not repeatedly ask 'aur batao?', echo the user, or use canned lines. Respond to the actual context, remember the conversational thread, and ask a follow-up only when it genuinely fits. Do not add emojis yourself; Alexa appends one mood-matched emoji from its configured pack. "
@@ -808,5 +814,9 @@ async def alexa_ai_chat(message: Message) -> None:
         # Telegram reply failures should not interrupt bot polling, but must be visible in host logs.
         logger.warning("Telegram rejected Alexa AI reply for chat_id=%s: %s", message.chat.id, type(exc).__name__)
         return
+    # A successful unaddressed group reply starts a short sender-specific
+    # conversation window, so the member can continue naturally without tags.
+    if message.chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}:
+        _active_until[key] = time.monotonic() + _SESSION_SECONDS
     asyncio.create_task(_maybe_send_sticker(message, text))
 
