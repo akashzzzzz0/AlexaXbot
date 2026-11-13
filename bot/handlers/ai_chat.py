@@ -746,7 +746,7 @@ async def alexa_ai_chat(message: Message) -> None:
         # The model sometimes adds ordinary Unicode emojis despite the prompt.
         # Remove those so Alexa's supplied animated custom emoji is used instead.
         answer = re.sub(
-            r"[\\U0001F000-\\U0001FAFF\\u2600-\\u27BF][\\uFE0E\\uFE0F]?(?:\\u200D[\\U0001F000-\\U0001FAFF])*(?:\\U0001F3FB-\\U0001F3FF)?",
+            r"[\U0001F000-\U0001FAFF\u2600-\u27BF][\uFE0E\uFE0F]?(?:\u200D[\U0001F000-\U0001FAFF])*(?:\U0001F3FB-\U0001F3FF)?",
             "",
             answer,
         ).strip()
