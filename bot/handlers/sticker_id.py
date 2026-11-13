@@ -8,6 +8,17 @@ from bot.config import settings
 router = Router(name="owner_sticker_id")
 
 
+def _custom_emoji_text(text: str, offset: int, length: int) -> str:
+    """Extract an entity substring using Telegram's UTF-16 offset units."""
+    encoded = text.encode("utf-16-le")
+    start = offset * 2
+    end = (offset + length) * 2
+    try:
+        return encoded[start:end].decode("utf-16-le")
+    except UnicodeDecodeError:
+        return ""
+
+
 @router.message(Command("stickerid"))
 async def get_sticker_file_id(message: Message) -> None:
     """Return a sticker file_id only to the configured owner in private chat."""
@@ -33,3 +44,62 @@ async def get_sticker_file_id(message: Message) -> None:
         "Sticker unique ID (usually configuration mein use nahi hoti):\n"
         f"{sticker.file_unique_id}"
     )
+
+
+@router.message(Command("emojiid"))
+async def get_custom_emoji_ids(message: Message) -> None:
+    """Extract Telegram premium/custom emoji IDs from a replied-to message for the owner."""
+    owner_id = settings.effective_owner_id
+    if not message.from_user or not owner_id or message.from_user.id != owner_id:
+        return
+
+    if message.chat.type != ChatType.PRIVATE:
+        await message.answer(
+            "Privacy ke liye Alexa ko DM mein emoji wala message bhejo, "
+            "us par reply karke /emojiid likho."
+        )
+        return
+
+    target = message.reply_to_message
+    if target is None:
+        await message.answer(
+            "Premium emoji wale message par reply karke /emojiid bhejo."
+        )
+        return
+
+    source_text = target.text or target.caption or ""
+    entities = target.entities or target.caption_entities or []
+    matches = []
+    for entity in entities:
+        entity_type = getattr(entity.type, "value", entity.type)
+        emoji_id = getattr(entity, "custom_emoji_id", None)
+        if entity_type != "custom_emoji" or not emoji_id:
+            continue
+        preview = _custom_emoji_text(source_text, entity.offset, entity.length)
+        matches.append((preview or "✨", str(emoji_id)))
+
+    if not matches:
+        await message.answer(
+            "Is message mein Telegram Custom Emoji entity nahi mili.\n"
+            "Premium emoji ko text message mein send karo, phir us message par "
+            "reply karke /emojiid bhejo. Sticker ki ID ke liye /stickerid use karo."
+        )
+        return
+
+    # Keep each response comfortably below Telegram's message length limit.
+    for start in range(0, len(matches), 20):
+        chunk = matches[start:start + 20]
+        lines = [
+            f"{index}. {preview}\ncustom_emoji_id: {emoji_id}"
+            for index, (preview, emoji_id) in enumerate(chunk, start=start + 1)
+        ]
+        suffix = (
+            f"\n\nTotal custom emojis found: {len(matches)}"
+            if start == 0 else ""
+        )
+        await message.answer(
+            "✨ <b>Custom Emoji IDs</b>\n\n"
+            + "\n\n".join(lines)
+            + suffix,
+            parse_mode="HTML",
+        )
