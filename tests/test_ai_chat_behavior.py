@@ -46,7 +46,7 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
         # non-greeting smart replies are held for the configured interval.
         self.assertFalse(asyncio.run(
             ai_chat.is_alexa_trigger(_group_message("what is everyone doing today?"))
-        )))
+        ))
 
     def test_smart_reply_ignores_active_member_to_member_conversation(self):
         chat_id = -100555
