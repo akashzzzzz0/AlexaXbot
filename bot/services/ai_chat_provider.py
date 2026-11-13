@@ -1,4 +1,4 @@
-"""Alexa chat provider chain: Gemini -> Groq -> Ollama -> OpenAI.
+"""Alexa chat provider chain: Groq -> Gemini -> Ollama -> OpenAI.
 
 Provider keys are read only from private runtime settings/environment. The
 existing chat handlers, prompts, history, and reply formatting remain unchanged.
@@ -226,16 +226,14 @@ async def _gemini_chat(
 
 
 async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False):
-    """Try Gemini first; use Groq, Ollama, and OpenAI only as fallbacks."""
+    """Try Groq first, then Gemini; retain Ollama/OpenAI as later fallbacks."""
     provider_errors = []
 
     # Bound each provider attempt so a slow cloud endpoint cannot leave Alexa
     # typing indefinitely. A timed-out request is cancelled before fallback.
     providers = [
-        # Gemini gets the first attempt and more time to finish a slower response.
-        # Backups run only if Gemini fails or reaches its timeout.
-        ("gemini", _gemini_chat, bool(get_gemini_api_key()), 60.0),
         ("groq", _groq_chat, bool(_groq_api_key()), 14.0),
+        ("gemini", _gemini_chat, bool(get_gemini_api_key()), 14.0),
         ("ollama", ollama_chat, True, 14.0),
         ("openai", _openai_chat, bool(_openai_api_key()), 14.0),
     ]
