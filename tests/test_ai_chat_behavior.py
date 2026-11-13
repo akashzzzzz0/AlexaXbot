@@ -1,5 +1,7 @@
 import asyncio
 import unittest
+from collections import deque
+from unittest.mock import patch
 from types import SimpleNamespace
 
 from aiogram.enums import ChatType
@@ -91,6 +93,17 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
                 self.assertIsNotNone(ai_chat._GREETING_RE.match(greeting))
         self.assertEqual(ai_chat._emotion_category("good afternoon"), "greeting")
         self.assertEqual(ai_chat._emotion_category("good evening"), "greeting")
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class AlexaAIProviderFailureTests(unittest.TestCase):
+    def test_provider_failure_is_reported_as_a_distinct_chat_error(self):
+        with patch.object(ai_chat, "ai_chat_completion", side_effect=ValueError("invalid provider response")):
+            with self.assertRaises(ai_chat.AIProviderUnavailable):
+                asyncio.run(ai_chat._ask_ai("hello", deque()))
 
 
 if __name__ == "__main__":
