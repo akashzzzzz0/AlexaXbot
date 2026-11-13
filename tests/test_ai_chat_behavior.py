@@ -40,10 +40,13 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
                 ))
 
     def test_group_smart_reply_cooldowns_prevent_spam(self):
-        message = _group_message("hi")
+        message = _group_message("what is everyone doing today?")
         self.assertTrue(asyncio.run(ai_chat.is_alexa_trigger(message)))
-        # A second greeting in the same group is held by the 15-second group cooldown.
-        self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(_group_message("hello"))))
+        # Standalone greetings intentionally bypass this cooldown; repeated
+        # non-greeting smart replies are held for the configured interval.
+        self.assertFalse(asyncio.run(
+            ai_chat.is_alexa_trigger(_group_message("what is everyone doing today?"))
+        )))
 
     def test_smart_reply_ignores_active_member_to_member_conversation(self):
         chat_id = -100555
