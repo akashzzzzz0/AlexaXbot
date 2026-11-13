@@ -4,12 +4,15 @@ Provider keys are read only from private runtime settings/environment. The
 existing chat handlers, prompts, history, and reply formatting remain unchanged.
 """
 import asyncio
+import logging
 import os
 
 import httpx
 
 from bot.config import get_gemini_api_key, settings
 from bot.services.ollama_ai import ollama_chat
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -232,10 +235,10 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
     # Bound each provider attempt so a slow cloud endpoint cannot leave Alexa
     # typing indefinitely. A timed-out request is cancelled before fallback.
     providers = [
-        ("groq", _groq_chat, bool(_groq_api_key()), 14.0),
-        ("gemini", _gemini_chat, bool(get_gemini_api_key()), 14.0),
-        ("ollama", ollama_chat, True, 14.0),
-        ("openai", _openai_chat, bool(_openai_api_key()), 14.0),
+        ("groq", _groq_chat, bool(_groq_api_key()), 20.0),
+        ("gemini", _gemini_chat, bool(get_gemini_api_key()), 25.0),
+        ("ollama", ollama_chat, True, 30.0),
+        ("openai", _openai_chat, bool(_openai_api_key()), 25.0),
     ]
     for name, provider, configured, timeout_seconds in providers:
         if not configured:
@@ -254,7 +257,12 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
             )
         except asyncio.TimeoutError:
             provider_errors.append(f"{name}:timeout")
+            logger.warning("Alexa AI provider timed out", extra={"provider": name, "timeout_seconds": timeout_seconds})
         except Exception as exc:
             provider_errors.append(f"{name}:{type(exc).__name__}")
+            logger.warning(
+                "Alexa AI provider failed; trying next configured provider",
+                extra={"provider": name, "error_type": type(exc).__name__},
+            )
 
     raise RuntimeError("all_ai_providers_failed:" + ",".join(provider_errors))

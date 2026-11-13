@@ -1,5 +1,7 @@
 import asyncio
 import unittest
+from collections import deque
+from unittest.mock import patch
 from types import SimpleNamespace
 
 from aiogram.enums import ChatType
@@ -38,10 +40,13 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
                 ))
 
     def test_group_smart_reply_cooldowns_prevent_spam(self):
-        message = _group_message("hi")
+        message = _group_message("what is everyone doing today?")
         self.assertTrue(asyncio.run(ai_chat.is_alexa_trigger(message)))
-        # A second greeting in the same group is held by the 15-second group cooldown.
-        self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(_group_message("hello"))))
+        # Standalone greetings intentionally bypass this cooldown; repeated
+        # non-greeting smart replies are held for the configured interval.
+        self.assertFalse(asyncio.run(
+            ai_chat.is_alexa_trigger(_group_message("what is everyone doing today?"))
+        ))
 
     def test_smart_reply_ignores_active_member_to_member_conversation(self):
         chat_id = -100555
@@ -91,6 +96,13 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
                 self.assertIsNotNone(ai_chat._GREETING_RE.match(greeting))
         self.assertEqual(ai_chat._emotion_category("good afternoon"), "greeting")
         self.assertEqual(ai_chat._emotion_category("good evening"), "greeting")
+
+
+class AlexaAIProviderFailureTests(unittest.TestCase):
+    def test_provider_failure_is_reported_as_a_distinct_chat_error(self):
+        with patch.object(ai_chat, "ai_chat_completion", side_effect=ValueError("invalid provider response")):
+            with self.assertRaises(ai_chat.AIProviderUnavailable):
+                asyncio.run(ai_chat._ask_ai("hello", deque()))
 
 
 if __name__ == "__main__":

@@ -19,4 +19,7 @@ jobs:
       - name: Compile bot and tests
         run: python -m compileall -q bot tests scripts
       - name: Run regression tests
-        run: python -m unittest discover -s tests -p 'test_speed_type_event.py' -v
+        run: |
+          python -m unittest discover -s tests -p 'test_speed_type_event.py' -v
+          python -m unittest discover -s tests -p 'test_ai_chat_behavior.py' -v
+          python -m unittest discover -s tests -p 'test_owner_ai_json.py' -v

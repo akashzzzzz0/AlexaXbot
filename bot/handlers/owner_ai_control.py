@@ -182,6 +182,25 @@ def _strip_prefix(text: str) -> str:
     return (text or "").strip()
 
 
+def _parse_model_json(raw: str) -> dict:
+    """Parse a JSON object even when a model wraps it in Markdown or brief prose."""
+    value = str(raw or "").strip()
+    if value.startswith("```"):
+        value = re.sub(r"^```(?:json)?\s*", "", value, count=1, flags=re.IGNORECASE)
+        value = re.sub(r"\s*```$", "", value, count=1)
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        start = value.find("{")
+        end = value.rfind("}")
+        if start < 0 or end <= start:
+            raise ValueError("owner_ai_invalid_json")
+        parsed = json.loads(value[start:end + 1])
+    if not isinstance(parsed, dict):
+        raise ValueError("owner_ai_json_not_object")
+    return parsed
+
+
 async def _classify_request(text: str) -> dict:
     """Use Ollama to classify a request into a fixed, validated action schema."""
     instructions = (
@@ -200,7 +219,7 @@ async def _classify_request(text: str) -> dict:
         max_tokens=180,
         json_mode=True,
     )
-    result = json.loads(raw)
+    result = _parse_model_json(raw)
     action = result.get("action")
     kind = str(result.get("type", "")).lower()
     allowed = {"report_today", "list_groups", "list_users", "lookup_user", "user_details", "referral_report", "group_activity", "bot_health", "global_controls_status", "inbox_summary", "group_settings_status", "group_status", "lock_content", "unlock_content", "ban", "mute", "kick", "promote", "demote", "demote_self", "promote_self", "make_bot_admin", "unban", "unmute", "warn", "reset_warnings", "help", "unsupported"}
@@ -208,7 +227,16 @@ async def _classify_request(text: str) -> dict:
         return {"action": "unsupported", "type": ""}
     if action in {"lock_content", "unlock_content"} and kind not in {"text", "links", "photos", "videos", "stickers", "all"}:
         return {"action": "unsupported", "type": ""}
-    return {"action": action, "type": kind, "duration_seconds": max(60, min(int(result.get("duration_seconds") or 3600), 2419200)), "reason": str(result.get("reason") or "Owner AI command")[:180]}
+    try:
+        duration_seconds = int(result.get("duration_seconds") or 3600)
+    except (TypeError, ValueError):
+        duration_seconds = 3600
+    return {
+        "action": action,
+        "type": kind,
+        "duration_seconds": max(60, min(duration_seconds, 2419200)),
+        "reason": str(result.get("reason") or "Owner AI command")[:180],
+    }
 
 
 async def _answer_owner_question(prompt: str) -> str:
