@@ -250,9 +250,10 @@ async def leaders(message: Message, db_session: AsyncSession, **kwargs):
         coin = '<tg-emoji emoji-id="6267068789146260253">💰</tg-emoji>'
         if i == 1:
             crown = '<tg-emoji emoji-id="6095957657145840116">👑</tg-emoji>'
+            gold_medal = '<tg-emoji emoji-id="6265004494719816749">🥇</tg-emoji>'
             entries.append(
                 f'<b>{crown} KING OF COINS</b>\\n'
-                f'<b>🥇 {name}</b>\\n'
+                f'{gold_medal} <b>{name}</b>\\n'
                 f'{coin} <b>{coins} coins</b>'
             )
         elif i in medal_ids:
