@@ -53,6 +53,16 @@ _anonymous_pending_actions = {}
 def _is_anonymous_group_admin(message: Message) -> bool:
     return bool(message.sender_chat and message.chat and message.sender_chat.id == message.chat.id and message.chat.type in ("group", "supergroup"))
 
+async def _target_is_group_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
+    """Return whether the target is a Telegram group admin/owner."""
+    try:
+        member = await bot.get_chat_member(chat_id, user_id)
+        status = str(getattr(member.status, "value", member.status))
+        return status in {"administrator", "creator"}
+    except Exception as exc:
+        logger.debug("Could not check target admin status", chat_id=chat_id, user_id=user_id, error=str(exc))
+        return False
+
 
 async def _queue_anonymous_confirmation(message: Message, action: str, target, reason: str = "", duration=None, silent: bool = False):
     if not _is_anonymous_group_admin(message):
@@ -510,7 +520,10 @@ async def cmd_ban(message: Message, bot: Bot, _: callable, db_session: AsyncSess
         name = mention_user(target.id, safe_username(target))
         await message.answer(_("user_banned").format(name=name, reason=reason or _("no_reason")), parse_mode="HTML")
     else:
-        await message.reply("❌ Ban failed. Check ALEXA's Ban Users permission and the target's admin status.")
+        if await _target_is_group_admin(bot, message.chat.id, target.id):
+            await message.reply("🚫 You can't ban a group admin.")
+        else:
+            await message.reply("⚠️ I couldn't ban this member. Please check that ALEXA has Ban Users permission.")
 
 
 @router.message(Command("sban"))
@@ -529,7 +542,10 @@ async def cmd_sban(message: Message, bot: Bot, db_session: AsyncSession, **kwarg
     if success:
         await _delete_moderation_command(message)
     else:
-        await message.answer("❌ Silent ban failed. Check Alexa's Ban Users permission and the target's status.")
+        if await _target_is_group_admin(bot, message.chat.id, target.id):
+            await message.answer("🚫 You can't ban a group admin.")
+        else:
+            await message.answer("⚠️ I couldn't ban this member. Please check ALEXA's Ban Users permission.")
 
 
 @router.message(Command("tban"))
@@ -653,7 +669,10 @@ async def cmd_mute(message: Message, bot: Bot, _: callable, db_session: AsyncSes
             parse_mode="HTML",
         )
     else:
-        await message.reply("❌ I couldn't mute this user. Check that ALEXA is an admin with Restrict Members permission and that the target is not a group admin.")
+        if await _target_is_group_admin(bot, message.chat.id, target.id):
+            await message.reply("🚫 You can't mute a group admin.")
+        else:
+            await message.reply("⚠️ I couldn't mute this member. Please check that ALEXA is an admin with Restrict Members permission.")
 
 
 @router.message(Command("smute"))
@@ -681,7 +700,10 @@ async def cmd_smute(message: Message, bot: Bot, db_session: AsyncSession, **kwar
     if success:
         await _delete_moderation_command(message)
     else:
-        await message.answer("❌ Silent mute failed. Check Alexa's Restrict Members permission and the target's status.")
+        if await _target_is_group_admin(bot, message.chat.id, target.id):
+            await message.answer("🚫 You can't mute a group admin.")
+        else:
+            await message.answer("⚠️ I couldn't mute this member. Please check ALEXA's Restrict Members permission.")
 
 
 @router.message(Command("unmute"))
