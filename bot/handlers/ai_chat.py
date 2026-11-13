@@ -436,14 +436,18 @@ def _looks_like_smart_reply_candidate(text: str) -> bool:
     if re.fullmatch(r"(?:ok(?:ay)?|acha|hmm+|huh|nice|same|true|right|👍+|👌+|❤️+|😂+|🤣+|🙏+)[.!?\s]*", value):
         return False
 
-    # Unaddressed messages qualify only when they clearly ask something or request help.
-    return bool(
-        re.search(
-            r"[?؟]|\b(?:kya|kyun|kaise|kaisa|kaisi|kab|kahan|kon|kaun|who|what|why|how|when|where|which|anyone|suggest|opinion|batao|help|madad|guide)\b",
-            value,
-            re.IGNORECASE,
-        )
-    )
+    # Questions and direct requests are strong candidates.
+    if re.search(
+        r"[?؟]|\\b(?:kya|kyun|kaise|kaisa|kaisi|kab|kahan|kon|kaun|who|what|why|how|when|where|which|anyone|suggest|opinion|batao|help|madad|guide)\\b",
+        value,
+        re.IGNORECASE,
+    ):
+        return True
+
+    # Allow meaningful standalone updates and statements when the group is quiet.
+    # Existing activity guards and cooldowns prevent Alexa from flooding chats.
+    words = re.findall(r"[\\w'-]+", value, flags=re.UNICODE)
+    return len(words) >= 4 and bool(re.search(r"[a-zA-Z\\u0900-\\u097F]", value))
 
 
 def _smart_group_reply_fallback(user_text: str) -> str:
@@ -645,8 +649,9 @@ async def _ask_ai(
         system_instruction += (
             "This is a SMART GROUP REPLY to an unaddressed message that has already passed relevance filters. "
             "Give a short, useful, natural reply to the message. Answer clear questions, join a joke naturally, or offer a brief empathetic reaction. "
-            "If the message is routine, adds no new context, or does not need Alexa's input, output exactly __IGNORE__. "
-            "Do not force a reply to every statement; choose only moments where a real group member would naturally join in. "
+            "The message has already passed Alexa's relevance filters, so respond to its actual meaning and conversational intent. "
+            "Do not output __IGNORE__ for a meaningful question, update, opinion, joke, or personal statement. "
+            "Do not force replies to trivial messages; answer eligible messages naturally and specifically. "
             "Do not mention or tag everyone, do not invent missing context, and do not write long explanations. "
             "Use natural Indian Roman Hindi/Hinglish when appropriate, usually in one short sentence."
         )
@@ -679,7 +684,8 @@ async def _ask_ai(
             logger.error("Alexa AI chat is disabled because OLLAMA_API_KEY is missing from runtime configuration")
             return ""
         raise
-    answer = answer[:700].rsplit(" ", 1)[0] if answer else ""
+    # Truncate without dropping the final complete word on every response.
+    answer = answer[:700].strip() if answer else ""
     if re.search(r"(?i)\ballah\b|الله|اللّٰه", answer):
         logger.warning("Alexa AI response was rejected by the existing vocabulary filter")
         return ""
