@@ -620,6 +620,31 @@ async def cmd_unban(message: Message, bot: Bot, _: callable, db_session: AsyncSe
         await message.reply("❌ Unban failed. Check ALEXA's Ban Users permission and the target ID.")
 
 
+@router.message(Command("kickme"))
+async def cmd_kickme(message: Message, bot: Bot, db_session: AsyncSession, **kwargs):
+    """Let a member voluntarily leave the group through Alexa."""
+    if message.chat.type not in ("group", "supergroup"):
+        return
+    if not message.from_user:
+        await message.reply("I couldn't identify who wants to leave.")
+        return
+
+    user = message.from_user
+    if await _target_is_group_admin(bot, message.chat.id, user.id):
+        await message.reply("👑 Admins can't use /kickme. Please leave the group manually.")
+        return
+
+    success = await kick_user(
+        bot, db_session, message.chat.id, user.id, user.id,
+        "Self-requested via /kickme",
+    )
+    if success:
+        name = mention_user(user.id, safe_username(user))
+        await message.answer(f"😂 As your wish, {name}!\\n🚪 <b>GET OUT!</b>", parse_mode="HTML")
+    else:
+        await message.reply("❌ Couldn't remove you. Alexa may need Ban Users permission.")
+
+
 @router.message(Command("kick"))
 async def cmd_kick(message: Message, bot: Bot, _: callable, db_session: AsyncSession, **kwargs):
     if message.chat.type == "private":
