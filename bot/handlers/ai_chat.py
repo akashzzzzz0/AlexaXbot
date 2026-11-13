@@ -235,7 +235,7 @@ async def _maybe_send_sticker(message: Message, user_text: str) -> None:
     if not message.from_user or message.from_user.is_bot:
         return
     emoji_markup = _pick_mood_custom_emoji(_emotion_category(user_text))
-    if not emoji_markup or random.random() >= 0.35:
+    if not emoji_markup or random.random() >= 0.50:
         return
     key = (message.chat.id, message.from_user.id)
     now = time.monotonic()
