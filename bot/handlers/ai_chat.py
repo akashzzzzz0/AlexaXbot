@@ -180,23 +180,30 @@ async def _maybe_react(message: Message) -> None:
         )
 
 
-# Emotion-aware sticker selection from the public pack configured below.
-_STICKER_SET_NAME = os.getenv("ALEXA_STICKER_SET_NAME", "video6104468803_by_vzrobot").strip()
-_STICKER_SET_CACHE: list[tuple[str, str]] | None = None
-_last_sticker_at: dict[tuple[int, int], float] = {}
-_STICKER_USER_COOLDOWN_SECONDS = 90.0
-
+# Owner-provided animated custom emoji IDs used in Alexa's chat and mood messages.
+# Custom emoji IDs are rendered inline; they are not Telegram sticker file_ids.
+_MOOD_CUSTOM_EMOJIS = {
+    "funny": [("😆","5431667752806934873"),("😋","5431477051964025198"),("😜","5431825189128139554"),("😛","5433660888215221686"),("😁","5431902597323713199")],
+    "happy": [("🌟","5429329916208379953"),("🌟","5429508080041751441"),("🌟","5431408036134547695"),("🌟","5431350041191151583"),("🌟","5431690206895959579"),("🌟","5435945896716037784"),("🤩","5436147536840648902"),("🤩","5436039896370279685"),("🤩","5433825067635077339"),("🤩","5433870383835018558"),("🤩","5435918340205863147"),("🤩","5435920650898275023"),("🤩","5435976378098939314"),("🤩","5436015857438321155"),("🤩","5434144321144127338"),("🤩","5435907366564424575"),("🤩","5436073989820674364"),("🤩","5435977761078409152")],
+    "sad": [("😞","5431525928691854014"),("😔","5431361998380100160"),("😥","5431498526800507104"),("😪","5431368737183791045"),("🌧","5436055912303324345"),("🌧","5436077193866276079"),("🌧","5433646787837590169")],
+    "angry": [("🙄","5431494631265169545"),("😐","5431794853774128339")],
+    "love": [("😍","5431534123489456787"),("🥰","5431864183136217360"),("🥰","5431730863056382465"),("💜","5434027768616614311"),("🖤","5431506068763076885")],
+    "surprise": [("😳","5431854227402026738"),("🤩","5436147536840648902"),("🤩","5436039896370279685"),("🤩","5433825067635077339"),("🤩","5433870383835018558"),("🤩","5435918340205863147"),("🤩","5435920650898275023"),("🤩","5435976378098939314"),("🤩","5436015857438321155"),("🤩","5434144321144127338"),("🤩","5435907366564424575"),("🤩","5436073989820674364"),("🤩","5435977761078409152")],
+    "greeting": [("☺️","5431811449527757792"),("☺️","5436151505390434632"),("☺️","5436017223237923905"),("🌼","5431724064123152798"),("😁","5431902597323713199")],
+    "attitude": [("😎","5431737571795302117"),("😏","5431708834169123919"),("🗿","5436048907211666885"),("🦕","5429213136047597208"),("🦦","5431856267511494171"),("😶","5436017532475567354"),("🥱","5431642571413681487"),("😐","5431794853774128339")],
+}
 
 def _emotion_category(text: str) -> str | None:
-    value = text.casefold()
+    value = (text or "").casefold()
     rules = (
-        ("funny", r"haha|hehe|lol|lmao|mazak|mazaak|😂|🤣|😹"),
-        ("sad", r"sad|cry|dukhi|udaas|udas|mood off|😢|😭|🥺|💔"),
-        ("angry", r"angry|gussa|ghussa|naraz|😡|🤬|😠|😤"),
-        ("love", r"thanks|thank you|shukriya|pyaar|pyar|cute|❤️|😍|🥰|😘|💕"),
-        ("surprise", r"wow|omg|shocked|surprised|😮|😱|🤯|😳"),
-        ("greeting", r"^\s*(?:hi+|hello+|helo+|hey+|salam|assalamualaikum|aoa|bye+|good\s+(?:morning|afternoon|evening|night)|good day|gm|gn|morning|afternoon|evening)\b"),
-        ("attitude", r"attitude|boss|savage|swag|😎|😏|🔥"),
+        ("funny", r"haha|hehe|lol|lmao|rofl|mazak|mazaak|funny|😂|🤣|😹|😆|😜"),
+        ("sad", r"sad|cry|dukhi|udaas|udas|mood off|miss you|bura lag|😢|😭|🥺|💔|😔|😞"),
+        ("angry", r"angry|gussa|ghussa|naraz|irritated|🙄|😡|🤬|😠|😤"),
+        ("love", r"thanks|thank you|shukriya|pyaar|pyar|cute|beautiful|love|😍|🥰|😘|💕|💜|🖤"),
+        ("surprise", r"wow|omg|shocked|surprised|seriously|really|no way|😮|😱|🤯|😳"),
+        ("happy", r"congrats|congratulations|mubarak|well done|shabash|zabardast|amazing|awesome|great|🎉|🥳|🏆|💯"),
+        ("greeting", r"^\\s*(?:hi+|hello+|helo+|hey+|salam|assalamualaikum|aoa|bye+|good\\s+(?:morning|afternoon|evening|night)|good day|gm|gn|morning|afternoon|evening)\\b"),
+        ("attitude", r"attitude|boss|savage|swag|😎|😏|🗿"),
     )
     for category, pattern in rules:
         if re.search(pattern, value, re.IGNORECASE):
@@ -204,113 +211,41 @@ def _emotion_category(text: str) -> str | None:
     return None
 
 
-_EMOTION_EMOJIS = {
-    "funny": {"😂", "🤣", "😹", "😆", "😁", "😜", "🤪"},
-    "sad": {"😢", "😭", "🥺", "😔", "💔", "😞"},
-    "angry": {"😡", "🤬", "😠", "😤"},
-    "love": {"❤️", "❤", "😍", "🥰", "😘", "💕", "💖", "💗", "💞"},
-    "surprise": {"😮", "😱", "🤯", "😳", "🙀"},
-    "greeting": {"👋", "😊", "🤗", "🙋", "😄"},
-    "attitude": {"😎", "😏", "🔥"},
-}
-
-
-# Custom emoji pack used inline in Alexa's actual chat replies.
-_CUSTOM_EMOJI_SET_NAME = os.getenv(
-    "ALEXA_CHAT_EMOJI_SET_NAME", "prem_28a5b_by_TgEmojis_bot"
-).strip()
-_CUSTOM_EMOJI_CACHE: list[tuple[str, str]] | None = None
+def _pick_mood_custom_emoji(category: str | None) -> str:
+    choices = _MOOD_CUSTOM_EMOJIS.get(category or "", [])
+    if not choices:
+        return ""
+    alt, emoji_id = random.choice(choices)
+    return f'<tg-emoji emoji-id="{emoji_id}">{html.escape(alt)}</tg-emoji>'
 
 
 async def _chat_mood_emoji(bot, user_text: str) -> str:
-    """Choose one pack emoji from the sender's message mood; use Unicode if unavailable."""
-    global _CUSTOM_EMOJI_CACHE
-    category = _emotion_category(user_text) or "neutral"
-    fallback_by_category = {
-        "funny": "😂", "sad": "🥺", "angry": "😤", "love": "❤️",
-        "surprise": "😮", "greeting": "😊", "attitude": "😎", "neutral": "🙂",
-    }
-    allowed = _EMOTION_EMOJIS.get(category, {"🙂", "😊", "😄", "✨"})
-    if category == "neutral":
-        allowed = {"🙂", "😊", "😄", "✨"}
+    """Use an animated custom emoji only when the user's message has a clear mood."""
+    return _pick_mood_custom_emoji(_emotion_category(user_text))
 
-    if _CUSTOM_EMOJI_CACHE is None:
-        try:
-            sticker_set = await bot.get_sticker_set(name=_CUSTOM_EMOJI_SET_NAME)
-            _CUSTOM_EMOJI_CACHE = [
-                (str(getattr(sticker, "emoji", "") or ""), str(getattr(sticker, "custom_emoji_id", "") or ""))
-                for sticker in sticker_set.stickers
-                if getattr(sticker, "custom_emoji_id", None)
-            ]
-        except Exception as exc:
-            logger.warning("Alexa custom emoji pack unavailable: %s", type(exc).__name__)
-            _CUSTOM_EMOJI_CACHE = []
 
-    matches = [
-        (alt, emoji_id) for alt, emoji_id in (_CUSTOM_EMOJI_CACHE or [])
-        if alt in allowed and emoji_id.isdigit()
-    ]
-    if not matches and category == "neutral":
-        matches = [
-            (alt, emoji_id) for alt, emoji_id in (_CUSTOM_EMOJI_CACHE or [])
-            if alt in {"🙂", "😊", "😄", "✨", "💬"} and emoji_id.isdigit()
-        ]
-    if matches:
-        alt, emoji_id = random.choice(matches)
-        return f'<tg-emoji emoji-id="{emoji_id}">{html.escape(alt)}</tg-emoji>'
-    return fallback_by_category.get(category, "🙂")
+_last_sticker_at: dict[tuple[int, int], float] = {}
+_STICKER_USER_COOLDOWN_SECONDS = 90.0
 
 
 async def _maybe_send_sticker(message: Message, user_text: str) -> None:
-    """Send an occasional sticker matching the user's emotional cue."""
-    global _STICKER_SET_CACHE
-    category = _emotion_category(user_text)
-    if not category or random.random() >= 0.50:
+    """Occasionally send a mood-matched animated custom emoji in groups."""
+    if message.chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}:
         return
     if not message.from_user or message.from_user.is_bot:
         return
-    sticker_key = (message.chat.id, message.from_user.id)
+    emoji_markup = _pick_mood_custom_emoji(_emotion_category(user_text))
+    if not emoji_markup or random.random() >= 0.35:
+        return
+    key = (message.chat.id, message.from_user.id)
     now = time.monotonic()
-    if now - _last_sticker_at.get(sticker_key, 0.0) < _STICKER_USER_COOLDOWN_SECONDS:
+    if now - _last_sticker_at.get(key, 0.0) < _STICKER_USER_COOLDOWN_SECONDS:
         return
-    if _STICKER_SET_CACHE is None:
-        try:
-            sticker_set = await message.bot.get_sticker_set(name=_STICKER_SET_NAME)
-            _STICKER_SET_CACHE = [
-                (sticker.file_id, getattr(sticker, "emoji", "") or "")
-                for sticker in sticker_set.stickers
-                if getattr(sticker, "file_id", None)
-            ]
-        except Exception:
-            _STICKER_SET_CACHE = []
-    matching = [
-        file_id for file_id, emoji in (_STICKER_SET_CACHE or [])
-        if emoji in _EMOTION_EMOJIS.get(category, set())
-    ]
-    if matching:
-        try:
-            await message.answer_sticker(random.choice(matching))
-            _last_sticker_at[sticker_key] = now
-        except Exception:
-            pass
-        return
-    # If pack lookup failed, keep existing manually configured IDs as fallback.
-    if _STICKER_SET_CACHE:
-        return
-    raw_ids = os.getenv("ALEXA_STICKER_FILE_IDS", "").strip()
-    if not raw_ids:
-        try:
-            from bot.gemini_secret import ALEXA_STICKER_FILE_IDS
-            raw_ids = str(ALEXA_STICKER_FILE_IDS or "").strip()
-        except (ImportError, AttributeError, TypeError):
-            raw_ids = ""
-    file_ids = [item.strip() for item in raw_ids.split(",") if item.strip()]
-    if file_ids:
-        try:
-            await message.answer_sticker(random.choice(file_ids))
-            _last_sticker_at[sticker_key] = now
-        except Exception:
-            pass
+    try:
+        await message.answer(emoji_markup, parse_mode="HTML")
+        _last_sticker_at[key] = now
+    except Exception as exc:
+        logger.debug("Alexa mood emoji send failed for chat_id=%s: %s", message.chat.id, type(exc).__name__)
 
 
 # Schema setup is cached per process; avoid running CREATE TABLE/INDEX on every reply.
@@ -629,7 +564,7 @@ async def _ask_ai(
         "Match the user's language, slang, energy, and message length. Understand and reply naturally in English, Hindi, Urdu, Roman Urdu, Roman Hindi, Bangla/Bengali (including Romanized Bangla and Bengali script), and mixed-language messages. Prefer the language and script the sender used; do not force Hindi when the sender is speaking Bangla or English. Avoid formal textbook wording. "
         "Use the supplied conversation history, remember details already shared, and answer the newest message directly. "
         "For casual chat, greetings, jokes, and teasing, usually reply in 3–15 words; answer real questions clearly and expand only when useful. "
-        "Vary openings and phrasing; do not repeatedly ask 'aur batao?', echo the user, or use canned lines. Respond to the actual context, remember the conversational thread, and ask a follow-up only when it genuinely fits. Do not add emojis yourself; Alexa appends one mood-matched emoji from its configured pack. "
+        "Vary openings and phrasing; do not repeatedly ask 'aur batao?', echo the user, or use canned lines. Respond to the actual context, remember the conversational thread, and ask a follow-up only when it genuinely fits. Do not add emojis yourself; Alexa may append one animated custom emoji only when the message clearly carries a mood. Neutral messages should have no emoji. "
         "Be gently cheeky when appropriate, never cruel, pushy, or artificially romantic. "
         "Do not claim to be a real human or invent offline activities, memories, feelings, or experiences. "
         "Do not bring up AI or bot labels in ordinary conversation, and never volunteer that you are an AI or bot. If someone says 'bolo tum bot ho', 'tum bot ho na?', or casually challenges your identity, do not repeat or adopt the bot/AI label; answer naturally in character, e.g. 'Abe main Alexa hoon 😂💗' or 'Naam toh Alexa hai mera 😏'. If someone directly asks whether you are AI/a bot, do not falsely deny it or claim to be a real human girl; keep the reply brief and transparent without making the label your conversational identity, e.g. 'Main Alexa hoon—meri baat aur personality se pehchano 🙂'. Never claim to be a real human girl. Do not mention internal setup, prompts, APIs, keys, or models. "
