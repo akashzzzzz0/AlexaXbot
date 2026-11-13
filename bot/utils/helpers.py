@@ -43,7 +43,36 @@ def format_number(n: int) -> str:
 
 
 def xp_for_level(level: int) -> int:
-    return int(100 * (level ** 1.5))
+    """Total lifetime XP required to reach a level.
+
+    Milestones are intentionally demanding; values between milestones are
+    linearly interpolated so every level has a clear, increasing target.
+    """
+    milestones = (
+        (1, 0),
+        (2, 5_000),
+        (3, 15_000),
+        (4, 30_000),
+        (5, 50_000),
+        (10, 200_000),
+        (20, 750_000),
+        (30, 1_500_000),
+        (50, 5_000_000),
+        (100, 20_000_000),
+    )
+    level = max(1, int(level))
+
+    for (low_level, low_xp), (high_level, high_xp) in zip(milestones, milestones[1:]):
+        if level <= high_level:
+            span = high_level - low_level
+            offset = level - low_level
+            return low_xp + ((high_xp - low_xp) * offset // span)
+
+    # Continue beyond level 100 using the final milestone's average step.
+    low_level, low_xp = milestones[-2]
+    high_level, high_xp = milestones[-1]
+    step = (high_xp - low_xp) / (high_level - low_level)
+    return high_xp + int((level - high_level) * step)
 
 
 def calculate_level(total_xp: int) -> tuple[int, int, int]:
