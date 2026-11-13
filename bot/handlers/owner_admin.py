@@ -8,6 +8,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 import structlog
+from html import escape
 
 from bot.config import settings
 
@@ -74,7 +75,7 @@ async def owner_promote_member(message: Message):
             can_promote_members=False,
         )
         if promoted:
-            name = target.full_name.replace("<", "&lt;").replace(">", "&gt;")
+            name = escape(target.full_name)
             await message.reply(
                 f"✅ <b>{name}</b> ko Admin promote kar diya gaya.\n"
                 "🔒 Promote Members permission enabled nahi ki gayi.",
