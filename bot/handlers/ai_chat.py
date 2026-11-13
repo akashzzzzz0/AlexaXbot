@@ -189,7 +189,7 @@ _MOOD_CUSTOM_EMOJIS = {
     "angry": [("🙄","5431494631265169545"),("😐","5431794853774128339")],
     "love": [("😍","5431534123489456787"),("🥰","5431864183136217360"),("🥰","5431730863056382465"),("💜","5434027768616614311"),("🖤","5431506068763076885")],
     "surprise": [("😳","5431854227402026738"),("🤩","5436147536840648902"),("🤩","5436039896370279685"),("🤩","5433825067635077339"),("🤩","5433870383835018558"),("🤩","5435918340205863147"),("🤩","5435920650898275023"),("🤩","5435976378098939314"),("🤩","5436015857438321155"),("🤩","5434144321144127338"),("🤩","5435907366564424575"),("🤩","5436073989820674364"),("🤩","5435977761078409152")],
-    "greeting": [("☺️","5431811449527757792"),("☺️","5436151505390434632"),("☺️","5436017223237923905"),("🌼","5431724064123152798"),("😁","5431902597323713199")],
+    "greeting": [("☺️","5431811449527757792"),("☺️","5436151505390434632"),("☺️","5436017223237923905"),("🌼","5431724064123152798"),("😁","5431902597323713199"),("✋","5431640806182123285")],
     "attitude": [("😎","5431737571795302117"),("😏","5431708834169123919"),("🗿","5436048907211666885"),("🦕","5429213136047597208"),("🦦","5431856267511494171"),("😶","5436017532475567354"),("🥱","5431642571413681487"),("😐","5431794853774128339")],
 }
 
@@ -202,7 +202,7 @@ def _emotion_category(text: str) -> str | None:
         ("love", r"thanks|thank you|shukriya|pyaar|pyar|cute|beautiful|love|😍|🥰|😘|💕|💜|🖤"),
         ("surprise", r"wow|omg|shocked|surprised|seriously|really|no way|😮|😱|🤯|😳"),
         ("happy", r"congrats|congratulations|mubarak|well done|shabash|zabardast|amazing|awesome|great|🎉|🥳|🏆|💯"),
-        ("greeting", r"^\\s*(?:hi+|hello+|helo+|hey+|salam|assalamualaikum|aoa|bye+|good\\s+(?:morning|afternoon|evening|night)|good day|gm|gn|morning|afternoon|evening)\\b"),
+        ("greeting", r"^\s*(?:hi+|hello+|helo+|hey+|salam|assalamualaikum|aoa|bye+|good\s+(?:morning|afternoon|evening|night)|good day|gm|gn|morning|afternoon|evening)\b"),
         ("attitude", r"attitude|boss|savage|swag|😎|😏|🗿"),
     )
     for category, pattern in rules:
@@ -744,7 +744,7 @@ async def alexa_ai_chat(message: Message) -> None:
     # Group reactions are handled independently for all suitable messages.
     try:
         mood_emoji = await _chat_mood_emoji(message.bot, original_text or text)
-        await message.reply(f"{html.escape(answer)} {mood_emoji}", parse_mode="HTML")
+        await message.reply(f"{html.escape(answer)}{(\" \" + mood_emoji) if mood_emoji else \"\"}", parse_mode="HTML")
     except Exception as exc:
         # Telegram reply failures should not interrupt bot polling, but must be visible in host logs.
         logger.warning("Telegram rejected Alexa AI reply for chat_id=%s: %s", message.chat.id, type(exc).__name__)
