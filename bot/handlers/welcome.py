@@ -337,7 +337,7 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
                                 chat.id,
                                 f"🔇 {user_link} [<code>{user.id}</code>] muted for {minutes} minute(s).\n"
                                 f"❌ Reason: {reason}\n"
-                                "Group admins can whitelist this member or unmute and reset their Bio Link Protection warnings below.",
+                                "Remove link from your bio, then tap Unmute.",
                                 parse_mode="HTML",
                                 reply_markup=_bio_admin_action_keyboard(chat.id, user.id),
                             )
@@ -383,7 +383,8 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
                             if muted:
                                 await event.bot.send_message(
                                     chat.id,
-                                    f"🔇 {user_link} muted for {max(1, applied_duration // 60)} minute(s) after reaching the warning limit.",
+                                    f"🔇 {user_link} muted for {max(1, applied_duration // 60)} minute(s) after reaching the warning limit.\n"
+                                    "Remove link from your bio, then tap Unmute.",
                                     parse_mode="HTML",
                                     reply_markup=_bio_admin_action_keyboard(chat.id, user.id),
                                 )
@@ -505,8 +506,8 @@ def _bio_admin_action_keyboard(group_id: int, user_id: int, *, include_whitelist
             callback_data=f"bio_admin:whitelist:{group_id}:{user_id}",
         )
     builder.button(
-        text="🔓 Unmute + Reset Warnings",
-        callback_data=f"bio_admin:unmute:{group_id}:{user_id}",
+        text="🔓 Unmute",
+        callback_data=f"bio_unmute:{group_id}:{user_id}",
     )
     builder.adjust(2 if include_whitelist else 1)
     return builder.as_markup()
@@ -552,7 +553,10 @@ async def bio_unmute_after_profile_fix(callback: CallbackQuery, db_session: Asyn
     )
     details = (latest_mute.details or {}) if latest_mute else {}
     reason = details.get("reason", "") if isinstance(details, dict) else ""
-    if reason != "Link found in profile bio (Bio Link Protection)":
+    if reason not in {
+        "Link found in profile bio (Bio Link Protection)",
+        "Bio-link warning limit reached",
+    }:
         await callback.answer("This mute was not caused by Bio Link Protection.", show_alert=True)
         return
 
