@@ -237,8 +237,29 @@ async def rank(message: Message, db_session: AsyncSession, db_user, **kwargs):
 @router.message(Command("leaders"))
 async def leaders(message: Message, db_session: AsyncSession, **kwargs):
     rows = (await db_session.execute(select(User, Wallet).join(Wallet, Wallet.user_id == User.id).order_by(desc(Wallet.balance)).limit(10))).all()
-    text = '<tg-emoji emoji-id="6325413811033477368">✨</tg-emoji> <b>Richest Players</b> <tg-emoji emoji-id="6325413811033477368">✨</tg-emoji>\n\n' + ("\n".join((f'<tg-emoji emoji-id="6265004494719816749">🥇</tg-emoji> <tg-emoji emoji-id="6095957657145840116">👑</tg-emoji> {escape(u.first_name)} — <tg-emoji emoji-id="6267068789146260253">💰</tg-emoji> {format_number(w.balance or 0)} coins' if i == 1 else f'<tg-emoji emoji-id="5447203607294265305">🥈</tg-emoji> {escape(u.first_name)} — <tg-emoji emoji-id="6267068789146260253">💰</tg-emoji> {format_number(w.balance or 0)} coins' if i == 2 else f'<tg-emoji emoji-id="5453902265922376865">🥉</tg-emoji> {escape(u.first_name)} — <tg-emoji emoji-id="6267068789146260253">💰</tg-emoji> {format_number(w.balance or 0)} coins' if i == 3 else f'{i}. {escape(u.first_name)} — <tg-emoji emoji-id="6267068789146260253">💰</tg-emoji> {format_number(w.balance or 0)} coins') for i,(u,w) in enumerate(rows,1)) if rows else "No players yet.") + '\n\n<tg-emoji emoji-id="6086954744268460848">🔥</tg-emoji> <i>Keep climbing the leaderboard!</i>'
-    await message.reply(text, parse_mode="HTML")
+
+    entries = []
+    medal_ids = {
+        1: ("6265004494719816749", "🥇"),
+        2: ("5447203607294265305", "🥈"),
+        3: ("5453902265922376865", "🥉"),
+    }
+    for i, (u, w) in enumerate(rows, 1):
+        if i in medal_ids:
+            medal_id, fallback = medal_ids[i]
+            rank = f'<tg-emoji emoji-id="{medal_id}">{fallback}</tg-emoji>'
+        else:
+            rank = f"<b>{i:02d}.</b>"
+        crown = ' <tg-emoji emoji-id="6095957657145840116">👑</tg-emoji>' if i == 1 else ""
+        entries.append(
+            f"{rank}{crown} <b>{escape(u.first_name)}</b>\n"
+            f'    <tg-emoji emoji-id="6267068789146260253">💰</tg-emoji> {format_number(w.balance or 0)} coins'
+        )
+
+    heading = '<tg-emoji emoji-id="6325413811033477368">✨</tg-emoji> <b>RICHEST PLAYERS</b> <tg-emoji emoji-id="6325413811033477368">✨</tg-emoji>'
+    body = "\n\n".join(entries) if entries else "No players yet."
+    footer = '\n\n<tg-emoji emoji-id="6086954744268460848">🔥</tg-emoji> <i>Keep climbing the leaderboard!</i>'
+    await message.reply(f"{heading}\n\n{body}{footer}", parse_mode="HTML")
 
 @router.message(Command("toprich"))
 async def toprich(message: Message, db_session: AsyncSession, **kwargs):
