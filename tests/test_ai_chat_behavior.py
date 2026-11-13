@@ -23,6 +23,7 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
         ai_chat._bot_username = ""
         ai_chat._smart_reply_last_check.clear()
         ai_chat._smart_reply_user_last_check.clear()
+        ai_chat._group_recent_activity.clear()
 
     def test_untagged_group_messages_from_any_member_trigger_chat(self):
         for index, text in enumerate((
@@ -38,10 +39,10 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
                 ))
 
     def test_group_smart_reply_cooldowns_prevent_spam(self):
-        message = _group_message("hi")
+        message = _group_message("kya haal hai?")
         self.assertTrue(asyncio.run(ai_chat.is_alexa_trigger(message)))
-        # A second greeting in the same group is held by the 15-second group cooldown.
-        self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(_group_message("hello"))))
+        # A second non-greeting smart reply in the same group is held by cooldown.
+        self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(_group_message("kya scene hai?"))))
 
     def test_smart_reply_ignores_active_member_to_member_conversation(self):
         chat_id = -100555
