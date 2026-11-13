@@ -201,7 +201,7 @@ def _emotion_category(text: str) -> str | None:
         ("angry", r"angry|gussa|ghussa|naraz|irritated|🙄|😡|🤬|😠|😤"),
         ("love", r"thanks|thank you|shukriya|pyaar|pyar|cute|beautiful|love|😍|🥰|😘|💕|💜|🖤"),
         ("surprise", r"wow|omg|shocked|surprised|seriously|really|no way|😮|😱|🤯|😳"),
-        ("happy", r"congrats|congratulations|mubarak|well done|shabash|zabardast|amazing|awesome|great|maza|mazza|khushi|khush|enjoy|fun|acha lag|achha lag|🎉|🥳|🏆|💯|😄|😊|😁|🙂|😃"),
+        ("happy", r"congrats|congratulations|mubarak|well done|shabash|zabardast|amazing|awesome|great|maza|mazza|khushi|khush|enjoy|fun|acha lag|achha lag|chat kar|baat kar|tumhare saath|🎉|🥳|🏆|💯|😄|😊|😁|🙂|😃"),
         ("greeting", r"^\s*(?:hi+|hello+|helo+|hey+|salam|assalamualaikum|aoa|bye+|good\s+(?:morning|afternoon|evening|night)|good day|gm|gn|morning|afternoon|evening)\b"),
         ("attitude", r"attitude|boss|savage|swag|😎|😏|🗿"),
     )
