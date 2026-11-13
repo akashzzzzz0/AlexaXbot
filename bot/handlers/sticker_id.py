@@ -19,6 +19,19 @@ def _custom_emoji_text(text: str, offset: int, length: int) -> str:
         return ""
 
 
+def _extract_custom_emoji_ids(text: str, entities) -> list[tuple[str, str]]:
+    """Return preview text and custom emoji IDs from Telegram message entities."""
+    matches = []
+    for entity in entities or []:
+        entity_type = getattr(entity.type, "value", entity.type)
+        emoji_id = getattr(entity, "custom_emoji_id", None)
+        if entity_type != "custom_emoji" or not emoji_id:
+            continue
+        preview = _custom_emoji_text(text, entity.offset, entity.length)
+        matches.append((preview or "✨", str(emoji_id)))
+    return matches
+
+
 @router.message(Command("stickerid"))
 async def get_sticker_file_id(message: Message) -> None:
     """Return a sticker file_id only to the configured owner in private chat."""
@@ -69,14 +82,7 @@ async def get_custom_emoji_ids(message: Message) -> None:
 
     source_text = target.text or target.caption or ""
     entities = target.entities or target.caption_entities or []
-    matches = []
-    for entity in entities:
-        entity_type = getattr(entity.type, "value", entity.type)
-        emoji_id = getattr(entity, "custom_emoji_id", None)
-        if entity_type != "custom_emoji" or not emoji_id:
-            continue
-        preview = _custom_emoji_text(source_text, entity.offset, entity.length)
-        matches.append((preview or "✨", str(emoji_id)))
+    matches = _extract_custom_emoji_ids(source_text, entities)
 
     if not matches:
         await message.answer(
