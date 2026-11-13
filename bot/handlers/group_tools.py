@@ -19,6 +19,9 @@ from bot.config import settings
 
 router = Router()
 
+# One active Tag All run per group; /stoptagall signals its event.
+_active_tagall: dict[int, asyncio.Event] = {}
+
 async def _insert_or_get(session: AsyncSession, candidate, model, *conditions):
     """Insert inside a savepoint; reload the unique row if another update won."""
     try:
@@ -147,7 +150,7 @@ async def _send_mention_batches(message: Message, mentions: list[str], text: str
     for chunk in chunks:
         await message.answer(chunk, parse_mode="HTML", disable_web_page_preview=True)
 
-async def _send_member_tag_messages(message: Message, mentions: list[str], custom_text: str) -> int:
+async def _send_member_tag_messages(message: Message, mentions: list[str], custom_text: str, stop_event: asyncio.Event) -> int:
     """Send one friendly, clickable mention per saved member with Telegram-safe pacing."""
     greetings = (
         "🌸 Hey {mention}! A little hello from Alexa 💖",
@@ -158,6 +161,8 @@ async def _send_member_tag_messages(message: Message, mentions: list[str], custo
     )
     sent = 0
     for index, mention in enumerate(mentions):
+        if stop_event.is_set():
+            break
         body = greetings[index % len(greetings)].format(mention=mention)
         if custom_text:
             body += "\n\n📣 " + escape(custom_text)
@@ -217,11 +222,39 @@ async def tag_all_members(message: Message, db_session: AsyncSession, **kwargs):
             "Telegram does not let bots download the complete historical member list."
         )
         return
-    sent = await _send_member_tag_messages(message, mentions, custom_text)
-    if sent == len(mentions):
-        await message.reply(f"✅ Tag All complete: {sent}/{len(mentions)} members were mentioned individually.")
-    else:
-        await message.reply(f"⚠️ Tag All paused: {sent}/{len(mentions)} members were mentioned. Please try again later.")
+    chat_id = message.chat.id
+    if chat_id in _active_tagall:
+        await message.reply("⚠️ Tag All is already running in this group. Use /stoptagall to stop it.")
+        return
+    stop_event = asyncio.Event()
+    _active_tagall[chat_id] = stop_event
+    try:
+        sent = await _send_member_tag_messages(message, mentions, custom_text, stop_event)
+        if stop_event.is_set():
+            await message.reply(f"🛑 Tag All stopped: {sent}/{len(mentions)} members were mentioned.")
+        elif sent == len(mentions):
+            await message.reply(f"✅ Tag All complete: {sent}/{len(mentions)} members were mentioned individually.")
+        else:
+            await message.reply(f"⚠️ Tag All paused: {sent}/{len(mentions)} members were mentioned. Please try again later.")
+    finally:
+        if _active_tagall.get(chat_id) is stop_event:
+            _active_tagall.pop(chat_id, None)
+
+
+@router.message(Command("stoptagall"))
+async def stop_tag_all(message: Message, **kwargs):
+    if message.chat.type not in ("group", "supergroup"):
+        await message.reply("Use /stoptagall inside the group.")
+        return
+    if not await _mention_is_group_admin(message):
+        await message.reply("Only group admins can stop Tag All.")
+        return
+    stop_event = _active_tagall.get(message.chat.id)
+    if stop_event is None:
+        await message.reply("There is no active Tag All in this group.")
+        return
+    stop_event.set()
+    await message.reply("🛑 Tag All stop requested. Alexa will stop after the current message.")
 
 
 @router.message(F.text.regexp(r"(?i)^@tagall(?:\s|$)"))
