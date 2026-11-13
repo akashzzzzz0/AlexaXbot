@@ -12,6 +12,81 @@ from bot.config import get_gemini_api_key, settings
 from bot.services.ollama_ai import ollama_chat
 
 
+
+
+def _groq_api_key() -> str:
+    return (
+        getattr(settings, "GROQ_API_KEY", "")
+        or os.getenv("GROQ_API_KEY", "")
+    ).strip()
+
+
+async def _groq_chat(
+    messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False
+) -> str:
+    api_key = _groq_api_key()
+    if not api_key:
+        raise RuntimeError("groq_not_configured")
+
+    chat_messages = []
+    if system.strip():
+        chat_messages.append({"role": "system", "content": system.strip()})
+    for item in messages:
+        role = str(item.get("role", "user"))
+        if role == "model":
+            role = "assistant"
+        if role not in {"system", "user", "assistant"}:
+            continue
+        content = str(item.get("content", item.get("text", ""))).strip()
+        if content:
+            chat_messages.append({"role": role, "content": content})
+    if not chat_messages:
+        raise ValueError("empty_prompt")
+
+    model = (
+        getattr(settings, "GROQ_MODEL", "")
+        or os.getenv("GROQ_MODEL", "")
+        or "openai/gpt-oss-20b"
+    ).strip()
+    payload = {
+        "model": model,
+        "messages": chat_messages,
+        "temperature": temperature,
+        "max_completion_tokens": max_tokens,
+        "reasoning_effort": "low",
+    }
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
+
+    timeout = httpx.Timeout(14.0, connect=5.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+        )
+        if response.status_code >= 400:
+            try:
+                detail = response.json().get("error", {}).get("message", response.text[:300])
+            except (ValueError, AttributeError):
+                detail = response.text[:300]
+            raise httpx.HTTPStatusError(
+                f"Groq chat HTTP {response.status_code}: {detail}",
+                request=response.request,
+                response=response,
+            )
+        data = response.json()
+
+    choices = data.get("choices") or []
+    answer = str((choices[0].get("message") or {}).get("content") or "").strip() if choices else ""
+    if not answer:
+        raise RuntimeError("groq_empty_response")
+    return answer
+
+
 def _openai_api_key() -> str:
     return (
         getattr(settings, "OPENAI_API_KEY", "")
@@ -151,12 +226,13 @@ async def _gemini_chat(
 
 
 async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False):
-    """Try Gemini first, then Ollama, then OpenAI when earlier providers fail."""
+    """Try Groq first, then Gemini; retain Ollama/OpenAI as later fallbacks."""
     provider_errors = []
 
     # Bound each provider attempt so a slow cloud endpoint cannot leave Alexa
     # typing indefinitely. A timed-out request is cancelled before fallback.
     providers = [
+        ("groq", _groq_chat, bool(_groq_api_key()), 14.0),
         ("gemini", _gemini_chat, bool(get_gemini_api_key()), 14.0),
         ("ollama", ollama_chat, True, 14.0),
         ("openai", _openai_chat, bool(_openai_api_key()), 14.0),
