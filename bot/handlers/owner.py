@@ -81,7 +81,7 @@ def owner_kb(_=None) -> object:
     builder.button(text="👤 Active DM Users", callback_data="owner:users")
     builder.button(text="📩 User Messages / Inbox", callback_data="owner:inbox")
     builder.button(text="📨 DM Broadcast", callback_data="owner:broadcast")
-    builder.button(text="📨 Opt-in Group Message", callback_data="owner:promotion")
+    builder.button(text="👑 GLOBAL PROMOTION — ALL GROUPS", callback_data="owner:promotion")
     builder.button(text="🚀 Free Group Promotion Requests", callback_data="owner:promo_requests")
     builder.button(text="✉️ Message Selected Groups", callback_data="owner:group_message")
     builder.button(text="🎁 Referrals / Stars", callback_data="owner:referrals")
@@ -252,7 +252,7 @@ async def owner_settings(callback: CallbackQuery, _: callable, db_session: Async
     builder = InlineKeyboardBuilder()
     builder.button(text=f"{'🟢 Turn maintenance OFF' if _maintenance_mode else '🔧 Turn maintenance ON'}", callback_data="owner:maintenance")
     builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
-    builder.button(text="📨 Opt-in Group Message", callback_data="owner:promotion")
+    builder.button(text="👑 GLOBAL PROMOTION — ALL GROUPS", callback_data="owner:promotion")
     builder.button(text="🚀 Free Group Promotion Requests", callback_data="owner:promo_requests")
     builder.button(text="👥 Groups • Activity • Links • Permissions", callback_data="owner:groups")
     builder.button(text="◀️ Owner Panel", callback_data="owner:menu")
@@ -1916,7 +1916,7 @@ async def process_group_promotion(message: Message, _: callable, db_session: Asy
     )
     summary = (
         "📣 <b>GLOBAL GROUP MESSAGE REPORT</b>\n\n"
-        f"📨 Opted-in groups: <b>{total}</b>\n"
+        f"👥 Active Alexa groups: <b>{total}</b>\n"
         f"🟢 Delivered: <b>{sent}</b>\n"
         f"🔴 Failed: <b>{len(failed)}</b>"
     )
