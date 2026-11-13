@@ -82,8 +82,8 @@ async def legacy_balance(message: Message, _: callable, db_session: AsyncSession
     status = ('Dead <tg-emoji emoji-id="6093636111358235216">💀</tg-emoji>' if (game_profile.deaths or 0) > 0 else 'Alive 💚')
     name = escape(account.first_name or "User")
     await message.reply(
-        f"👤 <b>Name:</b> {name}\n"
-        f"💰 <b>Balance:</b> {format_number(wallet.balance or 0)} coins\n"
+        f'<tg-emoji emoji-id="5974048815789903111">👤</tg-emoji> <b>Name:</b> {name}\n'
+        f'<tg-emoji emoji-id="6325444137797554944">💰</tg-emoji> <b>Balance:</b> {format_number(wallet.balance or 0)} coins\n'
         f"🏆 <b>Rank:</b> {rank_position}\n"
         f"⚪ <b>Level {level}:</b> {format_number(level_progress)}/{format_number(level_required)} XP\n"
         f"⚔️ <b>Kills:</b> {game_profile.kills or 0}\n"
