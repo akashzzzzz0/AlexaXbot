@@ -246,8 +246,9 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
     # Keep the established provider order, but make fallback bounded and fast.
     # A slow first provider must not leave Alexa typing for a long time.
     providers = [
-        ("groq", _groq_chat, bool(_groq_api_key()), 8.0),
+        # Gemini is the preferred first provider; other providers remain fallbacks.
         ("gemini", _gemini_chat, bool(get_gemini_api_key()), 6.0),
+        ("groq", _groq_chat, bool(_groq_api_key()), 8.0),
         ("ollama", ollama_chat, True, 6.0),
         ("openai", _openai_chat, bool(_openai_api_key()), 6.0),
     ]

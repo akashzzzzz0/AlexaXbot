@@ -703,7 +703,7 @@ async def alexa_ai_chat(message: Message) -> None:
     except (httpx.HTTPError, ValueError, TypeError, RuntimeError) as exc:
         logger.warning(
             "Alexa AI reply failed for chat_id=%s: %s (%s)",
-            message.chat.id, type(exc).__name__, str(exc)[:220],
+            message.chat.id, type(exc).__name__, str(exc)[:1200],
         )
         if smart_mode:
             answer = _smart_group_reply_fallback(original_text or text)
