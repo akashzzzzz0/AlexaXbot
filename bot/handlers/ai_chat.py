@@ -139,7 +139,7 @@ async def _explicitly_mentions_alexa(message: Message) -> bool:
 
     text = message.text or ""
     return bool(re.search(
-        rf"(?<![\\w@])@{re.escape(_bot_username)}(?![A-Za-z0-9_])",
+        rf"(?<![\w@])@{re.escape(_bot_username)}(?![A-Za-z0-9_])",
         text,
         re.IGNORECASE,
     ))
