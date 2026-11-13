@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     BOT_TOKEN: str = ""
     DATABASE_URL: str = "sqlite+aiosqlite:///./alexa.db"
 
+    # Groq is the primary chat provider; keep its key in host environment settings.
+    GROQ_API_KEY: str = ""
+    GROQ_MODEL: str = "openai/gpt-oss-20b"
+
     # OpenAI key is supplied only through private host environment settings.
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4.1-mini"
