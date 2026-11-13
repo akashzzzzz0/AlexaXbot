@@ -201,7 +201,7 @@ def _emotion_category(text: str) -> str | None:
         ("angry", r"angry|gussa|ghussa|naraz|irritated|🙄|😡|🤬|😠|😤"),
         ("love", r"thanks|thank you|shukriya|pyaar|pyar|cute|beautiful|love|😍|🥰|😘|💕|💜|🖤"),
         ("surprise", r"wow|omg|shocked|surprised|seriously|really|no way|😮|😱|🤯|😳"),
-        ("happy", r"congrats|congratulations|mubarak|well done|shabash|zabardast|amazing|awesome|great|🎉|🥳|🏆|💯"),
+        ("happy", r"congrats|congratulations|mubarak|well done|shabash|zabardast|amazing|awesome|great|maza|mazza|khushi|khush|enjoy|fun|acha lag|achha lag|🎉|🥳|🏆|💯|😄|😊|😁|🙂|😃"),
         ("greeting", r"^\s*(?:hi+|hello+|helo+|hey+|salam|assalamualaikum|aoa|bye+|good\s+(?:morning|afternoon|evening|night)|good day|gm|gn|morning|afternoon|evening)\b"),
         ("attitude", r"attitude|boss|savage|swag|😎|😏|🗿"),
     )
@@ -743,7 +743,17 @@ async def alexa_ai_chat(message: Message) -> None:
         pass
     # Group reactions are handled independently for all suitable messages.
     try:
-        mood_emoji = await _chat_mood_emoji(message.bot, original_text or text)
+        # The model sometimes adds ordinary Unicode emojis despite the prompt.
+        # Remove those so Alexa's supplied animated custom emoji is used instead.
+        answer = re.sub(
+            r"[\\U0001F000-\\U0001FAFF\\u2600-\\u27BF][\\uFE0E\\uFE0F]?(?:\\u200D[\\U0001F000-\\U0001FAFF])*(?:\\U0001F3FB-\\U0001F3FF)?",
+            "",
+            answer,
+        ).strip()
+        # Prefer the reply's own mood (e.g. "chat ka maza"), then the user's message.
+        mood_emoji = _pick_mood_custom_emoji(
+            _emotion_category(answer) or _emotion_category(original_text or text)
+        )
         mood_suffix = f" {mood_emoji}" if mood_emoji else ""
         await message.reply(f"{html.escape(answer)}{mood_suffix}", parse_mode="HTML")
     except Exception as exc:
