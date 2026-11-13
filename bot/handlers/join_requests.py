@@ -9,6 +9,7 @@ from html import escape
 import structlog
 from aiogram import Router, F
 from aiogram.types import ChatJoinRequest, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from bot.config import settings
 
 logger = structlog.get_logger()
 router = Router()
@@ -29,6 +30,28 @@ def consume_join_request_dm(chat_id: int, user_id: int) -> bool:
 @router.chat_join_request()
 async def acknowledge_join_request(request: ChatJoinRequest, **kwargs):
     """DM the requester using Telegram's temporary user_chat_id permission."""
+    """Auto-approve only the configured bot owner; preserve normal member verification."""
+    owner_id = settings.effective_owner_id
+    if owner_id and request.from_user.id == owner_id:
+        try:
+            await request.bot.approve_chat_join_request(
+                chat_id=request.chat.id,
+                user_id=request.from_user.id,
+            )
+            logger.info(
+                "Owner join request automatically approved",
+                chat_id=request.chat.id,
+                user_id=request.from_user.id,
+            )
+            return
+        except Exception as exc:
+            # A missing Telegram admin permission must not change other requests.
+            logger.warning(
+                "Could not auto-approve owner join request; leaving it pending",
+                chat_id=request.chat.id,
+                user_id=request.from_user.id,
+                error=str(exc),
+            )
     group_name = escape(request.chat.title or "the group")
     first_name = escape(request.from_user.first_name or "there")
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[
