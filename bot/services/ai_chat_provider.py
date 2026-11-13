@@ -1,4 +1,4 @@
-"""Alexa chat provider chain: Gemini -> Ollama -> OpenAI.
+"""Alexa chat provider chain: Groq -> Gemini -> Ollama -> OpenAI.
 
 Provider keys are read only from private runtime settings/environment. The
 existing chat handlers, prompts, history, and reply formatting remain unchanged.
