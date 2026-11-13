@@ -244,36 +244,25 @@ async def leaders(message: Message, db_session: AsyncSession, **kwargs):
         3: "5453902265922376865",
     }
     entries = []
+    coin = '<tg-emoji emoji-id="6267068789146260253">💰</tg-emoji>'
+
     for i, (u, w) in enumerate(rows, 1):
         name = escape(u.first_name or "Player")
-        coins = format_number(w.balance or 0)
-        coin = '<tg-emoji emoji-id="6267068789146260253">💰</tg-emoji>'
+        amount = format_number(w.balance or 0)
 
-        if i == 1:
-            crown = '<tg-emoji emoji-id="6095957657145840116">👑</tg-emoji>'
-            medal = f'<tg-emoji emoji-id="{medal_ids[1]}">🥇</tg-emoji>'
-            entries.append(
-                f'<b>{crown} KING OF COINS</b>\n'
-                f'{medal} <b>{name}</b>\n'
-                f'{coin} <b>{coins} coins</b>'
-            )
-        elif i in (2, 3):
-            fallback = "🥈" if i == 2 else "🥉"
-            medal = f'<tg-emoji emoji-id="{medal_ids[i]}">{fallback}</tg-emoji>'
-            entries.append(
-                f'{medal} <b>{name}</b>\n'
-                f'{coin} <b>{coins} coins</b>'
-            )
+        if i in medal_ids:
+            fallback = {1: "🥇", 2: "🥈", 3: "🥉"}[i]
+            position = f'<tg-emoji emoji-id="{medal_ids[i]}">{fallback}</tg-emoji>'
+            entries.append(f'{position} ㅤ<b>{name}</b> _ {amount} {coin}')
         else:
-            entries.append(
-                f'<b>{i:02d}.</b> {name}  ·  {coin} <b>{coins}</b>'
-            )
+            entries.append(f'<b>{i:02d}.</b> ㅤ<b>{name}</b> _ {amount} {coin}')
 
-    sparkle = '<tg-emoji emoji-id="6325413811033477368">✨</tg-emoji>'
-    heading = f'{sparkle} <b>ALEXA ROYALS</b> {sparkle}\n<i>THE RICHEST PLAYERS</i>'
-    body = "\n\n".join(entries) if entries else "No players yet."
-    footer = '\n\n<tg-emoji emoji-id="6086954744268460848">🔥</tg-emoji> <i>RULE THE LEADERBOARD</i>'
-    await message.reply(f"{heading}\n\n{body}{footer}", parse_mode="HTML")
+    heading = (
+        '<b>ㅤㅤ👑 𝗔𝗟𝗘𝗫𝗔 𝗪𝗘𝗔𝗟𝗧𝗛 𝗟𝗘𝗚𝗘𝗡𝗗𝗦 👑ㅤㅤ</b>\\n'
+        '<b>ㅤㅤㅤㅤ𝗧𝗢𝗣 𝟭𝟬 𝗣𝗟𝗔𝗬𝗘𝗥𝗦ㅤㅤㅤㅤ</b>'
+    )
+    body = "\\n\\n".join(entries) if entries else "No players yet."
+    await message.reply(f"{heading}\\n\\n{body}", parse_mode="HTML")
 
 @router.message(Command("toprich"))
 async def toprich(message: Message, db_session: AsyncSession, **kwargs):
