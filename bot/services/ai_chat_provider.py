@@ -229,18 +229,24 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
     """Try Groq first, then Gemini; retain Ollama/OpenAI as later fallbacks."""
     provider_errors = []
 
-    # Bound each provider attempt so a slow cloud endpoint cannot leave Alexa
-    # typing indefinitely. A timed-out request is cancelled before fallback.
+    # Keep the established provider order, but make fallback bounded and fast.
+    # A slow first provider must not leave Alexa typing for a long time.
     providers = [
-        ("groq", _groq_chat, bool(_groq_api_key()), 14.0),
-        ("gemini", _gemini_chat, bool(get_gemini_api_key()), 14.0),
-        ("ollama", ollama_chat, True, 14.0),
-        ("openai", _openai_chat, bool(_openai_api_key()), 14.0),
+        ("groq", _groq_chat, bool(_groq_api_key()), 8.0),
+        ("gemini", _gemini_chat, bool(get_gemini_api_key()), 6.0),
+        ("ollama", ollama_chat, True, 6.0),
+        ("openai", _openai_chat, bool(_openai_api_key()), 6.0),
     ]
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 18.0
     for name, provider, configured, timeout_seconds in providers:
         if not configured:
             provider_errors.append(f"{name}:not_configured")
             continue
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            provider_errors.append(f"{name}:overall_timeout")
+            break
         try:
             return await asyncio.wait_for(
                 provider(
@@ -250,7 +256,7 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
                     max_tokens=max_tokens,
                     json_mode=json_mode,
                 ),
-                timeout=timeout_seconds,
+                timeout=min(timeout_seconds, remaining),
             )
         except asyncio.TimeoutError:
             provider_errors.append(f"{name}:timeout")

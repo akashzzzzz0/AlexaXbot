@@ -531,18 +531,18 @@ async def _ask_ai_with_typing(
     """Keep Telegram's typing indicator active while Alexa prepares an AI reply."""
     # Keep the typing indicator alive while the model is working.
     async def _typing_hint() -> None:
-        try:
-            while True:
+        while True:
+            try:
                 await message.bot.send_chat_action(
                     chat_id=message.chat.id,
                     action="typing",
                 )
-                await asyncio.sleep(4)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            # Typing is optional; do not affect response generation.
-            pass
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                # A temporary Telegram action error must not stop future retries.
+                logger.debug("Alexa typing indicator retry: %s", type(exc).__name__)
+            await asyncio.sleep(4)
 
     typing_task = asyncio.create_task(_typing_hint())
     try:
@@ -700,20 +700,34 @@ async def alexa_ai_chat(message: Message) -> None:
         answer = await _ask_ai_with_typing(
             message, text, history, smart_mode=smart_mode, gender_style=gender_style
         )
-    except (httpx.HTTPError, ValueError, TypeError) as exc:
-        logger.warning("Alexa AI reply failed for chat_id=%s: %s", message.chat.id, type(exc).__name__)
-        # Basic greetings should never be silently ignored just because Ollama is
-        # temporarily unavailable. Keep this fallback limited to unaddressed group
-        # greetings; addressed/private AI requests still fail silently as before.
+    except (httpx.HTTPError, ValueError, TypeError, RuntimeError) as exc:
+        logger.warning(
+            "Alexa AI reply failed for chat_id=%s: %s (%s)",
+            message.chat.id, type(exc).__name__, str(exc)[:220],
+        )
         if smart_mode:
             answer = _smart_group_reply_fallback(original_text or text)
         else:
+            try:
+                await message.reply("Abhi reply nahi aa paaya 😅 Ek baar phir bolo.")
+            except Exception as send_exc:
+                logger.warning(
+                    "Alexa AI failure notice could not be sent for chat_id=%s: %s",
+                    message.chat.id, type(send_exc).__name__,
+                )
             return
-    except Exception:
+    except Exception as exc:
         logger.exception("Unexpected Alexa AI chat failure for chat_id=%s", message.chat.id)
         if smart_mode:
             answer = _smart_group_reply_fallback(original_text or text)
         else:
+            try:
+                await message.reply("Abhi reply nahi aa paaya 😅 Ek baar phir bolo.")
+            except Exception as send_exc:
+                logger.warning(
+                    "Alexa AI failure notice could not be sent for chat_id=%s: %s",
+                    message.chat.id, type(send_exc).__name__,
+                )
             return
 
     # Never send a fallback/fictional AI response when Ollama is unavailable.
