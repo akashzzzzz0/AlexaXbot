@@ -643,15 +643,6 @@ async def alexa_ai_chat(message: Message) -> None:
 
     key = (message.chat.id, message.from_user.id)
     original_text = (message.text or "").strip()
-    replied_to_alexa = bool(
-        message.reply_to_message
-        and message.reply_to_message.from_user
-        and message.reply_to_message.from_user.id == message.bot.id
-    )
-    directly_addressed = replied_to_alexa or bool(
-        re.search(r"(?i)(?<!\w)alexa(?!\w)", original_text)
-        or (username and re.search(rf"(?<!\w)@{re.escape(username)}\b", original_text, re.IGNORECASE))
-    )
     # Group replies are always explicitly addressed; private chat remains unchanged.
     smart_mode = False
     history = _conversations[key]
