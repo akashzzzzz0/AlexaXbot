@@ -531,18 +531,23 @@ async def _ask_ai_with_typing(
     """Keep Telegram's typing indicator active while Alexa prepares an AI reply."""
     # Keep the typing indicator alive while the model is working.
     async def _typing_hint() -> None:
-        try:
-            while True:
+        while True:
+            try:
                 await message.bot.send_chat_action(
                     chat_id=message.chat.id,
                     action="typing",
                 )
-                await asyncio.sleep(4)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            # Typing is optional; do not affect response generation.
-            pass
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                # A temporary Telegram/API error must not permanently stop
+                # the typing indicator while the AI request is still running.
+                logger.debug(
+                    "Alexa typing indicator retry for chat_id=%s: %s",
+                    message.chat.id,
+                    type(exc).__name__,
+                )
+            await asyncio.sleep(4)
 
     typing_task = asyncio.create_task(_typing_hint())
     try:
