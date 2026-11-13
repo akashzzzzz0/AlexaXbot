@@ -23,6 +23,7 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
         ai_chat._bot_username = ""
         ai_chat._smart_reply_last_check.clear()
         ai_chat._smart_reply_user_last_check.clear()
+        ai_chat._group_recent_activity.clear()
 
     def test_untagged_group_messages_from_any_member_trigger_chat(self):
         for index, text in enumerate((
