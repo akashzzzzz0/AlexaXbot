@@ -1,4 +1,4 @@
-"""Alexa chat provider chain: Ollama -> OpenAI -> Gemini.
+"""Alexa chat provider chain: Gemini -> Ollama -> OpenAI.
 
 Provider keys are read only from private runtime settings/environment. The
 existing chat handlers, prompts, history, and reply formatting remain unchanged.
@@ -151,15 +151,15 @@ async def _gemini_chat(
 
 
 async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False):
-    """Try Ollama first, OpenAI second, and Gemini last when earlier providers fail."""
+    """Try Gemini first, then Ollama, then OpenAI when earlier providers fail."""
     provider_errors = []
 
     # Bound each provider attempt so a slow cloud endpoint cannot leave Alexa
     # typing indefinitely. A timed-out request is cancelled before fallback.
     providers = [
+        ("gemini", _gemini_chat, bool(get_gemini_api_key()), 14.0),
         ("ollama", ollama_chat, True, 14.0),
         ("openai", _openai_chat, bool(_openai_api_key()), 14.0),
-        ("gemini", _gemini_chat, bool(get_gemini_api_key()), 14.0),
     ]
     for name, provider, configured, timeout_seconds in providers:
         if not configured:
