@@ -95,10 +95,6 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
         self.assertEqual(ai_chat._emotion_category("good evening"), "greeting")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class AlexaAIProviderFailureTests(unittest.TestCase):
     def test_provider_failure_is_reported_as_a_distinct_chat_error(self):
         with patch.object(ai_chat, "ai_chat_completion", side_effect=ValueError("invalid provider response")):
