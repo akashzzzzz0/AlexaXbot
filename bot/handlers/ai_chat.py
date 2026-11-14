@@ -623,8 +623,21 @@ async def _ask_ai(
     is_alexa_trigger,
 )
 async def alexa_ai_chat(message: Message) -> None:
-    # One indicator task covers the entire turn, including DB history loading,
-    # provider fallback attempts, and response generation.
+    # Send the first action inline before any history/database/provider work.
+    # A background task alone can lose the race to a very fast reply, so the
+    # client may never display the typing indicator at all.
+    try:
+        await message.bot.send_chat_action(
+            chat_id=message.chat.id,
+            action="typing",
+        )
+    except Exception as exc:
+        logger.warning(
+            "Alexa initial typing action failed for chat_id=%s: %s: %s",
+            message.chat.id, type(exc).__name__, str(exc).replace("\n", " ")[:240],
+        )
+
+    # Keep refreshing while history loads and AI/provider fallback runs.
     typing_task = asyncio.create_task(_typing_indicator_loop(message))
     try:
         await _process_alexa_ai_chat(message)
