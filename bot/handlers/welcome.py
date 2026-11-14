@@ -415,6 +415,20 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
                 logger.warning("Anti-bot could not remove joining bot", chat_id=chat.id, user_id=user.id, error=str(exc))
         return
 
+    # Group admins and creators are exempt from ChannelGuard.
+    joining_user_is_admin = False
+    try:
+        member_status = await event.bot.get_chat_member(chat.id, user.id)
+        status_value = str(getattr(member_status.status, "value", member_status.status))
+        joining_user_is_admin = status_value in ("administrator", "creator", "owner")
+    except Exception as exc:
+        logger.debug(
+            "Could not verify joining member role for ChannelGuard exemption",
+            chat_id=chat.id,
+            user_id=user.id,
+            error=str(exc),
+        )
+
     # ChannelGuard checks only actual URLs in exposed profile fields.
     # A connected channel alone is not a violation.
     bio_setting = await db_session.scalar(
