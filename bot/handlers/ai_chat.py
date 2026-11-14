@@ -351,7 +351,7 @@ def _group_conversation_is_active(chat_id: int) -> bool:
 
 
 _GREETING_RE = re.compile(
-    r"^\s*(?:hi+|hello+|helo+|good\s+morning|good\s+night)[.!?,\s]*$",
+    r"^\s*(?:hi+|hello+|helo+|hey+|good\s+(?:morning|afternoon|evening|night)|good\s+day|gm|gn|morning|afternoon|evening)[.!?,\s]*$",
     re.IGNORECASE,
 )
 _ALEXA_PREFIX_RE = re.compile(r"^\s*alexa\b[\s,!:.-]*(.*)$", re.IGNORECASE)
