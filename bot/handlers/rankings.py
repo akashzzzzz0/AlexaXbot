@@ -18,9 +18,10 @@ from bot.services.rankings_store import get_rankings, get_recap_messages
 router = Router(name="group_rankings")
 logger = structlog.get_logger()
 _PERIODS = {
-    "overall": ("🌍 Overall", "Overall"),
+    "overall": ("👑 Overall", "Overall"),
     "today": ("📅 Today", "Today"),
-    "week": ("📊 Week", "Last 7 days"),
+    "week": ("🏆 Week", "Last 7 days"),
+    "global": ("🌐 Global", "All Alexa groups · Today"),
 }
 _HEADER_EMOJI_ID = "6093382540784046658"
 _NAME_EMOJI_ID = "6258164063516233396"
@@ -28,13 +29,19 @@ _CROWN_EMOJI_ID = "6093382540784046658"
 
 
 def _keyboard(selected: str) -> InlineKeyboardMarkup:
-    row = []
-    for key, (label, _) in _PERIODS.items():
-        row.append(InlineKeyboardButton(
+    def button(key: str) -> InlineKeyboardButton:
+        label = _PERIODS[key][0]
+        return InlineKeyboardButton(
             text=f"✓ {label}" if key == selected else label,
             callback_data=f"rankings:{key}",
-        ))
-    return InlineKeyboardMarkup(inline_keyboard=[row])
+        )
+
+    # Requested layout: Overall alone; Today/Week side by side; Global alone.
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [button("overall")],
+        [button("today"), button("week")],
+        [button("global")],
+    ])
 
 
 def _leaderboard_image(period: str) -> BufferedInputFile:
@@ -117,7 +124,9 @@ def _render(rows, total: int, period: str, recap: str) -> str:
     else:
         lines.append("<i>Not enough text messages for a recap yet.</i>")
     if period == "overall":
-        lines.append("<i>AI recap uses recent messages from the last 7 days; Overall ranking is all-time.</i>")
+        lines.append("<i>Overall ranking is all-time for this group.</i>")
+    elif period == "global":
+        lines.append("<i>Daily ranking combines messages from all Alexa groups.</i>")
     # Telegram applies its caption limit to the rendered text, not the raw
     # HTML markup. Slicing the raw HTML at 1024 can cut an entity/tag in half
     # and make Telegram reject the entire leaderboard message.
@@ -126,7 +135,7 @@ def _render(rows, total: int, period: str, recap: str) -> str:
 
 async def _build_view(group_id: int, period: str):
     rows, total = await get_rankings(group_id, period)
-    messages = await get_recap_messages(group_id, period)
+    messages = [] if period == "global" else await get_recap_messages(group_id, period)
     recap = ""
     if messages:
         from bot.services.ollama_ai import ollama_chat
