@@ -417,9 +417,11 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
 
     # Group admins and creators are exempt from ChannelGuard.
     joining_user_is_admin = False
+    joining_role_verified = False
     try:
         member_status = await event.bot.get_chat_member(chat.id, user.id)
         status_value = str(getattr(member_status.status, "value", member_status.status))
+        joining_role_verified = True
         joining_user_is_admin = status_value in ("administrator", "creator", "owner")
     except Exception as exc:
         logger.debug(
@@ -434,7 +436,7 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
     bio_setting = await db_session.scalar(
         select(BioLinkProtectionSetting).where(BioLinkProtectionSetting.group_id == chat.id)
     )
-    if bio_setting and bio_setting.enabled and not joining_user_is_admin:
+    if bio_setting and bio_setting.enabled and joining_role_verified and not joining_user_is_admin:
         member_row = await db_session.scalar(
             select(GroupMember).where(
                 GroupMember.group_id == chat.id,
@@ -904,63 +906,6 @@ async def group_service_message_welcome(message: Message, db_session: AsyncSessi
         await _send_welcome_message(message.bot, db_session, message.chat, joined_user)
 
 
-@router.message(Command("channelguard"))
-async def cmd_channelguard(message: Message, db_session: AsyncSession, **kwargs):
-    """Manage ChannelGuard for this group: actual bio/linked-channel description URLs only."""
-    if message.chat.type not in ("group", "supergroup") or not message.from_user:
-        await message.reply("Use /channelguard inside a group.")
-        return
-    try:
-        actor = await message.bot.get_chat_member(message.chat.id, message.from_user.id)
-        status = str(getattr(actor.status, "value", actor.status))
-        if status not in ("administrator", "creator", "owner"):
-            await message.reply("Only group admins can manage ChannelGuard.")
-            return
-    except Exception:
-        await message.reply("Could not verify your group-admin permissions.")
-        return
-
-    parts = (message.text or "").split()
-    requested = parts[1].lower() if len(parts) > 1 else ""
-    if requested not in ("", "on", "off"):
-        await message.reply("Usage: /channelguard on, /channelguard off, or /channelguard for status.")
-        return
-
-    setting = await db_session.scalar(
-        select(BioLinkProtectionSetting).where(
-            BioLinkProtectionSetting.group_id == message.chat.id
-        )
-    )
-    if requested:
-        enabled = requested == "on"
-        if setting is None:
-            setting, _created = await _insert_or_get(
-                db_session,
-                BioLinkProtectionSetting(group_id=message.chat.id, enabled=enabled),
-                BioLinkProtectionSetting,
-                BioLinkProtectionSetting.group_id == message.chat.id,
-            )
-        setting.enabled = enabled
-        try:
-            await db_session.commit()
-        except Exception as exc:
-            await db_session.rollback()
-            logger.warning("Could not save ChannelGuard switch", group_id=message.chat.id, error=str(exc))
-            await message.reply("Could not save ChannelGuard right now. Try again.")
-            return
-    else:
-        enabled = bool(setting and setting.enabled)
-
-    state = "🟢 ON" if enabled else "🔴 OFF"
-    await message.reply(
-        f"🛡️ <b>ChannelGuard: {state}</b>\n\n"
-        "Checks actual links in a member's bio and, when Telegram exposes it, the connected channel description. "
-        "A connected channel by itself is not a violation.\n"
-        "Rule: 3 warnings → 1 hour mute. Buttons: Whitelist and Unmute.",
-        parse_mode="HTML",
-    )
-
-
 @router.message(F.chat.type.in_({"group", "supergroup"}))
 async def group_message_handler(message: Message, db_session: AsyncSession, db_user=None, db_group=None, group_security=None, _=None, **kwargs):
     # This broad handler is registered before the command routers. Let slash
@@ -1079,12 +1024,14 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
     # Resolve admin status once for link exemptions. Admin links are exempt
     # automatically (no command/configuration); non-admin behavior is unchanged.
     sender_is_admin = False
+    sender_role_verified = False
     if message.from_user:
         try:
             member_status = await message.bot.get_chat_member(
                 message.chat.id, message.from_user.id
             )
             sender_status = str(getattr(member_status.status, "value", member_status.status))
+            sender_role_verified = True
             sender_is_admin = sender_status in ("administrator", "creator", "owner")
         except Exception as exc:
             logger.debug(
@@ -1173,7 +1120,7 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                 BioLinkProtectionSetting.group_id == db_group.id
             )
         )
-        if bio_setting and bio_setting.enabled and not sender_is_admin:
+        if bio_setting and bio_setting.enabled and sender_role_verified and not sender_is_admin:
             member_row = await db_session.scalar(
                 select(GroupMember).where(
                     GroupMember.group_id == db_group.id,
