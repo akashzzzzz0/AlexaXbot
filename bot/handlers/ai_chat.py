@@ -322,6 +322,11 @@ _ALEXA_REPLY_COOLDOWN_SECONDS = 3.0
 _smart_reply_last_check: dict[int, float] = {}
 _smart_reply_user_last_check: dict[tuple[int, int], float] = {}
 _smart_reply_message_count: dict[int, int] = defaultdict(int)
+_smart_reply_user_recent_messages: dict[tuple[int, int], deque] = defaultdict(lambda: deque(maxlen=12))
+_smart_reply_spam_last_message: dict[tuple[int, int], int] = {}
+_smart_reply_spam_burst: dict[tuple[int, int], bool] = {}
+_SMART_REPLY_SPAM_WINDOW_SECONDS = 12.0
+_SMART_REPLY_SPAM_MIN_MESSAGES = 2
 _SMART_REPLY_GROUP_COOLDOWN_SECONDS = 60.0
 _SMART_REPLY_USER_COOLDOWN_SECONDS = 45.0
 
@@ -409,8 +414,27 @@ def _message_mentions_another_member(message: Message, text: str) -> bool:
     return False
 
 
+def _is_repeated_sender_burst(message: Message, now: float | None = None) -> bool:
+    """Allow each message from a member who is actively sending a short burst."""
+    if not message.from_user:
+        return False
+    now = time.monotonic() if now is None else now
+    user_key = (message.chat.id, message.from_user.id)
+    if _smart_reply_spam_last_message.get(user_key) == message.message_id:
+        return _smart_reply_spam_burst.get(user_key, False)
+
+    recent = _smart_reply_user_recent_messages[user_key]
+    recent.append(now)
+    while recent and now - recent[0] > _SMART_REPLY_SPAM_WINDOW_SECONDS:
+        recent.popleft()
+    is_burst = len(recent) >= _SMART_REPLY_SPAM_MIN_MESSAGES
+    _smart_reply_spam_last_message[user_key] = message.message_id
+    _smart_reply_spam_burst[user_key] = is_burst
+    return is_burst
+
+
 def _should_smart_reply(message: Message, text: str) -> bool:
-    """Reply to greetings or every sixth unaddressed human message, per group."""
+    """Reply to relevant messages; repeated sender bursts bypass pacing."""
     is_greeting = _looks_like_smart_reply_candidate(text)
 
     # A message addressed to another member is never an Alexa invitation.
@@ -421,23 +445,25 @@ def _should_smart_reply(message: Message, text: str) -> bool:
     chat_id = message.chat.id
     user_id = message.from_user.id if message.from_user else 0
     user_key = (chat_id, user_id)
+    spam_burst = _is_repeated_sender_burst(message, now)
 
-    # Count ordinary unaddressed messages even during cooldown, so the
-    # sixth-message cadence reflects actual group traffic continuously.
+    # Keep the existing sixth-message cadence for ordinary messages.
+    # Once a member sends a burst, each message in that burst can be answered.
     if not is_greeting:
         _smart_reply_message_count[chat_id] += 1
-        if _smart_reply_message_count[chat_id] % 6 != 0:
+        if not spam_burst and _smart_reply_message_count[chat_id] % 6 != 0:
             return False
 
-    # Every group's one-minute cooldown is independent. Explicit Alexa calls
-    # are handled before this function and intentionally bypass this gate.
-    last_group_reply = _smart_reply_last_check.get(chat_id)
-    if last_group_reply is not None and now - last_group_reply < _SMART_REPLY_GROUP_COOLDOWN_SECONDS:
-        return False
+    # Normal conversation keeps its independent per-group and per-user pacing.
+    # Repeated messages from the same sender intentionally bypass both gates.
+    if not spam_burst:
+        last_group_reply = _smart_reply_last_check.get(chat_id)
+        if last_group_reply is not None and now - last_group_reply < _SMART_REPLY_GROUP_COOLDOWN_SECONDS:
+            return False
 
-    last_user_check = _smart_reply_user_last_check.get(user_key)
-    if last_user_check is not None and now - last_user_check < _SMART_REPLY_USER_COOLDOWN_SECONDS:
-        return False
+        last_user_check = _smart_reply_user_last_check.get(user_key)
+        if last_user_check is not None and now - last_user_check < _SMART_REPLY_USER_COOLDOWN_SECONDS:
+            return False
     _smart_reply_user_last_check[user_key] = now
     return True
 
@@ -464,8 +490,14 @@ async def is_alexa_trigger(message: Message) -> bool:
         _active_conversations.discard(session_key)
         return False
 
-    # Apply the cooldown to every Alexa reply in this group, including direct calls.
-    if time.monotonic() - _last_alexa_reply_at.get(session_key, 0.0) < _ALEXA_REPLY_COOLDOWN_SECONDS:
+    # Repeated messages from the same sender bypass the short per-user guard,
+    # so each message in an active burst can receive its own distinct reply.
+    spam_burst = _is_repeated_sender_burst(message)
+    if (
+        not spam_burst
+        and time.monotonic() - _last_alexa_reply_at.get(session_key, 0.0)
+        < _ALEXA_REPLY_COOLDOWN_SECONDS
+    ):
         return False
 
     replied = message.reply_to_message
