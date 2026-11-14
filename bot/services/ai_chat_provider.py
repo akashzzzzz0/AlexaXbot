@@ -190,6 +190,63 @@ async def _groq_chat(
     return answer
 
 
+
+def _xai_api_key() -> str:
+    return (
+        getattr(settings, "XAI_API_KEY", "")
+        or os.getenv("XAI_API_KEY", "")
+        or getattr(settings, "GROK_API_KEY", "")
+        or os.getenv("GROK_API_KEY", "")
+    ).strip()
+
+
+async def _xai_chat(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False) -> str:
+    api_key = _xai_api_key()
+    if not api_key:
+        raise RuntimeError("grok_not_configured")
+    chat_messages = []
+    if system.strip():
+        chat_messages.append({"role": "system", "content": system.strip()})
+    for item in messages:
+        role = str(item.get("role", "user"))
+        if role == "model":
+            role = "assistant"
+        if role not in {"system", "user", "assistant"}:
+            continue
+        content = str(item.get("content", item.get("text", ""))).strip()
+        if content:
+            chat_messages.append({"role": role, "content": content})
+    if not chat_messages:
+        raise ValueError("empty_prompt")
+    model = (getattr(settings, "GROK_MODEL", "") or os.getenv("GROK_MODEL", "") or "grok-3-mini").strip()
+    payload = {"model": model, "messages": chat_messages, "temperature": temperature, "max_tokens": max_tokens}
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
+    timeout = httpx.Timeout(12.0, connect=5.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            "https://api.x.ai/v1/chat/completions",
+            json=payload,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        )
+        if response.status_code >= 400:
+            try:
+                detail = response.json().get("error", {}).get("message", response.text[:300])
+            except (ValueError, AttributeError):
+                detail = response.text[:300]
+            raise httpx.HTTPStatusError(
+                f"Grok chat HTTP {response.status_code}: {detail}",
+                request=response.request,
+                response=response,
+            )
+        data = response.json()
+    choices = data.get("choices") or []
+    answer = str((choices[0].get("message") or {}).get("content") or "").strip() if choices else ""
+    if not answer:
+        raise RuntimeError("grok_empty_response")
+    return answer
+
+
 def _openai_api_key() -> str:
     return (
         getattr(settings, "OPENAI_API_KEY", "")
@@ -271,13 +328,15 @@ def _safe_provider_error(name: str, exc: Exception) -> str:
 
 
 async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False):
-    """Use free Groq first and free Gemini as fallback; never call paid providers."""
+    """Try Gemini, Grok, OpenAI, then Cloudflare; continue after errors or empty replies."""
     providers = [
-        ("groq", _groq_chat, bool(_groq_api_key()), 8.0),
         ("gemini", _gemini_chat, bool(_gemini_api_key()), 8.0),
+        ("grok", _xai_chat, bool(_xai_api_key()), 8.0),
+        ("openai", _openai_chat, bool(_openai_api_key()), 8.0),
+        ("cloudflare", _cloudflare_chat, bool(_cloudflare_account_id() and _cloudflare_api_token()), 8.0),
     ]
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + 18.0
+    deadline = loop.time() + 34.0
     for name, provider, configured, timeout_seconds in providers:
         if not configured:
             continue
@@ -299,6 +358,5 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
                 return answer.strip()
             raise RuntimeError(name + "_empty_response")
         except Exception as exc:
-            # Keep provider failures out of user-facing chat; continue to free fallback.
             print("Alexa chat provider failed:", _safe_provider_error(name, exc))
     return ""
