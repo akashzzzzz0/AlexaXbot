@@ -46,7 +46,7 @@ def _keyboard(selected: str) -> InlineKeyboardMarkup:
 
 def _leaderboard_image(period: str) -> BufferedInputFile:
     """Create a compact neon banner locally so /rankings always has an attached image."""
-    width, height = 1200, 560
+    width, height = 1200, 720
     image = Image.new("RGB", (width, height), (9, 5, 25))
     pixels = image.load()
     for y in range(height):
@@ -66,7 +66,7 @@ def _leaderboard_image(period: str) -> BufferedInputFile:
     except Exception:
         title_font = tab_font = row_font = ImageFont.load_default()
 
-    draw.rounded_rectangle((22, 22, 1178, 538), radius=42,
+    draw.rounded_rectangle((22, 22, 1178, 698), radius=42,
                            outline=(174, 65, 255), width=5)
     draw.rounded_rectangle((42, 42, 1158, 230), radius=32,
                            fill=(19, 8, 45), outline=(123, 48, 220), width=3)
@@ -75,19 +75,25 @@ def _leaderboard_image(period: str) -> BufferedInputFile:
     draw.text(((width - bbox[2] + bbox[0]) / 2, 85), title, font=title_font,
               fill=(250, 239, 255), stroke_width=2, stroke_fill=(154, 58, 255))
 
-    for index, (label, key) in enumerate((("Overall", "overall"), ("Today", "today"), ("Week", "week"))):
-        left = 55 + index * 365
+    def draw_tab(label: str, key: str, bounds):
+        left, top, right, bottom = bounds
         active = key == period
-        draw.rounded_rectangle((left, 265, left + 350, 345), radius=23,
+        draw.rounded_rectangle(bounds, radius=23,
                                fill=(91, 25, 168) if active else (24, 13, 49),
                                outline=(226, 158, 255) if active else (112, 58, 170), width=4)
         box = draw.textbbox((0, 0), label, font=tab_font)
-        draw.text((left + (350 - box[2] + box[0]) / 2, 285), label,
+        draw.text((left + (right - left - box[2] + box[0]) / 2, top + 20), label,
                   font=tab_font, fill=(255, 245, 255))
+
+    # Match the Telegram keyboard: Overall alone, Today/Week paired, Global alone.
+    draw_tab("👑 Overall", "overall", (55, 255, 1145, 330))
+    draw_tab("📅 Today", "today", (55, 340, 590, 415))
+    draw_tab("🏆 Week", "week", (610, 340, 1145, 415))
+    draw_tab("🌐 Global", "global", (55, 425, 1145, 500))
 
     medals = ((255, 190, 56), (205, 207, 235), (218, 133, 79))
     for i, color in enumerate(medals):
-        top = 375 + i * 48
+        top = 535 + i * 48
         draw.rounded_rectangle((65, top, 1135, top + 38), radius=15,
                                fill=(17, 12, 35), outline=color, width=2)
         draw.ellipse((82, top + 3, 117, top + 38), fill=color)
@@ -118,11 +124,13 @@ def _render(rows, total: int, period: str, recap: str) -> str:
             lines.append(f"{index}. {sticker}{crown} {name} • <b>{int(row['message_count']):,}</b>")
     else:
         lines.append("<i>No messages recorded for this period yet.</i>")
-    lines.extend(["", f"✉️ <b>Total messages:</b> {total:,}", "", "✨ <b>ChatFight AI Summary</b>"])
-    if recap:
-        lines.append(html.escape(recap[:180]))
-    else:
-        lines.append("<i>Not enough text messages for a recap yet.</i>")
+    lines.extend(["", f"✉️ <b>Total messages:</b> {total:,}"])
+    if period != "global":
+        lines.extend(["", "✨ <b>ChatFight AI Summary</b>"])
+        if recap:
+            lines.append(html.escape(recap[:180]))
+        else:
+            lines.append("<i>Not enough text messages for a recap yet.</i>")
     if period == "overall":
         lines.append("<i>Overall ranking is all-time for this group.</i>")
     elif period == "global":
