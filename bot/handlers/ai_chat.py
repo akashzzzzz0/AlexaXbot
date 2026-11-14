@@ -673,7 +673,7 @@ def _is_identity_question(text: str) -> bool:
 
 def _local_chat_fallback(user_text: str, history=None) -> str:
     """Use recent turns to avoid repetitive or pushy replies when providers are down."""
-    value = re.sub(r"[.!?,\\s]+", " ", (user_text or "").casefold()).strip()
+    value = re.sub(r"[.!?,\s]+", " ", (user_text or "").casefold()).strip()
     recent = list(history or [])
     previous_user = next(
         (str(item[1]).casefold().strip() for item in reversed(recent) if item[0] == "user"),
@@ -704,7 +704,7 @@ def _local_chat_fallback(user_text: str, history=None) -> str:
     if value in {"alexa", "oye alexa", "hey alexa"}:
         return random.choice(("Haan bolo?", "Ji?", "Kya hua?"))
 
-    if re.search(r"\\b(?:chhoro|choro|rehne do|leave it|bas karo|mat pooch|nahi batana)\\b", value):
+    if re.search(r"\b(?:chhoro|choro|rehne do|leave it|bas karo|mat pooch|nahi batana)\b", value):
         return "Theek hai, nahi poochungi. Jab mann ho tab baat kar lena."
 
     if value.endswith("?"):
