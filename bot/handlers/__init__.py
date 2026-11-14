@@ -1,5 +1,5 @@
 from aiogram import Router
-from bot.handlers import rankings, start, intro, security, moderation, economy, games, duels, statistics, settings, help, affiliate, owner, owner_admin, owner_group_message, owner_group_activity, force_join, welcome, tournaments, alexa_games, group_tools, community_shield, scam_review, ultra_vip, ai, ai_chat, owner_ai_control, owner_intelligence, missing_games, group_promotion, sticker_id, world_events, join_requests
+from bot.handlers import rankings, start, intro, security, moderation, economy, games, duels, statistics, settings, help, affiliate, owner, owner_admin, owner_group_message, owner_group_activity, force_join, welcome, tournaments, alexa_games, group_tools, ultra_vip, ai, ai_chat, owner_ai_control, owner_intelligence, missing_games, group_promotion, sticker_id, world_events, join_requests
 from bot.handlers.auto_delete_middleware import StartMenuAutoDeleteMessageMiddleware, StartMenuAutoDeleteCallbackMiddleware
 
 class DailyGroupMessageCounterMiddleware:
@@ -100,8 +100,6 @@ def get_main_router() -> Router:
     router.include_router(owner.router)
     router.include_router(alexa_games.router)
     router.include_router(group_tools.router)
-    router.include_router(community_shield.router)
-    router.include_router(scam_review.router)
     router.include_router(ultra_vip.router)
     router.include_router(ai.router)
     # Owner-only utility; intentionally omitted from Telegram's public command menu.
