@@ -84,7 +84,7 @@ async def configure_command_visibility(bot) -> None:
     # in the Telegram slash-command menu.
     public_commands = [
         ("start", "Start ALEXA"), ("help", "Open full command guide"),
-        ("setintro", "Create or update your intro card"), ("intro", "Show a member intro card"), ("delintro", "Delete your intro card"), ("g", "World Event typing / legacy number guess"), ("n", "Guess the rest of a name"),
+        ("setintro", "Create or update your intro card"), ("intro", "Show a member intro card"), ("delintro", "Delete your intro card"), ("g", "Play legacy number guessing game"), ("n", "Guess the rest of a name"),
         ("menu", "Open main menu"), ("games", "Open games"),
         ("dice", "Play dice"), ("rps", "Play Rock Paper Scissors"),
         ("quiz", "Play quiz"), ("wheel", "Spin the wheel"),
