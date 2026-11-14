@@ -351,7 +351,7 @@ def _group_conversation_is_active(chat_id: int) -> bool:
 
 
 _GREETING_RE = re.compile(
-    r"^\s*(?:hi+|hello+|helo+|good\s+morning|good\s+night)[.!?,\s]*$",
+    r"^\s*(?:hi+|hello+|helo+|hey+|good\s+(?:morning|afternoon|evening|night)|good\s+day|gm|gn|morning|afternoon|evening)[.!?,\s]*$",
     re.IGNORECASE,
 )
 _ALEXA_PREFIX_RE = re.compile(r"^\s*alexa\b[\s,!:.-]*(.*)$", re.IGNORECASE)
@@ -496,29 +496,38 @@ async def _ask_ai_with_typing(
     message: Message, user_text: str, history: deque, *, smart_mode: bool = False,
     gender_style: str = "neutral"
 ) -> str:
-    """Keep Telegram's typing indicator active while Alexa prepares an AI reply."""
-    # Keep the typing indicator alive while the model is working.
-    async def _typing_hint() -> None:
-        while True:
-            try:
-                await message.bot.send_chat_action(
-                    chat_id=message.chat.id,
-                    action="typing",
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                # A temporary Telegram action error must not stop future retries.
-                logger.debug("Alexa typing indicator retry: %s", type(exc).__name__)
-            await asyncio.sleep(4)
+    """Generate a reply; the outer handler owns one indicator for the full turn."""
+    return await _ask_ai(
+        user_text, history, smart_mode=smart_mode, gender_style=gender_style
+    )
 
-    typing_task = asyncio.create_task(_typing_hint())
-    try:
-        return await _ask_ai(
-            user_text, history, smart_mode=smart_mode, gender_style=gender_style
-        )
-    finally:
-        typing_task.cancel()
+
+async def _typing_indicator_loop(message: Message) -> None:
+    """Refresh Telegram's typing action throughout history loading and AI generation."""
+    first_error = True
+    while True:
+        try:
+            await message.bot.send_chat_action(
+                chat_id=message.chat.id,
+                action="typing",
+            )
+            first_error = False
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            detail = str(exc).replace("\n", " ")[:240]
+            if first_error:
+                logger.warning(
+                    "Alexa typing action failed for chat_id=%s: %s: %s",
+                    message.chat.id, type(exc).__name__, detail,
+                )
+                first_error = False
+            else:
+                logger.debug(
+                    "Alexa typing action retry failed for chat_id=%s: %s",
+                    message.chat.id, type(exc).__name__,
+                )
+        await asyncio.sleep(4)
 
 
 async def _ask_ai(
@@ -546,6 +555,13 @@ async def _ask_ai(
         "Never label the user confused, upset, or joking unless their words clearly show it. Do not answer a follow-up with a random teasing line that ignores the previous turn. " +
         "If the previous context still does not make the meaning clear, ask one simple, relevant clarification instead of inventing an interpretation or changing the topic. " +
         "If corrected for sounding robotic, acknowledge it casually and adjust. "
+        "Important slang/context rules: Never invent a fake full form or dictionary meaning for slang, abbreviations, or profanity. "
+        "Understand common Urdu/Hinglish chat slang from context. Mild rude words such as 'bc' or 'bsdk' are not a reason to refuse, lecture, or suddenly switch to English. "
+        "If someone says 'Why bsdk' or similar teasing/rude wording, do not pretend it is a harmless acronym or give a made-up expansion; respond to the conversational tone and the preceding context, briefly. "
+        "If someone says 'Hatt bc', stay calm and natural; a light response such as 'Achha ji, kya hua ab?' may fit. Do not reply 'I can't help with that' to ordinary banter. "
+        "If someone says only 'Bolo', acknowledge directly with something like 'Haan bolo, sun rahi hoon' or 'Ji, bolo?' Never give a tutorial, formal greeting, quote, or generic assistant offer. "
+        "For 'kyun/why', answer the actual preceding statement; never manufacture a definition or unrelated explanation. "
+        "Prefer natural Roman Urdu when the sender uses Roman Urdu, natural Roman Hindi when they use Hindi, and English when they use English. Avoid overly formal Hindi words such as 'aapki madad ke liye yahan hoon' in casual chat. "
         "Never use the word Allah or its Arabic/Urdu spellings (الله or اللّٰه); rephrase religious invocations neutrally. "
     )
     if user_text.strip().casefold() == "alexa":
@@ -607,16 +623,20 @@ async def _ask_ai(
     is_alexa_trigger,
 )
 async def alexa_ai_chat(message: Message) -> None:
-    # Show typing immediately, including while persisted conversation history loads.
-    # _ask_ai_with_typing keeps refreshing it during the actual provider request.
+    # One indicator task covers the entire turn, including DB history loading,
+    # provider fallback attempts, and response generation.
+    typing_task = asyncio.create_task(_typing_indicator_loop(message))
     try:
-        await message.bot.send_chat_action(
-            chat_id=message.chat.id,
-            action="typing",
-        )
-    except Exception as exc:
-        logger.debug("Alexa initial typing indicator unavailable: %s", type(exc).__name__)
+        await _process_alexa_ai_chat(message)
+    finally:
+        typing_task.cancel()
+        try:
+            await typing_task
+        except asyncio.CancelledError:
+            pass
 
+
+async def _process_alexa_ai_chat(message: Message) -> None:
     text = (message.text or "").strip()
     if message.chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}:
         logger.info(

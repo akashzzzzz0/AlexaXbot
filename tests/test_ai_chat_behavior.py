@@ -28,8 +28,8 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
     def test_untagged_group_messages_from_any_member_trigger_chat(self):
         for index, text in enumerate((
             "hi", "hello", "good morning", "good afternoon",
-            "good evening", "good night", "kya haal hai?",
-            "aaj group mein kya scene hai",
+            "good evening", "good night", "morning", "afternoon",
+            "evening", "gm", "gn",
         )):
             with self.subTest(text=text):
                 # Each sample represents a fresh group so the intentional
@@ -38,8 +38,13 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
                     ai_chat.is_alexa_trigger(_group_message(text, chat_id=-100123-index))
                 ))
 
+    def test_non_greeting_group_chat_does_not_trigger_unsolicited_reply(self):
+        for text in ("kya haal hai?", "aaj group mein kya scene hai", "nice"):
+            with self.subTest(text=text):
+                self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(_group_message(text))))
+
     def test_group_smart_reply_cooldowns_prevent_spam(self):
-        message = _group_message("kya haal hai?")
+        message = _group_message("hello")
         self.assertTrue(asyncio.run(ai_chat.is_alexa_trigger(message)))
         # A second non-greeting smart reply in the same group is held by cooldown.
         self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(_group_message("kya scene hai?"))))
