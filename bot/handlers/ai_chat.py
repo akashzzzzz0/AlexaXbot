@@ -406,18 +406,18 @@ def _should_smart_reply(message: Message, text: str) -> bool:
     user_id = message.from_user.id if message.from_user else 0
     user_key = (chat_id, user_id)
 
+    # Count ordinary unaddressed messages even during cooldown, so the
+    # sixth-message cadence reflects actual group traffic continuously.
+    if not is_greeting:
+        _smart_reply_message_count[chat_id] += 1
+        if _smart_reply_message_count[chat_id] % 6 != 0:
+            return False
+
     # Every group's one-minute cooldown is independent. Explicit Alexa calls
     # are handled before this function and intentionally bypass this gate.
     last_group_reply = _smart_reply_last_check.get(chat_id)
     if last_group_reply is not None and now - last_group_reply < _SMART_REPLY_GROUP_COOLDOWN_SECONDS:
         return False
-
-    # Greetings are always eligible (subject to the group cooldown). Other
-    # unaddressed messages are counted per group; only message 6, 12, 18... replies.
-    if not is_greeting:
-        _smart_reply_message_count[chat_id] += 1
-        if _smart_reply_message_count[chat_id] % 6 != 0:
-            return False
 
     last_user_check = _smart_reply_user_last_check.get(user_key)
     if last_user_check is not None and now - last_user_check < _SMART_REPLY_USER_COOLDOWN_SECONDS:
