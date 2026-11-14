@@ -244,9 +244,9 @@ async def revive(message: Message, db_session: AsyncSession, db_user, **kwargs):
     if not ok:
         await message.reply(f"Revive costs {settings.REVIVE_COST} coins. Balance: {balance}.")
         return
-    row.deaths = max(0, row.deaths - 1)
+    row.deaths = 0
     row.revives = (row.revives or 0) + 1
-    await message.reply("✨ Game profile revived. One virtual defeat removed.")
+    await message.reply("✨ You revived yourself successfully for 1,000 coins. You are alive again!")
 
 @router.message(Command("rank"))
 async def rank(message: Message, db_session: AsyncSession, db_user, **kwargs):
