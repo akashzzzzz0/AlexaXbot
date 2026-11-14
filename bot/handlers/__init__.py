@@ -1,5 +1,5 @@
 from aiogram import Router
-from bot.handlers import rankings, start, intro, security, moderation, economy, games, duels, statistics, settings, help, affiliate, owner, owner_admin, owner_group_message, owner_group_activity, force_join, welcome, tournaments, alexa_games, group_tools, ultra_vip, ai, ai_chat, owner_ai_control, owner_intelligence, missing_games, group_promotion, sticker_id, world_events, join_requests
+from bot.handlers import rankings, start, intro, security, moderation, economy, games, duels, statistics, settings, help, affiliate, owner, owner_admin, owner_group_message, owner_group_activity, force_join, welcome, tournaments, alexa_games, group_tools, ultra_vip, ai, ai_chat, owner_ai_control, owner_intelligence, missing_games, group_promotion, sticker_id, join_requests
 from bot.handlers.auto_delete_middleware import StartMenuAutoDeleteMessageMiddleware, StartMenuAutoDeleteCallbackMiddleware
 
 class DailyGroupMessageCounterMiddleware:
@@ -68,10 +68,6 @@ def get_main_router() -> Router:
     # or callbacks intended for the other feature routers.
     # Force-join guard must run before feature handlers so unjoined members cannot use commands either.
     router.include_router(force_join.router)
-    # Check the active speed-type challenge before conversational FSM handlers
-    # (deposit/withdraw/transfer/dice) can consume a member's one-word answer.
-    # Non-matching messages raise SkipHandler and continue through normal routers.
-    router.include_router(world_events.router)
     router.include_router(start.router)
     router.include_router(intro.router)
     router.include_router(security.router)
