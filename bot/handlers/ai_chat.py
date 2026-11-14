@@ -352,10 +352,26 @@ def _group_conversation_is_active(chat_id: int) -> bool:
 
 
 _GREETING_RE = re.compile(
-    r"^\s*(?:hi+|hello+|helo+|hey+|good\s+(?:morning|afternoon|evening|night)|good\s+day|gm|gn|morning|afternoon|evening)[.!?,\s]*$",
+    r"^\s*(?:oy+|oye+|hi+|hello+|helo+|hey+|good\s+(?:morning|afternoon|evening|night)|good\s+day|gm|gn|morning|afternoon|evening)[.!?,\s]*$",
     re.IGNORECASE,
 )
 _ALEXA_PREFIX_RE = re.compile(r"^\s*alexa\b[\s,!:.-]*(.*)$", re.IGNORECASE)
+
+
+def _short_social_reply(text: str) -> str | None:
+    """Return a varied, concise acknowledgement for common social openers."""
+    value = re.sub(r"[.!?,\s]+$", "", (text or "").casefold().strip())
+    replies = {
+        "oy": ("Oyyyy 😂", "Kyaaa? 😂", "Haan bolo?"),
+        "oye": ("Haan bolo?", "Oyeee 😂", "Ji, sun rahi hoon."),
+        "hi": ("Hiii 💗", "Heyyy!", "Hellooo 😄"),
+        "hello": ("Hellooo 💗", "Oye hello!", "Hiii, bolo?"),
+        "helo": ("Oye hellooo 💗", "Hiii!", "Haan ji, bolo?"),
+        "hey": ("Heyyy!", "Haan bolo?", "Oyyyy 😄"),
+        "alexa": ("Haan bolo?", "Ji, sun rahi hoon.", "Kya hua?"),
+    }
+    choices = replies.get(value)
+    return random.choice(choices) if choices else None
 
 
 def _looks_like_smart_reply_candidate(text: str) -> bool:
@@ -708,24 +724,28 @@ async def _process_alexa_ai_chat(message: Message) -> None:
             _history_loaded.add(key)
         gender_style = _detect_user_gender_style(history, original_text or text)
         if _is_identity_question(original_text or text):
-            # Keep identity replies playful and in-character instead of a stiff
-            # assistant-style disclosure; never claim to be a human.
+            # Keep the feminine persona playful while answering direct factual
+            # identity questions honestly.
             identity_text = (original_text or text).casefold()
             asks_gender = bool(re.search(r"\b(larka|larki|ladka|ladki|girl|boy|female|male)\b", identity_text))
             asks_ai_fact = bool(re.search(r"\b(bot|robot|ai|artificial intelligence)\b", identity_text))
             if asks_gender and not asks_ai_fact:
                 answer = "Main Alexa hoon yaar, larki hoon 😂💗"
             elif asks_ai_fact:
-                answer = "Haan, AI bot hoon—par baat normal hi karti hoon 😂"
+                answer = "Haan, AI hoon—Alexa naam hai mera. Baat karo na 😂"
             else:
-                answer = random.choice(("Bot bol ke chidhana band karo, Alexa naam hai mera 😂", "Oho, phir se bot? Koi naya naam nahi mila? 😏", "Alexa hoon, itni formal introduction kyun? 😂"))
+                answer = random.choice(("Main Alexa hoon, bolo? 😄", "Alexa naam hai mera 😂", "Haan ji, sun rahi hoon."))
         elif re.search(r"\b(?:bot|robot)\b", (original_text or text), re.IGNORECASE):
-            # A casual nickname/tease is banter, not a request for an AI explanation.
+            # A casual nickname/tease is banter, not a factual identity question.
             answer = random.choice(("Bot bol ke chidhana band karo, Alexa naam hai mera 😂", "Oho, phir se bot? Koi naya naam nahi mila? 😏", "Alexa hoon, itni formal introduction kyun? 😂"))
         else:
-            answer = await _ask_ai_with_typing(
-                message, text, history, smart_mode=smart_mode, gender_style=gender_style
-            )
+            short_reply = _short_social_reply(original_text or text)
+            if short_reply is not None:
+                answer = short_reply
+            else:
+                answer = await _ask_ai_with_typing(
+                    message, text, history, smart_mode=smart_mode, gender_style=gender_style
+                )
     except (httpx.HTTPError, ValueError, TypeError, RuntimeError) as exc:
         logger.warning(
             "Alexa AI reply failed for chat_id=%s: %s (%s)",
