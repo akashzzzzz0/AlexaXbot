@@ -575,6 +575,9 @@ async def _send_speed_type_reminder(
 ) -> None:
     """Reply to the event with one short reminder after three minutes."""
     await asyncio.sleep(SPEED_TYPE_REMINDER_DELAY_SECONDS)
+    from bot.handlers.owner import get_maintenance_mode
+    if get_maintenance_mode():
+        return
     async with async_session_maker() as session:
         active = await session.scalar(
             select(SpeedTypeEvent.id).where(
@@ -627,6 +630,9 @@ async def _create_event(
     created_by: int | None = None,
     reserved_words: set[str] | None = None,
 ) -> bool:
+    from bot.handlers.owner import get_maintenance_mode
+    if get_maintenance_mode():
+        return False
     now = datetime.now(timezone.utc)
     async with async_session_maker() as session:
         if await _has_active_event(session, chat_id, now):
@@ -726,6 +732,10 @@ async def _event_scheduler(bot) -> None:
     # Send the first event immediately, then repeat every four hours for active groups.
     while True:
         try:
+            from bot.handlers.owner import get_maintenance_mode
+            if get_maintenance_mode():
+                await asyncio.sleep(EVENT_INTERVAL_SECONDS)
+                continue
             await _close_expired_events(bot)
             async with async_session_maker() as session:
                 groups = (await session.scalars(select(Group).where(Group.is_active.is_(True)))).all()
