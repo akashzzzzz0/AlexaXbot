@@ -11,14 +11,17 @@ from aiogram.types import (
     InlineKeyboardMarkup, InputMediaPhoto, Message,
 )
 from PIL import Image, ImageDraw, ImageFont
+import structlog
 
 from bot.services.rankings_store import get_rankings, get_recap_messages
 
 router = Router(name="group_rankings")
+logger = structlog.get_logger()
 _PERIODS = {
-    "overall": ("🌍 Overall", "Overall"),
+    "overall": ("👑 Overall", "Overall"),
     "today": ("📅 Today", "Today"),
-    "week": ("📊 Week", "Last 7 days"),
+    "week": ("🏆 Week", "Last 7 days"),
+    "global": ("🌐 Global", "All Alexa groups · Today"),
 }
 _HEADER_EMOJI_ID = "6093382540784046658"
 _NAME_EMOJI_ID = "6258164063516233396"
@@ -26,18 +29,24 @@ _CROWN_EMOJI_ID = "6093382540784046658"
 
 
 def _keyboard(selected: str) -> InlineKeyboardMarkup:
-    row = []
-    for key, (label, _) in _PERIODS.items():
-        row.append(InlineKeyboardButton(
+    def button(key: str) -> InlineKeyboardButton:
+        label = _PERIODS[key][0]
+        return InlineKeyboardButton(
             text=f"✓ {label}" if key == selected else label,
             callback_data=f"rankings:{key}",
-        ))
-    return InlineKeyboardMarkup(inline_keyboard=[row])
+        )
+
+    # Requested layout: Overall alone; Today/Week side by side; Global alone.
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [button("overall")],
+        [button("today"), button("week")],
+        [button("global")],
+    ])
 
 
 def _leaderboard_image(period: str) -> BufferedInputFile:
     """Create a compact neon banner locally so /rankings always has an attached image."""
-    width, height = 1200, 560
+    width, height = 1200, 720
     image = Image.new("RGB", (width, height), (9, 5, 25))
     pixels = image.load()
     for y in range(height):
@@ -57,7 +66,7 @@ def _leaderboard_image(period: str) -> BufferedInputFile:
     except Exception:
         title_font = tab_font = row_font = ImageFont.load_default()
 
-    draw.rounded_rectangle((22, 22, 1178, 538), radius=42,
+    draw.rounded_rectangle((22, 22, 1178, 698), radius=42,
                            outline=(174, 65, 255), width=5)
     draw.rounded_rectangle((42, 42, 1158, 230), radius=32,
                            fill=(19, 8, 45), outline=(123, 48, 220), width=3)
@@ -66,19 +75,25 @@ def _leaderboard_image(period: str) -> BufferedInputFile:
     draw.text(((width - bbox[2] + bbox[0]) / 2, 85), title, font=title_font,
               fill=(250, 239, 255), stroke_width=2, stroke_fill=(154, 58, 255))
 
-    for index, (label, key) in enumerate((("Overall", "overall"), ("Today", "today"), ("Week", "week"))):
-        left = 55 + index * 365
+    def draw_tab(label: str, key: str, bounds):
+        left, top, right, bottom = bounds
         active = key == period
-        draw.rounded_rectangle((left, 265, left + 350, 345), radius=23,
+        draw.rounded_rectangle(bounds, radius=23,
                                fill=(91, 25, 168) if active else (24, 13, 49),
                                outline=(226, 158, 255) if active else (112, 58, 170), width=4)
         box = draw.textbbox((0, 0), label, font=tab_font)
-        draw.text((left + (350 - box[2] + box[0]) / 2, 285), label,
+        draw.text((left + (right - left - box[2] + box[0]) / 2, top + 20), label,
                   font=tab_font, fill=(255, 245, 255))
+
+    # Match the Telegram keyboard: Overall alone, Today/Week paired, Global alone.
+    draw_tab("OVERALL", "overall", (55, 255, 1145, 330))
+    draw_tab("TODAY", "today", (55, 340, 590, 415))
+    draw_tab("WEEK", "week", (610, 340, 1145, 415))
+    draw_tab("GLOBAL", "global", (55, 425, 1145, 500))
 
     medals = ((255, 190, 56), (205, 207, 235), (218, 133, 79))
     for i, color in enumerate(medals):
-        top = 375 + i * 48
+        top = 535 + i * 48
         draw.rounded_rectangle((65, top, 1135, top + 38), radius=15,
                                fill=(17, 12, 35), outline=color, width=2)
         draw.ellipse((82, top + 3, 117, top + 38), fill=color)
@@ -109,26 +124,26 @@ def _render(rows, total: int, period: str, recap: str) -> str:
             lines.append(f"{index}. {sticker}{crown} {name} • <b>{int(row['message_count']):,}</b>")
     else:
         lines.append("<i>No messages recorded for this period yet.</i>")
-    lines.extend(["", f"✉️ <b>Total messages:</b> {total:,}", "", "✨ <b>ChatFight AI Summary</b>"])
-    if recap:
-        lines.append(html.escape(recap[:180]))
-    else:
-        lines.append("<i>Not enough text messages for a recap yet.</i>")
-    if period == "overall":
-        lines.append("<i>AI recap uses recent messages from the last 7 days; Overall ranking is all-time.</i>")
-    caption = "\n".join(lines)
-    # Telegram photo captions are limited to 1024 characters.
-    if len(caption) > 1000:
-        lines = lines[:]
+    lines.extend(["", f"✉️ <b>Total messages:</b> {total:,}"])
+    if period != "global":
+        lines.extend(["", "✨ <b>ChatFight AI Summary</b>"])
         if recap:
-            lines[-1] = html.escape(recap[:80]) if period != "overall" else "<i>Overall ranking is all-time.</i>"
-        caption = "\n".join(lines)
-    return caption[:1024]
+            lines.append(html.escape(recap[:180]))
+        else:
+            lines.append("<i>Not enough text messages for a recap yet.</i>")
+    if period == "overall":
+        lines.append("<i>Overall ranking is all-time for this group.</i>")
+    elif period == "global":
+        lines.append("<i>Daily ranking combines messages from all Alexa groups.</i>")
+    # Telegram applies its caption limit to the rendered text, not the raw
+    # HTML markup. Slicing the raw HTML at 1024 can cut an entity/tag in half
+    # and make Telegram reject the entire leaderboard message.
+    return "\n".join(lines)
 
 
 async def _build_view(group_id: int, period: str):
     rows, total = await get_rankings(group_id, period)
-    messages = await get_recap_messages(group_id, period)
+    messages = [] if period == "global" else await get_recap_messages(group_id, period)
     recap = ""
     if messages:
         from bot.services.ollama_ai import ollama_chat
@@ -166,6 +181,7 @@ async def rankings_command(message: Message):
             reply_markup=_keyboard("today"),
         )
     except Exception:
+        logger.exception("Could not load group leaderboard", group_id=message.chat.id)
         await message.answer("⚠️ Alexa could not load the leaderboard right now. Please try again.")
 
 
@@ -186,4 +202,5 @@ async def rankings_period_callback(callback: CallbackQuery):
             reply_markup=_keyboard(period),
         )
     except Exception:
+        logger.exception("Could not refresh group leaderboard", group_id=callback.message.chat.id, period=period)
         await callback.message.answer("⚠️ Could not refresh rankings. Please try again.")

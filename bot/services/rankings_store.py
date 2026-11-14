@@ -129,6 +129,22 @@ async def get_rankings(group_id: int, period: str):
                 (group_id,),
             )
             total_row = await total_cursor.fetchone()
+        elif period == "global":
+            # One daily leaderboard across every group where Alexa records activity.
+            start_day = now.date().isoformat()
+            query = """
+                SELECT user_id,MAX(username) AS username,MAX(first_name) AS first_name,
+                       SUM(message_count) AS message_count
+                FROM ranking_daily WHERE day_key=?
+                GROUP BY user_id
+                ORDER BY message_count DESC, first_name COLLATE NOCASE ASC LIMIT 10
+            """
+            params = (start_day,)
+            total_cursor = await db.execute(
+                "SELECT COALESCE(SUM(message_count),0) AS total FROM ranking_daily WHERE day_key=?",
+                (start_day,),
+            )
+            total_row = await total_cursor.fetchone()
         else:
             if period == "today":
                 start_day = now.date().isoformat()
