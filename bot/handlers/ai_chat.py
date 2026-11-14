@@ -318,9 +318,10 @@ _bot_username = None
 _last_alexa_reply_at: dict[tuple[int, int], float] = {}
 _ALEXA_REPLY_COOLDOWN_SECONDS = 3.0
 
-# Opportunistic group replies are deliberately rate-limited to avoid flooding chats.
+# Unaddressed group replies are paced independently per group.
 _smart_reply_last_check: dict[int, float] = {}
 _smart_reply_user_last_check: dict[tuple[int, int], float] = {}
+_smart_reply_message_count: dict[int, int] = defaultdict(int)
 _SMART_REPLY_GROUP_COOLDOWN_SECONDS = 60.0
 _SMART_REPLY_USER_COOLDOWN_SECONDS = 45.0
 
@@ -393,13 +394,11 @@ def _message_mentions_another_member(message: Message, text: str) -> bool:
 
 
 def _should_smart_reply(message: Message, text: str) -> bool:
-    """Allow only plain greetings to open an unprompted group interaction."""
+    """Reply to greetings or every sixth unaddressed human message, per group."""
     is_greeting = _looks_like_smart_reply_candidate(text)
 
     # A message addressed to another member is never an Alexa invitation.
     if _message_mentions_another_member(message, text):
-        return False
-    if not is_greeting:
         return False
 
     now = time.monotonic()
@@ -407,15 +406,18 @@ def _should_smart_reply(message: Message, text: str) -> bool:
     user_id = message.from_user.id if message.from_user else 0
     user_key = (chat_id, user_id)
 
-    # The cooldown is independent for each group. During it, only a direct
-    # Alexa call/mention/reply can reach the AI handler; smart replies stay silent.
+    # Every group's one-minute cooldown is independent. Explicit Alexa calls
+    # are handled before this function and intentionally bypass this gate.
     last_group_reply = _smart_reply_last_check.get(chat_id)
     if last_group_reply is not None and now - last_group_reply < _SMART_REPLY_GROUP_COOLDOWN_SECONDS:
         return False
 
-    # Greetings may open a quiet conversation, but never bypass the group cooldown.
-    if not is_greeting and _group_conversation_is_active(chat_id):
-        return False
+    # Greetings are always eligible (subject to the group cooldown). Other
+    # unaddressed messages are counted per group; only message 6, 12, 18... replies.
+    if not is_greeting:
+        _smart_reply_message_count[chat_id] += 1
+        if _smart_reply_message_count[chat_id] % 6 != 0:
+            return False
 
     last_user_check = _smart_reply_user_last_check.get(user_key)
     if last_user_check is not None and now - last_user_check < _SMART_REPLY_USER_COOLDOWN_SECONDS:
@@ -472,10 +474,8 @@ async def is_alexa_trigger(message: Message) -> bool:
     ):
         return True
 
-    # Continue only this member's active conversation until they hand it to
-    # another member by mentioning/replying to them.
-    if session_key in _active_conversations:
-        return True
+    # An earlier mention must not turn every later unmentioned message into
+    # an automatic reply. Only a fresh Alexa call/reply bypasses group pacing.
 
     # Recognize Alexa's name anywhere in a group message, not only at the start.
     # This makes natural phrases like "yaar Alexa zara help" trigger reliably.
@@ -706,7 +706,6 @@ async def _process_alexa_ai_chat(message: Message) -> None:
     smart_mode = (
         message.chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}
         and not directly_addressed
-        and not session_was_active
     )
     # Explicitly calling Alexa opens a persistent per-user/per-group session.
     if message.chat.type != ChatType.PRIVATE and directly_addressed:
@@ -822,9 +821,10 @@ async def _process_alexa_ai_chat(message: Message) -> None:
     if message.chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}:
         replied_at = time.monotonic()
         _last_alexa_reply_at[key] = replied_at
-        if directly_addressed or session_was_active:
+        if directly_addressed:
             _active_conversations.add(key)
-        else:
-            _smart_reply_last_check[message.chat.id] = replied_at
+        # Any Alexa reply starts the one-minute group cooldown. A direct
+        # mention/name call can still bypass it without affecting other groups.
+        _smart_reply_last_check[message.chat.id] = replied_at
     asyncio.create_task(_maybe_send_sticker(message, text))
 
