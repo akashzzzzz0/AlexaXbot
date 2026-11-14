@@ -1,6 +1,6 @@
-"""Alexa chat provider chain: Cloudflare Workers AI -> Gemini only.
+"""Alexa chat provider chain: free Groq -> free Gemini only.
 
-If both providers fail, return an empty response so Alexa stays silent.
+If both providers fail, return an empty response so Alexa stays silent. Paid OpenAI/Ollama providers are not used for chat.
 Other Gemini/Ollama integrations remain independent.
 """
 import asyncio
@@ -271,13 +271,13 @@ def _safe_provider_error(name: str, exc: Exception) -> str:
 
 
 async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False):
-    """Try Cloudflare, then Gemini; stay silent if neither returns a reply."""
+    """Use free Groq first and free Gemini as fallback; never call paid providers."""
     providers = [
-        ("cloudflare", _cloudflare_chat, bool(_cloudflare_account_id() and _cloudflare_api_token()), 14.0),
-        ("gemini", _gemini_chat, bool(_gemini_api_key()), 14.0),
+        ("groq", _groq_chat, bool(_groq_api_key()), 8.0),
+        ("gemini", _gemini_chat, bool(_gemini_api_key()), 8.0),
     ]
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + 30.0
+    deadline = loop.time() + 18.0
     for name, provider, configured, timeout_seconds in providers:
         if not configured:
             continue
@@ -285,8 +285,20 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
         if remaining <= 0:
             break
         try:
-            return await asyncio.wait_for(provider(messages, system=system, temperature=temperature, max_tokens=max_tokens, json_mode=json_mode), timeout=min(timeout_seconds, remaining))
+            answer = await asyncio.wait_for(
+                provider(
+                    messages,
+                    system=system,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    json_mode=json_mode,
+                ),
+                timeout=min(timeout_seconds, remaining),
+            )
+            if isinstance(answer, str) and answer.strip():
+                return answer.strip()
+            raise RuntimeError(name + "_empty_response")
         except Exception as exc:
-            # Keep provider failures out of user-facing chat; continue to the sole fallback.
+            # Keep provider failures out of user-facing chat; continue to free fallback.
             print("Alexa chat provider failed:", _safe_provider_error(name, exc))
     return ""
