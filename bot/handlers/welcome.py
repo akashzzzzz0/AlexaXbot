@@ -620,18 +620,19 @@ async def bio_unmute_after_profile_fix(callback: CallbackQuery, db_session: Asyn
         await callback.answer("This mute was not caused by Bio Link Protection.", show_alert=True)
         return
 
-    try:
-        evidence, profile_available = await _channelguard_profile_links(callback.bot, user_id)
-        if not profile_available:
-            await callback.answer("Telegram did not expose your bio/connected-channel details for verification. Try again later.", show_alert=True)
+    if not member.is_whitelisted:
+        try:
+            evidence, profile_available = await _channelguard_profile_links(callback.bot, user_id)
+            if not profile_available:
+                await callback.answer("Telegram did not expose your bio/connected-channel details for verification. Try again later.", show_alert=True)
+                return
+            if evidence:
+                await callback.answer("A link is still in your bio or connected channel. Remove it first, or ask an admin to whitelist you.", show_alert=True)
+                return
+        except Exception as exc:
+            logger.warning("Could not verify profile before ChannelGuard unmute", chat_id=group_id, user_id=user_id, error=str(exc))
+            await callback.answer("Could not verify your profile right now. Please try again later.", show_alert=True)
             return
-        if evidence:
-            await callback.answer("A link is still in your bio or connected channel. Remove it first, then tap Unmute.", show_alert=True)
-            return
-    except Exception as exc:
-        logger.warning("Could not verify profile before ChannelGuard unmute", chat_id=group_id, user_id=user_id, error=str(exc))
-        await callback.answer("Could not verify your profile right now. Please try again later.", show_alert=True)
-        return
 
     ok = await unmute_user(callback.bot, db_session, group_id, user_id, callback.bot.id)
     if not ok:
