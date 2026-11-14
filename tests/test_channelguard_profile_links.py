@@ -56,5 +56,5 @@ class ChannelGuardProfileTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item[0] for item in evidence], ["connected_channel_description"])
 
 
-if __(!)name__ == "__main__":
+if __name__ == "__main__":
     unittest.main()
