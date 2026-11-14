@@ -142,30 +142,42 @@ def _render(rows, total: int, period: str, recap: str) -> str:
 
 
 async def _build_view(group_id: int, period: str):
+    # Keep the command path limited to the indexed ranking query. AI is handled
+    # separately so a slow model response never delays the leaderboard itself.
     rows, total = await get_rankings(group_id, period)
-    messages = [] if period == "global" else await get_recap_messages(group_id, period)
-    recap = ""
-    if messages:
+    return _render(rows, total, period, "")
+
+
+async def _refresh_recap(message: Message, group_id: int, period: str, base_caption: str):
+    if period == "global":
+        return
+    try:
+        messages = await get_recap_messages(group_id, period)
+        if not messages:
+            return
         from bot.services.ollama_ai import ollama_chat
         transcript = "\n".join(f"{name}: {body}" for name, body in messages)
-        try:
-            recap = await asyncio.wait_for(
-                ollama_chat(
-                    [{"role": "user", "content":
-                        "Summarize the key topics and notable moments from this group chat. "
-                        "Use 2-3 concise bullet points in the same language as the messages. "
-                        "Do not invent details or identify private individuals beyond their displayed names.\n\n"
-                        + transcript[:10000]
-                    }],
-                    system="You create concise, neutral group chat recaps from supplied messages.",
-                    temperature=0.2,
-                    max_tokens=220,
-                ),
-                timeout=45,
+        recap = await asyncio.wait_for(
+            ollama_chat(
+                [{"role": "user", "content":
+                    "Summarize the key topics and notable moments from this group chat. "
+                    "Use 2-3 concise bullet points in the same language as the messages. "
+                    "Do not invent details or identify private individuals beyond their displayed names.\n\n"
+                    + transcript[:10000]
+                }],
+                system="You create concise, neutral group chat recaps from supplied messages.",
+                temperature=0.2,
+                max_tokens=220,
+            ),
+            timeout=45,
+        )
+        fallback = "<i>Not enough text messages for a recap yet.</i>"
+        if recap and fallback in base_caption:
+            await message.edit_caption(
+                caption=base_caption.replace(fallback, html.escape(recap[:180]))
             )
-        except Exception:
-            recap = "AI summary is temporarily unavailable. Message ranking is still working."
-    return _render(rows, total, period, recap)
+    except Exception:
+        logger.exception("Could not refresh leaderboard AI recap", group_id=group_id, period=period)
 
 
 @router.message(Command("rankings"))
@@ -175,11 +187,12 @@ async def rankings_command(message: Message):
         return
     try:
         caption = await _build_view(message.chat.id, "today")
-        await message.answer_photo(
+        sent = await message.answer_photo(
             photo=_leaderboard_image("today"),
             caption=caption,
             reply_markup=_keyboard("today"),
         )
+        asyncio.create_task(_refresh_recap(sent, message.chat.id, "today", caption))
     except Exception:
         logger.exception("Could not load group leaderboard", group_id=message.chat.id)
         await message.answer("⚠️ Alexa could not load the leaderboard right now. Please try again.")
@@ -197,10 +210,11 @@ async def rankings_period_callback(callback: CallbackQuery):
     await callback.answer()
     try:
         caption = await _build_view(callback.message.chat.id, period)
-        await callback.message.edit_media(
+        updated = await callback.message.edit_media(
             media=InputMediaPhoto(media=_leaderboard_image(period), caption=caption),
             reply_markup=_keyboard(period),
         )
+        asyncio.create_task(_refresh_recap(updated, callback.message.chat.id, period, caption))
     except Exception:
         logger.exception("Could not refresh group leaderboard", group_id=callback.message.chat.id, period=period)
         await callback.message.answer("⚠️ Could not refresh rankings. Please try again.")
