@@ -34,3 +34,6 @@ Thumbs.db
 dist/
 build/
 *.egg-info/
+
+# Isolated Alexa chat rankings database (runtime data)
+data/
