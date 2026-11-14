@@ -751,31 +751,21 @@ async def _process_alexa_ai_chat(message: Message) -> None:
             "Alexa AI reply failed for chat_id=%s: %s (%s)",
             message.chat.id, type(exc).__name__, str(exc)[:1200],
         )
-        if smart_mode:
-            answer = _smart_group_reply_fallback(original_text or text)
-        else:
-            try:
-                await message.reply("Abhi reply nahi aa paaya 😅 Ek baar phir bolo.")
-            except Exception as send_exc:
-                logger.warning(
-                    "Alexa AI failure notice could not be sent for chat_id=%s: %s",
-                    message.chat.id, type(send_exc).__name__,
-                )
-            return
+        return
     except Exception as exc:
         logger.exception("Unexpected Alexa AI chat failure for chat_id=%s", message.chat.id)
-        if smart_mode:
-            answer = _smart_group_reply_fallback(original_text or text)
-        else:
-            try:
-                await message.reply("Abhi reply nahi aa paaya 😅 Ek baar phir bolo.")
-            except Exception as send_exc:
-                logger.warning(
-                    "Alexa AI failure notice could not be sent for chat_id=%s: %s",
-                    message.chat.id, type(send_exc).__name__,
-                )
-            return
+        return
 
+    # If Cloudflare and Gemini both fail, ai_chat_completion returns an empty
+    # string. Do not replace that with a canned group reply or an error notice.
+    if not answer:
+        logger.warning(
+            "Alexa AI returned no usable reply; staying silent",
+            extra={"chat_id": message.chat.id, "user_id": message.from_user.id},
+        )
+        return
+    if answer.strip().casefold() == "__ignore__":
+        return
     # Never send a fallback/fictional AI response when Ollama is unavailable.
     if smart_mode and (not answer or answer.strip().casefold() == "__ignore__"):
         answer = _smart_group_reply_fallback(original_text or text)
