@@ -670,6 +670,18 @@ def _is_identity_question(text: str) -> bool:
     return any(re.search(pattern, value, re.IGNORECASE) for pattern in patterns)
 
 
+
+def _local_chat_fallback(user_text: str) -> str:
+    """Keep the conversation responsive if every remote AI provider is unavailable."""
+    value = (user_text or "").casefold().strip()
+    if re.fullmatch(r"(hi|hello|hey|helo|hii+|salam|assalamualaikum)[!. ]*", value):
+        return random.choice(("Heyyy! Kya haal hai?", "Hiii! Bolo, kya scene hai?", "Oyyyy! Kya haal chaal?"))
+    if value in {"alexa", "oye alexa", "hey alexa"}:
+        return random.choice(("Haan bolo?", "Ji, sun rahi hoon.", "Bolo, kya hua?"))
+    if value.endswith("?"):
+        return random.choice(("Hmm, is ka jawab abhi clear nahi hai. Zara doosre tareeqe se poochho?", "Achaa, ek baar thora aur context do na?", "Is par abhi pakka jawab nahi de paungi—thori der baad phir pooch lena."))
+    return random.choice(("Achaa, samajh rahi hoon. Phir kya hua?", "Haan, sun rahi hoon—bolo na.", "Oho, acha! Aage batao?", "Hmm, acha acha. Main sun rahi hoon."))
+
 async def _process_alexa_ai_chat(message: Message) -> None:
     text = (message.text or "").strip()
     if message.chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}:
@@ -761,14 +773,14 @@ async def _process_alexa_ai_chat(message: Message) -> None:
         logger.exception("Unexpected Alexa AI chat failure for chat_id=%s", message.chat.id)
         return
 
-    # If Cloudflare and Gemini both fail, ai_chat_completion returns an empty
-    # string. Do not replace that with a canned group reply or an error notice.
+    # If all four remote providers fail, keep casual conversation going locally.
+    # This is a short conversational fallback, not a fabricated factual answer.
     if not answer:
+        answer = _local_chat_fallback(original_text or text)
         logger.warning(
-            "Alexa AI returned no usable reply; staying silent",
+            "Alexa used local chat fallback after all remote providers failed",
             extra={"chat_id": message.chat.id, "user_id": message.from_user.id},
         )
-        return
     if answer.strip().casefold() == "__ignore__":
         return
     # Never send a fallback/fictional AI response when Ollama is unavailable.
