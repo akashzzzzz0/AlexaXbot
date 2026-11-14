@@ -260,13 +260,6 @@ async def on_startup(bot) -> None:
     logger.info('Bot startup complete', db_ready=db_ok)
 
     try:
-        from bot.handlers.world_events import start_event_scheduler
-        start_event_scheduler(bot)
-        logger.info('Alexa World Events scheduler started')
-    except Exception as exc:
-        logger.warning('Alexa World Events scheduler could not start', error=str(exc))
-
-    try:
         from bot.services.daily_group_promotion import start_daily_promotion_scheduler
         if db_ok:
             start_daily_promotion_scheduler(bot)
@@ -293,11 +286,6 @@ async def on_startup(bot) -> None:
 
 async def on_shutdown(bot, runner) -> None:
     logger.info('Bot shutting down')
-    try:
-        from bot.handlers.world_events import stop_event_scheduler
-        await stop_event_scheduler()
-    except Exception:
-        pass
     try:
         from bot.services.daily_group_promotion import stop_daily_promotion_scheduler
         await stop_daily_promotion_scheduler()
