@@ -105,5 +105,68 @@ class AlexaChatProviderRoutingTests(unittest.IsolatedAsyncioTestCase):
             provider.assert_not_awaited()
 
 
+    async def test_cloudflare_reads_standard_response_field(self):
+        class FakeResponse:
+            status_code = 200
+            request = object()
+            def json(self):
+                return {"result": {"response": "Cloudflare answer"}, "success": True}
+
+        class FakeClient:
+            def __init__(self, *args, **kwargs):
+                pass
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                return False
+            async def post(self, *args, **kwargs):
+                return FakeResponse()
+
+        with (
+            patch.object(ai_chat_provider, "_cloudflare_account_id", return_value="account"),
+            patch.object(ai_chat_provider, "_cloudflare_api_token", return_value="token"),
+            patch("bot.services.ai_chat_provider.httpx.AsyncClient", FakeClient),
+        ):
+            answer = await ai_chat_provider._cloudflare_chat(
+                [{"role": "user", "content": "Hello"}]
+            )
+        self.assertEqual(answer, "Cloudflare answer")
+
+    async def test_cloudflare_reads_openai_compatible_content_blocks(self):
+        class FakeResponse:
+            status_code = 200
+            request = object()
+            def json(self):
+                return {
+                    "result": {
+                        "choices": [{
+                            "message": {
+                                "content": [{"type": "text", "text": "Cloudflare block answer"}]
+                            }
+                        }]
+                    }
+                }
+
+        class FakeClient:
+            def __init__(self, *args, **kwargs):
+                pass
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                return False
+            async def post(self, *args, **kwargs):
+                return FakeResponse()
+
+        with (
+            patch.object(ai_chat_provider, "_cloudflare_account_id", return_value="account"),
+            patch.object(ai_chat_provider, "_cloudflare_api_token", return_value="token"),
+            patch("bot.services.ai_chat_provider.httpx.AsyncClient", FakeClient),
+        ):
+            answer = await ai_chat_provider._cloudflare_chat(
+                [{"role": "user", "content": "Hello"}]
+            )
+        self.assertEqual(answer, "Cloudflare block answer")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,8 +1,4 @@
-"""Alexa chat provider chain: free Groq -> free Gemini only.
-
-If both providers fail, return an empty response so Alexa stays silent. Paid OpenAI/Ollama providers are not used for chat.
-Other Gemini/Ollama integrations remain independent.
-"""
+"""Sequential Alexa chat providers with safe response parsing and fallback."""
 import asyncio
 import os
 import re
@@ -62,10 +58,44 @@ async def _cloudflare_chat(messages, *, system="", temperature=0.7, max_tokens=5
         data = response.json()
 
     result = data.get("result") or {}
-    choices = result.get("choices") or []
-    choice_content = ((choices[0].get("message") or {}).get("content") if choices else "")
-    answer = str(result.get("response") or choice_content or data.get("response") or "").strip()
+
+    def _content_text(value):
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, list):
+            return "".join(_content_text(part.get("text", "") if isinstance(part, dict) else part) for part in value).strip()
+        if isinstance(value, dict):
+            for key in ("text", "content", "response", "output_text"):
+                if value.get(key):
+                    extracted = _content_text(value[key])
+                    if extracted:
+                        return extracted
+        return ""
+
+    choices = result.get("choices") or data.get("choices") or []
+    choice_content = ""
+    if choices and isinstance(choices[0], dict):
+        message = choices[0].get("message") or choices[0].get("delta") or {}
+        choice_content = _content_text(message.get("content", "") if isinstance(message, dict) else message)
+        if not choice_content:
+            choice_content = _content_text(choices[0].get("text", ""))
+    answer = (
+        _content_text(result.get("response"))
+        or choice_content
+        or _content_text(result.get("output_text"))
+        or _content_text(result.get("output"))
+        or _content_text(result.get("content"))
+        or _content_text(data.get("response"))
+    )
     if not answer:
+        # Log only structural metadata, never prompts, replies, tokens, or IDs.
+        logger = __import__("logging").getLogger(__name__)
+        logger.warning(
+            "Cloudflare Workers AI returned HTTP 200 without recognized text; "
+            "top_keys=%s result_keys=%s",
+            sorted(data.keys()) if isinstance(data, dict) else type(data).__name__,
+            sorted(result.keys()) if isinstance(result, dict) else type(result).__name__,
+        )
         raise RuntimeError("cloudflare_empty_response")
     return answer
 
@@ -339,6 +369,7 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
     deadline = loop.time() + 34.0
     for name, provider, configured, timeout_seconds in providers:
         if not configured:
+            print("Alexa chat provider skipped:", name + ":missing_runtime_configuration")
             continue
         remaining = deadline - loop.time()
         if remaining <= 0:
