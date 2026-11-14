@@ -243,17 +243,18 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
     """Try Groq first, then Gemini; retain Ollama/OpenAI as later fallbacks."""
     provider_errors = []
 
-    # Keep the established provider order, but make fallback bounded and fast.
-    # A slow first provider must not leave Alexa typing for a long time.
+    # Preserve provider priority, but allow Ollama Cloud enough time to finish
+    # inference. Its previous 6-second cap routinely expired before a cloud
+    # model could return a response, even when the API key and model were valid.
     providers = [
         # Gemini is the preferred first provider; other providers remain fallbacks.
         ("gemini", _gemini_chat, bool(get_gemini_api_key()), 6.0),
         ("groq", _groq_chat, bool(_groq_api_key()), 8.0),
-        ("ollama", ollama_chat, True, 6.0),
-        ("openai", _openai_chat, bool(_openai_api_key()), 6.0),
+        ("ollama", ollama_chat, True, 28.0),
+        ("openai", _openai_chat, bool(_openai_api_key()), 8.0),
     ]
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + 18.0
+    deadline = loop.time() + 52.0
     for name, provider, configured, timeout_seconds in providers:
         if not configured:
             provider_errors.append(f"{name}:not_configured")
