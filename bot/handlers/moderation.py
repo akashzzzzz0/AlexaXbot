@@ -149,7 +149,7 @@ async def confirm_anonymous_action(callback: CallbackQuery, bot: Bot, db_session
         await callback.answer(f"Action failed: {str(exc)[:150]}", show_alert=True)
 
 router.message.outer_middleware(AdminActionMiddleware(
-    commands={"ban", "sban", "dban", "tban", "unban", "kick", "mute", "smute", "unmute", "warn", "unwarn", "warns", "warnings", "history", "note", "del", "purg", "pin", "unpin", "ro", "setrole", "clearrole", "role", "resetwarn", "resetwarns", "approvebio", "promote", "demote"}
+    commands={"ban", "sban", "dban", "tban", "unban", "kick", "mute", "smute", "unmute", "warn", "unwarn", "warns", "warnings", "history", "note", "del", "purg", "pin", "unpin", "ro", "setrole", "clearrole", "role", "resetwarn", "resetwarns", "approvebio", "channelguard", "promote", "demote"}
 ))
 router.callback_query.outer_middleware(AdminActionMiddleware(prefixes=("mod:", "mute_duration:", "ban_duration:", "warn_action:", "ban_confirm:", "anon_confirm:", "anon_cancel:")))
 
@@ -250,10 +250,64 @@ async def _bio_link_protection_enabled(db_session: AsyncSession, chat_id: int) -
     if setting is not None:
         return bool(setting.enabled)
     # Keep the previous behavior until an admin makes an explicit choice.
-    security = await db_session.scalar(
-        select(SecuritySettings).where(SecuritySettings.group_id == chat_id)
+    return False
+
+
+@router.message(Command("channelguard"))
+async def cmd_channelguard(message: Message, db_session: AsyncSession, **kwargs):
+    """Manage ChannelGuard: actual URLs in exposed bios/connected-channel descriptions."""
+    if message.chat.type not in ("group", "supergroup") or not message.from_user:
+        await message.reply("Use /channelguard inside a group.")
+        return
+    try:
+        actor = await message.bot.get_chat_member(message.chat.id, message.from_user.id)
+        status = str(getattr(actor.status, "value", actor.status))
+        if status not in ("administrator", "creator", "owner"):
+            await message.reply("Only group admins can manage ChannelGuard.")
+            return
+    except Exception:
+        await message.reply("Could not verify your group-admin permissions.")
+        return
+
+    parts = (message.text or "").split()
+    requested = parts[1].lower() if len(parts) > 1 else ""
+    if requested not in ("", "on", "off"):
+        await message.reply("Usage: /channelguard on, /channelguard off, or /channelguard for status.")
+        return
+
+    setting = await db_session.scalar(
+        select(BioLinkProtectionSetting).where(
+            BioLinkProtectionSetting.group_id == message.chat.id
+        )
     )
-    return bool(security and security.anti_link)
+    if requested:
+        enabled = requested == "on"
+        if setting is None:
+            setting, _created = await _insert_or_get(
+                db_session,
+                BioLinkProtectionSetting(group_id=message.chat.id, enabled=enabled),
+                BioLinkProtectionSetting,
+                BioLinkProtectionSetting.group_id == message.chat.id,
+            )
+        setting.enabled = enabled
+        try:
+            await db_session.commit()
+        except Exception as exc:
+            await db_session.rollback()
+            logger.warning("Could not save ChannelGuard switch", group_id=message.chat.id, error=str(exc))
+            await message.reply("Could not save ChannelGuard right now. Try again.")
+            return
+    else:
+        enabled = bool(setting and setting.enabled)
+
+    state = "🟢 ON" if enabled else "🔴 OFF"
+    await message.reply(
+        f"🛡️ <b>ChannelGuard: {state}</b>\n\n"
+        "Checks actual links in a member's bio and, when Telegram exposes it, the connected channel description. "
+        "A connected channel by itself is not a violation.\n"
+        "Rule: 3 warnings → 1 hour mute. Buttons: Whitelist and Unmute.",
+        parse_mode="HTML",
+    )
 
 
 @router.callback_query(F.data == "menu:moderation")
@@ -294,9 +348,9 @@ async def open_bio_link_protection(callback: CallbackQuery, db_session: AsyncSes
         return
     enabled = await _bio_link_protection_enabled(db_session, chat.id)
     await callback.message.edit_text(
-        "🛡️ <b>Bio Link Protection</b>\n\n"
-        "When enabled, ALEXA checks for links in member bios where Telegram makes the bio available, "
-        "and applies the group's configured protection.\n\n"
+        "🛡️ <b>ChannelGuard</b>\n\n"
+        "When enabled, ChannelGuard checks actual links in member bios and exposed connected-channel descriptions. "
+        "A connected channel by itself is not a violation.\n\n"
         f"Current status: <b>{'🟢 ON' if enabled else '🔴 OFF'}</b>",
         parse_mode="HTML",
         reply_markup=bio_link_protection_kb(enabled),
@@ -318,15 +372,14 @@ async def open_bio_link_settings(callback: CallbackQuery, db_session: AsyncSessi
         await callback.answer("Could not verify your group-admin permissions.", show_alert=True)
         return
     config = await db_session.scalar(select(BioLinkProtectionConfig).where(BioLinkProtectionConfig.group_id == chat.id))
-    action = config.action if config else "warn_mute"
-    duration = config.mute_duration if config else 3600
+    action = "warn_mute"
+    duration = 3600
     _bio_link_settings_drafts[(chat.id, callback.from_user.id)] = {"action": action, "duration": duration}
     await callback.message.edit_text(
-        "⚙️ <b>Bio Link Protection Settings</b>\n\n"
-        "Choose what ALEXA should do when a member's bio contains a link. "
-        "Select an action and, if using mute, a duration. Then press Save Settings.\n\n"
-        f"Selected action: <b>{action.upper()}</b>\n"
-        f"Mute duration: <b>{duration // 60} minutes</b>",
+        "⚙️ <b>ChannelGuard Settings</b>\n\n"
+        "ChannelGuard has one fixed action: 3 warnings, then a 1-hour mute. "
+        "Save Settings to apply this rule to the group.\n\n"
+        "Selected action: <b>3 WARNINGS → 1 HOUR MUTE</b>",
         parse_mode="HTML",
         reply_markup=bio_link_action_kb(action, duration),
     )
@@ -336,13 +389,14 @@ async def open_bio_link_settings(callback: CallbackQuery, db_session: AsyncSessi
 @router.callback_query(F.data.startswith("mod:bio_action:"))
 async def select_bio_link_action(callback: CallbackQuery, **kwargs):
     action = callback.data.rsplit(":", 1)[-1]
-    if action not in ("warn_mute", "warn_ban", "mute", "ban"):
+    if action != "warn_mute":
         await callback.answer("Invalid action.", show_alert=True)
         return
     key = (callback.message.chat.id, callback.from_user.id)
     draft = _bio_link_settings_drafts.setdefault(key, {"action": "warn_mute", "duration": 3600})
-    draft["action"] = action
-    await callback.message.edit_reply_markup(reply_markup=bio_link_action_kb(draft["action"], draft["duration"]))
+    draft["action"] = "warn_mute"
+    draft["duration"] = 3600
+    await callback.message.edit_reply_markup(reply_markup=bio_link_action_kb("warn_mute", 3600))
     await callback.answer(f"Action selected: {action.upper()}. Save to apply.")
 
 
@@ -353,13 +407,14 @@ async def select_bio_link_duration(callback: CallbackQuery, **kwargs):
     except ValueError:
         await callback.answer("Invalid duration.", show_alert=True)
         return
-    if duration not in (900, 1800, 3600, 21600, 43200, 86400):
+    if duration != 3600:
         await callback.answer("Invalid duration.", show_alert=True)
         return
     key = (callback.message.chat.id, callback.from_user.id)
     draft = _bio_link_settings_drafts.setdefault(key, {"action": "warn_mute", "duration": 3600})
-    draft["duration"] = duration
-    await callback.message.edit_reply_markup(reply_markup=bio_link_action_kb(draft["action"], duration))
+    draft["action"] = "warn_mute"
+    draft["duration"] = 3600
+    await callback.message.edit_reply_markup(reply_markup=bio_link_action_kb("warn_mute", 3600))
     await callback.answer("Mute duration selected. Save to apply.")
 
 
@@ -383,11 +438,11 @@ async def save_bio_link_settings(callback: CallbackQuery, db_session: AsyncSessi
     if config is None:
         config = await _insert_or_get(
             db_session,
-            BioLinkProtectionConfig(group_id=chat.id, action=draft["action"], mute_duration=draft["duration"]),
+            BioLinkProtectionConfig(group_id=chat.id, action="warn_mute", mute_duration=3600),
             BioLinkProtectionConfig, BioLinkProtectionConfig.group_id == chat.id,
         )
-    config.action = draft["action"]
-    config.mute_duration = draft["duration"]
+    config.action = "warn_mute"
+    config.mute_duration = 3600
     try:
         await db_session.commit()
     except Exception as exc:
@@ -397,9 +452,8 @@ async def save_bio_link_settings(callback: CallbackQuery, db_session: AsyncSessi
         return
     _bio_link_settings_drafts.pop(key, None)
     await callback.message.edit_text(
-        "✅ <b>Bio Link Protection settings saved</b>\n\n"
-        f"Action: <b>{config.action.upper()}</b>\n"
-        f"Mute duration: <b>{config.mute_duration // 60} minutes</b>\n\n"
+        "✅ <b>ChannelGuard settings saved</b>\n\n"
+        "Action: <b>3 WARNINGS → 1 HOUR MUTE</b>\n\n"
         "These settings apply only to this group.",
         parse_mode="HTML",
         reply_markup=bio_link_protection_kb(await _bio_link_protection_enabled(db_session, chat.id)),
@@ -410,7 +464,7 @@ async def save_bio_link_settings(callback: CallbackQuery, db_session: AsyncSessi
 @router.callback_query(F.data == "mod:bio_link_status")
 async def bio_link_status(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
     enabled = await _bio_link_protection_enabled(db_session, callback.message.chat.id)
-    await callback.answer("Bio Link Protection is " + ("ON." if enabled else "OFF."), show_alert=True)
+    await callback.answer("ChannelGuard is " + ("ON." if enabled else "OFF."), show_alert=True)
 
 
 async def _set_bio_link_protection(callback: CallbackQuery, db_session: AsyncSession, enabled: bool):
@@ -445,14 +499,14 @@ async def _set_bio_link_protection(callback: CallbackQuery, db_session: AsyncSes
         return
 
     await callback.message.edit_text(
-        "🛡️ <b>Bio Link Protection</b>\n\n"
-        "When enabled, ALEXA checks for links in member bios where Telegram makes the bio available, "
-        "and applies the group's configured protection.\n\n"
+        "🛡️ <b>ChannelGuard</b>\n\n"
+        "When enabled, ChannelGuard checks actual links in member bios and exposed connected-channel descriptions. "
+        "A connected channel by itself is not a violation.\n\n"
         f"Current status: <b>{'🟢 ON' if enabled else '🔴 OFF'}</b>",
         parse_mode="HTML",
         reply_markup=bio_link_protection_kb(enabled),
     )
-    await callback.answer("Bio Link Protection " + ("enabled." if enabled else "disabled."))
+    await callback.answer("ChannelGuard " + ("enabled." if enabled else "disabled."))
 
 
 @router.callback_query(F.data == "mod:bio_link_on")
@@ -498,7 +552,7 @@ async def cmd_approvebio(message: Message, db_session: AsyncSession, **kwargs):
         await message.reply("❌ Could not save this approval. Please check the database logs.")
         return
     await message.reply(
-        f"✅ {escape(safe_username(target))} is approved for Bio Link Protection and can keep links in their bio.",
+        f"✅ {escape(safe_username(target))} is approved for ChannelGuard and can keep links in their bio.",
         parse_mode="HTML",
     )
 

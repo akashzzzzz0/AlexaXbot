@@ -86,6 +86,145 @@ async def _send_temporary_notice(bot, chat_id: int, text: str):
     return sent
 
 
+
+async def _channelguard_profile_links(bot, user_id: int):
+    """Return actual URLs in the user's bio or linked personal-channel description.
+
+    A connected channel by itself is not a violation. Telegram may hide these
+    profile fields, so callers must treat an unavailable profile as unverifiable.
+    """
+    profile = await bot.get_chat(user_id)
+    bio = getattr(profile, "bio", None)
+    available = bio is not None
+    evidence = []
+    if bio and contains_non_alexa_link(str(bio)):
+        evidence.append(("bio", str(bio)))
+
+    linked_channel = getattr(profile, "personal_chat", None)
+    if linked_channel is not None:
+        available = True
+        channel_info = linked_channel
+        linked_id = getattr(linked_channel, "id", None)
+        if linked_id is not None:
+            try:
+                channel_info = await bot.get_chat(linked_id)
+            except Exception:
+                # The profile may expose a partial Chat object; inspect any
+                # description already present without treating its existence
+                # or username as a violation.
+                channel_info = linked_channel
+        description = (
+            getattr(channel_info, "description", None)
+            or getattr(linked_channel, "description", None)
+            or ""
+        )
+        if description and contains_non_alexa_link(str(description)):
+            evidence.append(("connected_channel_description", str(description)))
+    return evidence, available
+
+
+async def _channelguard_warn_and_mute(bot, db_session: AsyncSession, group_id: int, user, display_name: str):
+    """Record one ChannelGuard warning and apply the fixed 3-warning/1-hour rule."""
+    user_id = user.id
+    stored_user = await db_session.get(User, user_id)
+    if stored_user is None:
+        stored_user, _created = await _insert_or_get(
+            db_session,
+            User(
+                id=user_id,
+                telegram_id=user_id,
+                first_name=getattr(user, "first_name", None) or display_name or "User",
+                last_name=getattr(user, "last_name", None),
+                username=getattr(user, "username", None),
+                is_bot=False,
+            ),
+            User,
+            User.id == user_id,
+        )
+        await db_session.flush()
+    member = await db_session.scalar(
+        select(GroupMember).where(
+            GroupMember.group_id == group_id,
+            GroupMember.user_id == user_id,
+        )
+    )
+    if member is None:
+        member, _created = await _insert_or_get(
+            db_session,
+            GroupMember(group_id=group_id, user_id=user_id),
+            GroupMember,
+            GroupMember.group_id == group_id,
+            GroupMember.user_id == user_id,
+        )
+    if member.is_whitelisted:
+        return None, 0
+
+    channelguard_count = await db_session.scalar(
+        select(func.count()).select_from(Warning).where(
+            Warning.group_id == group_id,
+            Warning.user_id == user_id,
+            Warning.reason.like("ChannelGuard:%"),
+        )
+    ) or 0
+    count = int(channelguard_count) + 1
+    db_session.add(
+        Warning(
+            group_id=group_id,
+            user_id=user_id,
+            admin_id=None,
+            reason="ChannelGuard: profile link detected",
+        )
+    )
+    member.warn_count = (member.warn_count or 0) + 1
+    await log_action(
+        db_session,
+        group_id,
+        "warn",
+        user_id,
+        bot.id,
+        {"reason": "ChannelGuard: profile link detected"},
+    )
+    reached = count >= 3
+    if reached:
+        muted = await mute_user(
+            bot,
+            db_session,
+            group_id,
+            user_id,
+            bot.id,
+            3600,
+            "Bio-link warning limit reached",
+        )
+        await db_session.commit()
+        return ("muted" if muted else "mute_failed"), count
+
+    await db_session.commit()
+    return "warned", count
+
+
+def _channelguard_notice(user_id: int, display_name: str, state: str, count: int):
+    user_link = mention_user(user_id, display_name or f"User {user_id}")
+    if state == "warned":
+        return (
+            f"⚠️ Warning {user_link}, please remove the link from your bio or connected channel. "
+            f"Warning: {min(count, 3)}/3",
+            None,
+        )
+    if state == "muted":
+        return (
+            f"🔇 {user_link} has been muted for 1 hour after reaching 3/3 warnings.\n"
+            "Remove the link from your bio or connected channel, then tap Unmute.",
+            _bio_admin_action_keyboard,
+        )
+    if state == "mute_failed":
+        return (
+            f"⚠️ {user_link} reached 3/3 ChannelGuard warnings, but the 1-hour mute failed. "
+            "Check ALEXA's Restrict Members permission.",
+            None,
+        )
+    return None, None
+
+
 _recent_welcome_keys = {}
 
 
@@ -276,132 +415,53 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
                 logger.warning("Anti-bot could not remove joining bot", chat_id=chat.id, user_id=user.id, error=str(exc))
         return
 
-    # Admin/creator profile bios are always exempt from bio-link protection.
-    # This is automatic and does not require a command.
+    # Group admins and creators are exempt from ChannelGuard.
     joining_user_is_admin = False
+    joining_role_verified = False
     try:
         member_status = await event.bot.get_chat_member(chat.id, user.id)
         status_value = str(getattr(member_status.status, "value", member_status.status))
+        joining_role_verified = True
         joining_user_is_admin = status_value in ("administrator", "creator", "owner")
     except Exception as exc:
         logger.debug(
-            "Could not verify joining member role for bio-link exemption",
+            "Could not verify joining member role for ChannelGuard exemption",
             chat_id=chat.id,
             user_id=user.id,
             error=str(exc),
         )
 
-    # Bio-link protection must be explicitly enabled in its own setting.
-    # Anti-Link is for messages, and must never silently mute/ban people just
-    # because they joined the group or their profile bio contains a URL.
+    # ChannelGuard checks only actual URLs in exposed profile fields.
+    # A connected channel alone is not a violation.
     bio_setting = await db_session.scalar(
         select(BioLinkProtectionSetting).where(BioLinkProtectionSetting.group_id == chat.id)
     )
-    bio_protection_enabled = bool(bio_setting and bio_setting.enabled)
-    # Telegram may not expose bios for every joining member, so this is best-effort.
-    if bio_protection_enabled and not joining_user_is_admin:
-        try:
-            profile = await event.bot.get_chat(user.id)
-            bio = getattr(profile, "bio", None) or ""
-            if bio and contains_non_alexa_link(bio):
-                config = await db_session.scalar(
-                    select(BioLinkProtectionConfig).where(BioLinkProtectionConfig.group_id == chat.id)
-                )
-                action = config.action if config else "mute"
-                duration = config.mute_duration if config else 3600
-                try:
-                    display_name = escape(user.full_name or user.first_name or "User")
-                    user_link = f'<a href="tg://user?id={user.id}">{display_name}</a>'
-                    reason = "URL found in bio"
-
-                    if action == "ban":
-                        await event.bot.ban_chat_member(chat.id, user.id)
-                        await event.bot.unban_chat_member(chat.id, user.id)
-                        notice = (
-                            "🚫 <b>Member Removed</b> 🚫\n\n"
-                            f"👤 User: {user_link} [<code>{user.id}</code>]\n"
-                            f"❌ Reason: {reason}"
-                        )
-                        await event.bot.send_message(chat.id, notice, parse_mode="HTML")
-                    elif action == "mute":
-                        # Use the shared moderation service so the configured duration,
-                        # full muted permissions, member state, and audit log stay in sync.
-                        applied_duration = max(60, int(duration or 3600))
-                        muted = await mute_user(
-                            event.bot, db_session, chat.id, user.id, event.bot.id,
-                            applied_duration, "Link found in profile bio (Bio Link Protection)"
-                        )
-                        if muted:
-                            minutes = max(1, applied_duration // 60)
-                            await event.bot.send_message(
-                                chat.id,
-                                f"🔇 {user_link} [<code>{user.id}</code>] muted for {minutes} minute(s).\n"
-                                f"❌ Reason: {reason}\n"
-                                "Remove link from your bio, then tap Unmute.",
-                                parse_mode="HTML",
-                                reply_markup=_bio_admin_action_keyboard(chat.id, user.id),
-                            )
-                        else:
-                            await _send_temporary_notice(
-                                event.bot, chat.id,
-                                "⚠️ Bio-link protection found a link in the member's profile, but the mute failed. Check ALEXA's Restrict Members permission."
-                            )
-                    else:
-                        # Persist a real warning and show the member's clickable Telegram name.
-                        group_settings = await db_session.scalar(
-                            select(GroupSettings).where(GroupSettings.group_id == chat.id)
-                        )
-                        max_warns = max(1, int(group_settings.max_warns if group_settings else 3))
-                        warning_count, reached_limit = await warn_user(
-                            db_session, chat.id, user.id, event.bot.id, reason, max_warns
-                        )
-                        await db_session.commit()
-                        notice = (
-                            "🚨 <b>Warning Issued</b> 🚨\n\n"
-                            f"👤 User: {user_link} [<code>{user.id}</code>]\n"
-                            f"❌ Reason: {reason}\n"
-                            f"⚠️ Warning: {warning_count}/{max_warns}\n\n"
-                            "Notice: Please remove any links from your bio."
-                        )
-                        await event.bot.send_message(chat.id, notice, parse_mode="HTML")
-
-                        if reached_limit and action == "warn_ban":
-                            await event.bot.ban_chat_member(chat.id, user.id)
-                            await event.bot.unban_chat_member(chat.id, user.id)
-                            await event.bot.send_message(
-                                chat.id,
-                                f"🚫 {user_link} has been removed after reaching the warning limit.",
-                                parse_mode="HTML",
-                            )
-                            return
-                        if reached_limit and action == "warn_mute":
-                            applied_duration = max(60, int(duration or 3600))
-                            muted = await mute_user(
-                                event.bot, db_session, chat.id, user.id, event.bot.id,
-                                applied_duration, "Bio-link warning limit reached"
-                            )
-                            if muted:
-                                await event.bot.send_message(
-                                    chat.id,
-                                    f"🔇 {user_link} muted for {max(1, applied_duration // 60)} minute(s) after reaching the warning limit.\n"
-                                    "Remove link from your bio, then tap Unmute.",
-                                    parse_mode="HTML",
-                                    reply_markup=_bio_admin_action_keyboard(chat.id, user.id),
-                                )
-                                return
-                except Exception as action_exc:
-                    logger.warning("Bio-link action failed", chat_id=chat.id, user_id=user.id, action=action, error=str(action_exc))
-                logger.info("Member bio contains a link", chat_id=chat.id, user_id=user.id, action=action)
-                if action in ("ban", "mute"):
-                    return
-        except Exception as exc:
-            # Do not block normal joins when Telegram does not expose the bio.
-            logger.debug(
-                "Bio-link check unavailable for joining member",
-                chat_id=chat.id,
-                user_id=user.id,
-                error=str(exc),
+    if bio_setting and bio_setting.enabled and joining_role_verified and not joining_user_is_admin:
+        member_row = await db_session.scalar(
+            select(GroupMember).where(
+                GroupMember.group_id == chat.id,
+                GroupMember.user_id == user.id,
             )
+        )
+        if not (member_row and member_row.is_whitelisted):
+            try:
+                evidence, profile_available = await _channelguard_profile_links(event.bot, user.id)
+                if evidence:
+                    state, count = await _channelguard_warn_and_mute(
+                        event.bot, db_session, chat.id, user, user.full_name or user.first_name or "User"
+                    )
+                    notice, keyboard_builder = _channelguard_notice(
+                        user.id, user.full_name or user.first_name or "User", state, count
+                    )
+                    if notice:
+                        markup = keyboard_builder(chat.id, user.id) if keyboard_builder else None
+                        await event.bot.send_message(chat.id, notice, parse_mode="HTML", reply_markup=markup)
+                    if state in ("muted", "mute_failed"):
+                        return
+                elif not profile_available:
+                    logger.debug("ChannelGuard profile fields unavailable on join", chat_id=chat.id, user_id=user.id)
+            except Exception as exc:
+                logger.debug("ChannelGuard join profile check unavailable", chat_id=chat.id, user_id=user.id, error=str(exc))
 
     if security and (security.anti_raid or security.anti_mass_join):
         redis = kwargs.get("redis_client") or getattr(event.bot, "_redis_client", None)
@@ -560,19 +620,19 @@ async def bio_unmute_after_profile_fix(callback: CallbackQuery, db_session: Asyn
         await callback.answer("This mute was not caused by Bio Link Protection.", show_alert=True)
         return
 
-    try:
-        profile = await callback.bot.get_chat(user_id)
-        if not hasattr(profile, "bio") or profile.bio is None:
-            await callback.answer("Telegram did not make your bio available to verify. Try again later.", show_alert=True)
+    if not member.is_whitelisted:
+        try:
+            evidence, profile_available = await _channelguard_profile_links(callback.bot, user_id)
+            if not profile_available:
+                await callback.answer("Telegram did not expose your bio/connected-channel details for verification. Try again later.", show_alert=True)
+                return
+            if evidence:
+                await callback.answer("A link is still in your bio or connected channel. Remove it first, or ask an admin to whitelist you.", show_alert=True)
+                return
+        except Exception as exc:
+            logger.warning("Could not verify profile before ChannelGuard unmute", chat_id=group_id, user_id=user_id, error=str(exc))
+            await callback.answer("Could not verify your profile right now. Please try again later.", show_alert=True)
             return
-        bio = profile.bio or ""
-        if contains_non_alexa_link(bio):
-            await callback.answer("A link is still in your bio. Remove it first, then try again.", show_alert=True)
-            return
-    except Exception as exc:
-        logger.warning("Could not verify bio before unmute", chat_id=group_id, user_id=user_id, error=str(exc))
-        await callback.answer("Could not verify your bio right now. Please try again later.", show_alert=True)
-        return
 
     ok = await unmute_user(callback.bot, db_session, group_id, user_id, callback.bot.id)
     if not ok:
@@ -698,18 +758,12 @@ async def bio_link_admin_action(callback: CallbackQuery, db_session: AsyncSessio
         await callback.answer("Unmute failed. Check Alexa's Restrict Members permission.", show_alert=True)
         return
     try:
-        await db_session.execute(
-            delete(Warning).where(
-                Warning.group_id == group_id,
-                Warning.user_id == user_id,
-            )
-        )
-        member.warn_count = 0
+        # Unmute must never erase the member's warning history.
         await db_session.commit()
     except Exception as exc:
         await db_session.rollback()
-        logger.warning("Could not reset bio-link warnings after unmute", group_id=group_id, user_id=user_id, error=str(exc))
-        await callback.answer("Unmute was attempted, but warning reset could not be saved. Please retry after checking the database.", show_alert=True)
+        logger.warning("Could not save ChannelGuard unmute", group_id=group_id, user_id=user_id, error=str(exc))
+        await callback.answer("Unmute could not be saved. Please try again.", show_alert=True)
         return
 
     try:
@@ -719,12 +773,12 @@ async def bio_link_admin_action(callback: CallbackQuery, db_session: AsyncSessio
     try:
         await callback.bot.send_message(
             group_id,
-            f"✅ {mention_user(user_id, f'User {user_id}')} has been unmuted by an admin. Bio-link warnings have been reset.",
+            f"✅ {mention_user(user_id, f'User {user_id}')} has been unmuted by an admin. Existing warnings were kept.",
             parse_mode="HTML",
         )
     except Exception:
         pass
-    await callback.answer("Member unmuted and Bio Link Protection warnings reset.")
+    await callback.answer("Member unmuted. Warning history was kept.")
 
 
 @router.callback_query(F.data.startswith("captcha_verify:"))
@@ -971,12 +1025,14 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
     # Resolve admin status once for link exemptions. Admin links are exempt
     # automatically (no command/configuration); non-admin behavior is unchanged.
     sender_is_admin = False
+    sender_role_verified = False
     if message.from_user:
         try:
             member_status = await message.bot.get_chat_member(
                 message.chat.id, message.from_user.id
             )
             sender_status = str(getattr(member_status.status, "value", member_status.status))
+            sender_role_verified = True
             sender_is_admin = sender_status in ("administrator", "creator", "owner")
         except Exception as exc:
             logger.debug(
@@ -1057,213 +1113,60 @@ async def group_message_handler(message: Message, db_session: AsyncSession, db_u
                 )
             return
 
-    # When Bio Link Protection is enabled, also moderate links posted by existing
-    # members: delete each link message, issue persistent warnings, and mute on 3.
-    message_text = message.text or message.caption or ""
-    if message.from_user and message_text and contains_link(message_text):
+    # ChannelGuard checks profile fields only when its own per-group switch is ON.
+    # Ordinary message links remain governed by the group's existing Anti-Link rules.
+    if message.from_user and not message.from_user.is_bot:
         bio_setting = await db_session.scalar(
             select(BioLinkProtectionSetting).where(
-                BioLinkProtectionSetting.group_id == message.chat.id
+                BioLinkProtectionSetting.group_id == db_group.id
             )
         )
-        # Do not inherit the message Anti-Link toggle here. Bio protection
-        # is a separate feature and only runs when explicitly enabled.
-        bio_protection_enabled = bool(bio_setting and bio_setting.enabled)
-        if bio_protection_enabled:
-            is_admin = False
-            try:
-                member = await message.bot.get_chat_member(message.chat.id, message.from_user.id)
-                is_admin = member.status in ("administrator", "creator", "owner")
-            except Exception as exc:
-                logger.debug("Could not verify link sender role", error=str(exc), user_id=message.from_user.id)
-            approved_row = await db_session.scalar(
+        if bio_setting and bio_setting.enabled and sender_role_verified and not sender_is_admin:
+            member_row = await db_session.scalar(
                 select(GroupMember).where(
                     GroupMember.group_id == db_group.id,
                     GroupMember.user_id == message.from_user.id,
                 )
             )
-            # /approvebio exempts this member from Bio Link Protection: do not
-            # delete their messages or count bio-link warnings again.
-            if not is_admin and not (approved_row and approved_row.is_whitelisted):
+            if not (member_row and member_row.is_whitelisted):
                 try:
-                    await message.delete()
-                except Exception as exc:
-                    logger.warning("Could not delete link message", error=str(exc), group_id=message.chat.id)
-                if db_user:
-                    notice_markup = None
-                    count, reached = await warn_user(
-                        db_session, db_group.id, db_user.id, message.bot.id,
-                        "Posting links (Bio Link Protection)", max_warns=3
+                    evidence, profile_available = await _channelguard_profile_links(
+                        message.bot, message.from_user.id
                     )
-                    try:
-                        await db_session.flush()
-                    except Exception:
-                        pass
-                    if reached:
-                        muted = await mute_user(
-                            message.bot, db_session, db_group.id, db_user.id,
-                            message.bot.id, 3600, "3 link warnings reached"
+                    if evidence:
+                        state, count = await _channelguard_warn_and_mute(
+                            message.bot,
+                            db_session,
+                            db_group.id,
+                            message.from_user,
+                            message.from_user.full_name or message.from_user.first_name or "User",
                         )
-                        if muted:
-                            target_link = mention_user(
-                                db_user.id,
-                                getattr(db_user, "full_name", None) or getattr(db_user, "first_name", None) or f"User {db_user.id}",
-                            )
-                            notice = f"🔇 {target_link} was muted after reaching {count}/3 Bio Link Protection warnings."
-                            notice_markup = _bio_admin_action_keyboard(db_group.id, db_user.id)
-                        else:
-                            notice = (
-                                f"⚠️ Link removed. Member reached {count}/3 warnings, but I couldn't apply the mute. "
-                                "Please check ALEXA's Restrict Members permission."
-                            )
-                            notice_markup = None
-                    else:
-                        notice = (
-                            f"⚠️ Link removed. Warning {count}/3. "
-                            "At 3 warnings, the member will be muted for 1 hour."
+                        notice, keyboard_builder = _channelguard_notice(
+                            message.from_user.id,
+                            message.from_user.full_name or message.from_user.first_name or "User",
+                            state,
+                            count,
                         )
-                    if notice:
-                        try:
-                            await message.bot.send_message(message.chat.id, notice, parse_mode="HTML", reply_markup=notice_markup)
-                        except Exception:
-                            pass
-                return
-
-
-    # Bio-link scan for existing members on each message, similar to the standalone
-    # BioLink Protector flow. Telegram Bot API may not expose every user's bio,
-    # so failures are logged and must never block normal group messages.
-    if message.from_user and not message.from_user.is_bot:
-        bio_setting = await db_session.scalar(
-            select(BioLinkProtectionSetting).where(
-                BioLinkProtectionSetting.group_id == message.chat.id
-            )
-        )
-        bio_protection_enabled = (
-            bool(bio_setting.enabled) if bio_setting is not None
-            else bool(group_security.anti_link)
-        )
-        if bio_protection_enabled:
-            try:
-                member_status = await message.bot.get_chat_member(
-                    message.chat.id, message.from_user.id
-                )
-                is_admin = member_status.status in ("administrator", "creator", "owner")
-                if not is_admin:
-                    member_row = await db_session.scalar(
-                        select(GroupMember).where(
-                            GroupMember.group_id == db_group.id,
-                            GroupMember.user_id == message.from_user.id,
-                        )
-                    )
-                    if not (member_row and member_row.is_whitelisted):
-                        profile = await message.bot.get_chat(message.from_user.id)
-                        bio = getattr(profile, "bio", None) or ""
-                        if bio and contains_link(bio):
-                            config = await db_session.scalar(
-                                select(BioLinkProtectionConfig).where(
-                                    BioLinkProtectionConfig.group_id == db_group.id
-                                )
+                        if notice:
+                            markup = keyboard_builder(db_group.id, message.from_user.id) if keyboard_builder else None
+                            await message.bot.send_message(
+                                message.chat.id, notice, parse_mode="HTML", reply_markup=markup
                             )
-                            action = config.action if config else "mute"
-                            duration = config.mute_duration if config else 3600
-                            try:
-                                await message.delete()
-                            except Exception:
-                                pass
-                            user_link = mention_user(
-                                message.from_user.id,
-                                message.from_user.full_name or message.from_user.first_name or f"User {message.from_user.id}",
-                            )
-                            notice_markup = None
-                            if action in ("warn", "warn_mute", "warn_ban"):
-                                if db_user:
-                                    count, reached = await warn_user(
-                                        db_session, db_group.id, db_user.id, message.bot.id,
-                                        "Link found in profile bio (Bio Link Protection)", max_warns=3
-                                    )
-                                    if reached and action == "warn_mute":
-                                        muted = await mute_user(
-                                            message.bot, db_session, db_group.id, db_user.id,
-                                            message.bot.id, duration, "3 bio-link warnings reached"
-                                        )
-                                        notice = (
-                                            f"🔇 {user_link} was muted after reaching 3/3 Bio Link Protection warnings."
-                                            if muted else
-                                            f"⚠️ {user_link} — bio-link warning limit reached (3/3), but mute failed. Check ALEXA's Restrict Members permission."
-                                        )
-                                        if muted:
-                                            notice_markup = _bio_admin_action_keyboard(db_group.id, db_user.id)
-                                    elif reached and action == "warn_ban":
-                                        banned = await ban_user(
-                                            message.bot, db_session, db_group.id, db_user.id,
-                                            message.bot.id, "3 bio-link warnings reached"
-                                        )
-                                        notice = (
-                                            ""
-                                            if banned else
-                                            f"⚠️ {user_link} — bio-link warning limit reached (3/3), but ban failed. Check ALEXA's Ban Users permission."
-                                        )
-                                    else:
-                                        if action == "warn":
-                                            notice = (
-                                                "🚨 <b>Warning Issued</b> 🚨\n\n"
-                                                f"👤 User: {user_link}\n"
-                                                "❌ Reason: Link found in profile bio\n"
-                                                f"⚠️ Warning: {count}/3\n\n"
-                                                "Notice: Please remove any links from your bio."
-                                            )
-                                        else:
-                                            next_action = "muted" if action == "warn_mute" else "banned"
-                                            notice = (
-                                                "🚨 <b>Warning Issued</b> 🚨\n\n"
-                                                f"👤 User: {user_link}\n"
-                                                "❌ Reason: Link found in profile bio\n"
-                                                f"⚠️ Warning: {count}/3\n\n"
-                                                f"Notice: At 3 warnings, the member will be {next_action}."
-                                            )
-                                else:
-                                    notice = f"⚠️ {user_link}, message removed because a link was found in your bio. Please remove it."
-                            elif action == "mute":
-                                muted = False
-                                if db_user:
-                                    muted = await mute_user(
-                                        message.bot, db_session, db_group.id, db_user.id,
-                                        message.bot.id, duration, "Link found in profile bio"
-                                    )
-                                notice = (
-                                    f"🔇 {user_link} was muted by Bio Link Protection."
-                                    if muted else
-                                    f"⚠️ {user_link} — message removed because a link was found in the member's bio, but mute failed. Check ALEXA's Restrict Members permission."
-                                )
-                                if muted:
-                                    notice_markup = _bio_admin_action_keyboard(db_group.id, db_user.id)
-                            else:
-                                banned = False
-                                if db_user:
-                                    banned = await ban_user(
-                                        message.bot, db_session, db_group.id, db_user.id,
-                                        message.bot.id, "Link found in profile bio"
-                                    )
-                                notice = "" if banned else f"⚠️ {user_link} — message removed, but ban failed. Check ALEXA's Ban Users permission."
-                            if notice:
-                                try:
-                                    await message.bot.send_message(
-                                        message.chat.id,
-                                        notice,
-                                        parse_mode="HTML",
-                                        reply_markup=notice_markup,
-                                    )
-                                except Exception:
-                                    pass
+                        if state in ("muted", "mute_failed"):
                             return
-            except Exception as exc:
-                logger.debug(
-                    "Bio-link scan unavailable for message sender",
-                    chat_id=message.chat.id,
-                    user_id=message.from_user.id,
-                    error=str(exc),
-                )
+                    elif not profile_available:
+                        logger.debug(
+                            "ChannelGuard profile fields unavailable for message sender",
+                            chat_id=message.chat.id,
+                            user_id=message.from_user.id,
+                        )
+                except Exception as exc:
+                    logger.debug(
+                        "ChannelGuard profile scan unavailable",
+                        chat_id=message.chat.id,
+                        user_id=message.from_user.id,
+                        error=str(exc),
+                    )
 
     # Persistent keyword blocklist and auto-reply filters configured by group admins.
     text_content = (message.text or message.caption or "").lower()
