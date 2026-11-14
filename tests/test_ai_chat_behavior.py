@@ -86,9 +86,27 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
     def test_slash_commands_do_not_trigger_casual_chat(self):
         self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(_group_message("/ban 123"))))
 
+    def test_oy_oye_are_group_greeting_triggers(self):
+        for index, text in enumerate(("oy", "oyyy", "oye", "oyeee")):
+            with self.subTest(text=text):
+                self.assertTrue(asyncio.run(
+                    ai_chat.is_alexa_trigger(_group_message(text, chat_id=-100800-index))
+                ))
+
+    def test_short_social_reply_handler_returns_only_short_varied_lines(self):
+        examples = {
+            "oy": ("Oyyyy 😂", "Kyaaa? 😂", "Haan bolo?"),
+            "oye": ("Haan bolo?", "Oyeee 😂", "Ji, sun rahi hoon."),
+            "helo": ("Oye hellooo 💗", "Hiii!", "Haan ji, bolo?"),
+            "Alexa": ("Haan bolo?", "Ji, sun rahi hoon.", "Kya hua?"),
+        }
+        for text, choices in examples.items():
+            with self.subTest(text=text):
+                self.assertIn(ai_chat._short_social_reply(text), choices)
+
     def test_all_day_greetings_are_recognized_for_replies_and_stickers(self):
         greetings = (
-            "hi", "hello", "good morning", "good afternoon",
+            "oy", "oye", "hi", "hello", "good morning", "good afternoon",
             "good evening", "good night", "morning", "afternoon",
             "evening", "gm", "gn",
         )
