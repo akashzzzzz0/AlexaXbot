@@ -1,4 +1,4 @@
-"""Alexa chat provider chain: Groq -> OpenAI.
+"""Alexa chat provider chain: Cloudflare Workers AI -> Groq -> OpenAI.
 
 Gemini and Ollama remain available to other bot features, but are deliberately
 excluded from conversational chat. Provider keys stay runtime-only.
@@ -13,6 +13,61 @@ from bot.config import settings
 
 
 
+
+def _cloudflare_account_id() -> str:
+    return (getattr(settings, "CLOUDFLARE_ACCOUNT_ID", "") or os.getenv("CLOUDFLARE_ACCOUNT_ID", "")).strip()
+
+
+def _cloudflare_api_token() -> str:
+    return (getattr(settings, "CLOUDFLARE_API_TOKEN", "") or os.getenv("CLOUDFLARE_API_TOKEN", "")).strip()
+
+
+async def _cloudflare_chat(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False) -> str:
+    account_id = _cloudflare_account_id()
+    api_token = _cloudflare_api_token()
+    if not account_id or not api_token:
+        raise RuntimeError("cloudflare_not_configured")
+
+    chat_messages = []
+    if system.strip():
+        chat_messages.append({"role": "system", "content": system.strip()})
+    for item in messages:
+        role = str(item.get("role", "user"))
+        if role == "model":
+            role = "assistant"
+        if role not in {"system", "user", "assistant"}:
+            continue
+        content = str(item.get("content", item.get("text", ""))).strip()
+        if content:
+            chat_messages.append({"role": role, "content": content})
+    if not chat_messages:
+        raise ValueError("empty_prompt")
+
+    model = (getattr(settings, "CLOUDFLARE_AI_MODEL", "") or os.getenv("CLOUDFLARE_AI_MODEL", "") or "@cf/zai-org/glm-4.7-flash").strip()
+    payload = {"messages": chat_messages, "temperature": temperature, "max_tokens": max_tokens}
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
+
+    timeout = httpx.Timeout(14.0, connect=5.0)
+    endpoint = "https://api.cloudflare.com/client/v4/accounts/" + account_id + "/ai/run/" + model
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(endpoint, json=payload, headers={"Authorization": "Bearer " + api_token, "Content-Type": "application/json"})
+        if response.status_code >= 400:
+            try:
+                data = response.json()
+                detail = data.get("errors") or data.get("error") or response.text[:300]
+            except (ValueError, AttributeError):
+                detail = response.text[:300]
+            raise httpx.HTTPStatusError("Cloudflare Workers AI HTTP " + str(response.status_code) + ": " + str(detail)[:220], request=response.request, response=response)
+        data = response.json()
+
+    result = data.get("result") or {}
+    choices = result.get("choices") or []
+    choice_content = ((choices[0].get("message") or {}).get("content") if choices else "")
+    answer = str(result.get("response") or choice_content or data.get("response") or "").strip()
+    if not answer:
+        raise RuntimeError("cloudflare_empty_response")
+    return answer
 
 def _groq_api_key() -> str:
     return (
@@ -168,17 +223,18 @@ def _safe_provider_error(name: str, exc: Exception) -> str:
 
 
 async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False):
-    """Use Groq first and OpenAI second for Alexa conversational chat only."""
+    """Use Cloudflare Workers AI first, then Groq and OpenAI for Alexa conversational chat only."""
     provider_errors = []
 
     # Gemini and Ollama are intentionally not part of this chat chain.
     # Their independent non-chat integrations elsewhere in the bot are untouched.
     providers = [
+        ("cloudflare", _cloudflare_chat, bool(_cloudflare_account_id() and _cloudflare_api_token()), 14.0),
         ("groq", _groq_chat, bool(_groq_api_key()), 10.0),
         ("openai", _openai_chat, bool(_openai_api_key()), 12.0),
     ]
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + 24.0
+    deadline = loop.time() + 36.0
     for name, provider, configured, timeout_seconds in providers:
         if not configured:
             provider_errors.append(f"{name}:not_configured")
