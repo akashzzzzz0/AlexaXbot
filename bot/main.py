@@ -431,6 +431,10 @@ async def main() -> None:
     dp.update.outer_middleware(I18nMiddleware())
     dp.update.outer_middleware(DatabaseMiddleware())
     dp.update.outer_middleware(CallbackLoggingMiddleware())
+    # Register last so the global maintenance gate runs before DB, logging,
+    # anti-link, auto-delete, and every feature handler for group updates.
+    from bot.middlewares.global_maintenance import GlobalMaintenanceMiddleware
+    dp.update.outer_middleware(GlobalMaintenanceMiddleware())
 
     # Run bot (handles own errors, never raises)
     await run_bot(bot, dp, runner)

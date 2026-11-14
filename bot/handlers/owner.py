@@ -1718,11 +1718,46 @@ async def toggle_maintenance(callback: CallbackQuery, _: callable, db_session: A
     else:
         row.value = "1" if _maintenance_mode else "0"
     await db_session.commit()
-    await callback.answer(
-        "Maintenance ON." if _maintenance_mode else "Maintenance OFF.",
-        show_alert=True,
-    )
     await callback.message.edit_reply_markup(reply_markup=owner_kb())
+
+    if _maintenance_mode:
+        # Send exactly one notice to each active group on the OFF -> ON transition.
+        await callback.answer("Maintenance ON. Sending one notice to active groups.")
+        groups = await _active_groups(db_session)
+        sent = 0
+        failed = 0
+        notice = (
+            "⚙️ <b>ALEXA IS UNDER MAINTENANCE</b>\n\n"
+            "🔧 Alexa is temporarily paused. All group features and automatic "
+            "replies are disabled until maintenance is turned OFF by the owner."
+        )
+        for group in groups:
+            try:
+                try:
+                    await callback.bot.send_message(group.id, notice, parse_mode="HTML")
+                except TelegramRetryAfter as exc:
+                    await asyncio.sleep(max(1, int(exc.retry_after)))
+                    await callback.bot.send_message(group.id, notice, parse_mode="HTML")
+                sent += 1
+                await asyncio.sleep(0.05)
+            except Exception as exc:
+                failed += 1
+                logger.warning(
+                    "Could not send maintenance notice to group",
+                    group_id=group.id,
+                    error=str(exc),
+                )
+        try:
+            await callback.message.answer(
+                "⚙️ <b>Global Maintenance is ON</b>\n"
+                f"📨 Notice sent: <b>{sent}</b> groups\n"
+                f"⚠️ Failed: <b>{failed}</b> groups",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+    else:
+        await callback.answer("Maintenance OFF. Alexa is active again.", show_alert=True)
 
 
 @router.callback_query(F.data == "owner:emergency")

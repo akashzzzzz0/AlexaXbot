@@ -79,6 +79,9 @@ async def _record_sent(group_id: int, slot_name: str, day_key: str) -> None:
 
 
 async def _send_to_active_groups(bot, slot_name: str, day_key: str) -> None:
+    from bot.handlers.owner import get_maintenance_mode
+    if get_maintenance_mode():
+        return
     async with async_session_maker() as session:
         targets = list((await session.scalars(
             select(Group.id).where(Group.is_active.is_(True))
@@ -95,6 +98,8 @@ async def _send_to_active_groups(bot, slot_name: str, day_key: str) -> None:
     failed = 0
     for group_id in targets:
         try:
+            if get_maintenance_mode():
+                break
             if await _already_sent(group_id, slot_name, day_key):
                 skipped += 1
                 continue
@@ -156,6 +161,10 @@ async def _send_to_active_groups(bot, slot_name: str, day_key: str) -> None:
 async def _daily_promotion_scheduler(bot) -> None:
     while True:
         try:
+            from bot.handlers.owner import get_maintenance_mode
+            if get_maintenance_mode():
+                await asyncio.sleep(_CHECK_INTERVAL_SECONDS)
+                continue
             now = datetime.now(_TIMEZONE)
             day_key = now.date().isoformat()
             for hour, slot_name in _SLOTS:
