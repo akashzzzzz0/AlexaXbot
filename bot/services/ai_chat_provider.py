@@ -1,7 +1,7 @@
-"""Alexa chat provider chain: Groq -> Gemini -> Ollama -> OpenAI.
+"""Alexa chat provider chain: Groq -> OpenAI.
 
-Provider keys are read only from private runtime settings/environment. The
-existing chat handlers, prompts, history, and reply formatting remain unchanged.
+Gemini and Ollama remain available to other bot features, but are deliberately
+excluded from conversational chat. Provider keys stay runtime-only.
 """
 import asyncio
 import os
@@ -9,8 +9,7 @@ import re
 
 import httpx
 
-from bot.config import get_gemini_api_key, settings
-from bot.services.ollama_ai import ollama_chat
+from bot.config import settings
 
 
 
@@ -155,77 +154,6 @@ async def _openai_chat(
     return answer
 
 
-async def _gemini_chat(
-    messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False
-) -> str:
-    api_key = get_gemini_api_key()
-    if not api_key:
-        raise RuntimeError("gemini_not_configured")
-
-    contents = []
-    system_parts = [system.strip()] if system.strip() else []
-    for item in messages:
-        role = str(item.get("role", "user"))
-        if role == "assistant":
-            role = "model"
-        if role == "system":
-            content = str(item.get("content", item.get("text", ""))).strip()
-            if content:
-                system_parts.append(content)
-            continue
-        if role not in {"user", "model"}:
-            continue
-        content = str(item.get("content", item.get("text", ""))).strip()
-        if content:
-            contents.append({"role": role, "parts": [{"text": content}]})
-    if not contents:
-        raise ValueError("empty_prompt")
-
-    model = (
-        getattr(settings, "GEMINI_MODEL", "")
-        or os.getenv("GEMINI_MODEL", "")
-        or "gemini-3.5-flash-lite"
-    ).strip()
-    payload = {
-        "contents": contents,
-        "generationConfig": {
-            "temperature": temperature,
-            "maxOutputTokens": max_tokens,
-        },
-    }
-    if system_parts:
-        payload["systemInstruction"] = {"parts": [{"text": "\n\n".join(system_parts)}]}
-    if json_mode:
-        payload["generationConfig"]["responseMimeType"] = "application/json"
-
-    timeout = httpx.Timeout(60.0, connect=10.0)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-            params={"key": api_key},
-            json=payload,
-            headers={"Content-Type": "application/json"},
-        )
-        if response.status_code >= 400:
-            try:
-                detail = response.json().get("error", {}).get("message", response.text[:300])
-            except (ValueError, AttributeError):
-                detail = response.text[:300]
-            raise httpx.HTTPStatusError(
-                f"Gemini HTTP {response.status_code}: {detail}",
-                request=response.request,
-                response=response,
-            )
-        data = response.json()
-
-    candidates = data.get("candidates") or []
-    parts = ((candidates[0].get("content") or {}).get("parts") or []) if candidates else []
-    answer = "".join(str(part.get("text") or "") for part in parts).strip()
-    if not answer:
-        raise RuntimeError("gemini_empty_response")
-    return answer
-
-
 def _safe_provider_error(name: str, exc: Exception) -> str:
     """Keep HTTP diagnostics useful without logging credentials or request URLs."""
     response = getattr(exc, "response", None)
@@ -240,19 +168,17 @@ def _safe_provider_error(name: str, exc: Exception) -> str:
 
 
 async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False):
-    """Use Groq as the primary chat provider, then fall back safely."""
+    """Use Groq first and OpenAI second for Alexa conversational chat only."""
     provider_errors = []
 
-    # Groq is preferred for Alexa chat; other configured providers remain
-    # available as fallbacks if Groq is unavailable or rate-limited.
+    # Gemini and Ollama are intentionally not part of this chat chain.
+    # Their independent non-chat integrations elsewhere in the bot are untouched.
     providers = [
-        ("groq", _groq_chat, bool(_groq_api_key()), 8.0),
-        ("gemini", _gemini_chat, bool(get_gemini_api_key()), 12.0),
-        ("ollama", ollama_chat, True, 28.0),
-        ("openai", _openai_chat, bool(_openai_api_key()), 8.0),
+        ("groq", _groq_chat, bool(_groq_api_key()), 10.0),
+        ("openai", _openai_chat, bool(_openai_api_key()), 12.0),
     ]
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + 52.0
+    deadline = loop.time() + 24.0
     for name, provider, configured, timeout_seconds in providers:
         if not configured:
             provider_errors.append(f"{name}:not_configured")
