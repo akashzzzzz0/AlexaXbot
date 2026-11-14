@@ -86,10 +86,10 @@ def _leaderboard_image(period: str) -> BufferedInputFile:
                   font=tab_font, fill=(255, 245, 255))
 
     # Match the Telegram keyboard: Overall alone, Today/Week paired, Global alone.
-    draw_tab("👑 Overall", "overall", (55, 255, 1145, 330))
-    draw_tab("📅 Today", "today", (55, 340, 590, 415))
-    draw_tab("🏆 Week", "week", (610, 340, 1145, 415))
-    draw_tab("🌐 Global", "global", (55, 425, 1145, 500))
+    draw_tab("OVERALL", "overall", (55, 255, 1145, 330))
+    draw_tab("TODAY", "today", (55, 340, 590, 415))
+    draw_tab("WEEK", "week", (610, 340, 1145, 415))
+    draw_tab("GLOBAL", "global", (55, 425, 1145, 500))
 
     medals = ((255, 190, 56), (205, 207, 235), (218, 133, 79))
     for i, color in enumerate(medals):
