@@ -125,6 +125,10 @@ async def kill(message: Message, db_session: AsyncSession, db_user, **kwargs):
         await message.reply("Choose another human player.")
         return
     victim = await profile(db_session, target.id)
+    # A defeated player cannot be killed again until they revive themselves.
+    if (victim.deaths or 0) > 0:
+        await message.reply("This user is already killed. They must use /revive first.")
+        return
     now = datetime.now(timezone.utc)
     protected = victim.protection_until and (victim.protection_until.replace(tzinfo=timezone.utc) > now)
     if protected:
