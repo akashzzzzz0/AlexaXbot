@@ -247,6 +247,7 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
     # available as fallbacks if Groq is unavailable or rate-limited.
     providers = [
         ("groq", _groq_chat, bool(_groq_api_key()), 8.0),
+        ("gemini", _gemini_chat, bool(get_gemini_api_key()), 12.0),
         ("ollama", ollama_chat, True, 28.0),
         ("openai", _openai_chat, bool(_openai_api_key()), 8.0),
     ]
