@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import settings
 from bot.services.ollama_ai import ollama_chat
+from bot.services.ai_chat_provider import ai_chat_completion
 from bot.database.models import (GlobalSetting, Group, GroupMember, GroupSettings, SecuritySettings, User, Warning,
     Economy, Wallet, Referral, AffiliateRequest, ActionLog, GroupStats, InboxMessage, ScamReview, DailyGroupMessageStat)
 from bot.services.moderation_service import ban_user, unban_user, kick_user, mute_user, unmute_user, warn_user
@@ -212,7 +213,7 @@ async def _classify_request(text: str) -> dict:
 
 
 async def _answer_owner_question(prompt: str) -> str:
-    """General owner Q&A; this never executes actions or invents private account access."""
+    """General owner Q&A using the configured provider fallback chain."""
     system = (
         "You are Alexa, the owner's helpful Roman Urdu/Hinglish assistant. Answer general knowledge, explanations, "
         "planning and everyday questions directly and clearly in the user's language. Be honest about uncertainty. "
@@ -221,7 +222,7 @@ async def _answer_owner_question(prompt: str) -> str:
         "that the control layer has not implemented, say it is not connected yet. Do not expose API keys or internal setup."
     )
     try:
-        answer = await ollama_chat(
+        answer = await ai_chat_completion(
             [{"role": "user", "content": prompt[:3000]}],
             system=system,
             temperature=0.55,
@@ -229,8 +230,8 @@ async def _answer_owner_question(prompt: str) -> str:
         )
         return html.escape(answer[:3500])
     except Exception as exc:
-        logger.warning("Owner general Q&A failed: %s", type(exc).__name__)
-        return "Abhi general AI answer nahi aa saka. Ollama connection/model check karo."
+        logger.warning("Owner general Q&A provider chain failed: %s", type(exc).__name__)
+        return "Abhi general AI answer nahi aa saka. AI providers ki connection/key/model settings check karo."
 
 
 async def _today_report(session: AsyncSession) -> str:
