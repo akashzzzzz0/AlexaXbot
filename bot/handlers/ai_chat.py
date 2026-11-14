@@ -311,11 +311,12 @@ def _history_db_save(chat_id: int, user_id: int, user_text: str, answer: str) ->
             (chat_id, user_id, chat_id, user_id),
         )
 
-# A user who addresses Alexa keeps a short, per-chat conversation window.
-# This lets follow-up messages work without repeatedly tagging/replying to her.
-_active_until = {}
-_SESSION_SECONDS = 10 * 60
+# Once a member addresses Alexa, keep that member's conversation open in this
+# group until they explicitly address another member. State is per user + group.
+_active_conversations: set[tuple[int, int]] = set()
 _bot_username = None
+_last_alexa_reply_at: dict[tuple[int, int], float] = {}
+_ALEXA_REPLY_COOLDOWN_SECONDS = 3.0
 
 # Opportunistic group replies are deliberately rate-limited to avoid flooding chats.
 _smart_reply_last_check: dict[int, float] = {}
@@ -358,40 +359,8 @@ _ALEXA_PREFIX_RE = re.compile(r"^\s*alexa\b[\s,!:.-]*(.*)$", re.IGNORECASE)
 
 
 def _looks_like_smart_reply_candidate(text: str) -> bool:
-    """Only join quiet group chat for greetings, questions, or clear requests."""
-    value = (text or "").strip().casefold()
-    if not value:
-        return False
-
-    # Simple greetings are intentional conversation openers.
-    if _GREETING_RE.match(value):
-        return True
-
-    # Do not interrupt ordinary statements, reactions, or long group discussions.
-    if re.fullmatch(r"(?:ok(?:ay)?|acha|hmm+|huh|nice|same|true|right|👍+|👌+|❤️+|😂+|🤣+|🙏+)[.!?\s]*", value):
-        return False
-
-    # Questions and direct requests are strong candidates.
-    if re.search(
-        r"[?؟]|\b(?:kya|kyun|kaise|kaisa|kaisi|kab|kahan|kon|kaun|who|what|why|how|when|where|which|anyone|suggest|opinion|batao|help|madad|guide)\b",
-        value,
-        re.IGNORECASE,
-    ):
-        return True
-
-    # First-person introductions and personal updates are strong conversation
-    # openers, including common Romanized Bangla, Hindi/Urdu, and English forms.
-    if re.search(
-        r"\b(?:i am|i'm|im|my name is|i live in|i am from|i'm from|"
-        r"main|mai|mein|mera|meri|mere|ami|aami|amar|amader)\b",
-        value,
-        re.IGNORECASE,
-    ):
-        return True
-
-    # Allow meaningful standalone updates when the group is otherwise quiet.
-    words = re.findall(r"[\w'-]+", value, flags=re.UNICODE)
-    return len(words) >= 4 and bool(re.search(r"[a-zA-Z\u0900-\u097F\u0980-\u09FF]", value))
+    """Only plain greetings may start a conversation without addressing Alexa."""
+    return bool(_GREETING_RE.fullmatch((text or "").strip()))
 
 
 def _smart_group_reply_fallback(user_text: str) -> str:
@@ -425,13 +394,13 @@ def _message_mentions_another_member(message: Message, text: str) -> bool:
 
 
 def _should_smart_reply(message: Message, text: str) -> bool:
-    """Allow unaddressed smart replies at most once per group cooldown window."""
-    is_greeting = bool(_GREETING_RE.match((text or "").strip()))
+    """Allow only plain greetings to open an unprompted group interaction."""
+    is_greeting = _looks_like_smart_reply_candidate(text)
 
     # A message addressed to another member is never an Alexa invitation.
     if _message_mentions_another_member(message, text):
         return False
-    if not _looks_like_smart_reply_candidate(text):
+    if not is_greeting:
         return False
 
     now = time.monotonic()
@@ -456,7 +425,7 @@ def _should_smart_reply(message: Message, text: str) -> bool:
     return True
 
 async def is_alexa_trigger(message: Message) -> bool:
-    """Trigger every ordinary human text message in groups and private chats."""
+    """Trigger only on Alexa calls, active sessions, or simple greetings."""
     global _bot_username
     text = (message.text or "").strip()
     if not text or not message.from_user or message.from_user.is_bot:
@@ -466,21 +435,26 @@ async def is_alexa_trigger(message: Message) -> bool:
     if text.startswith("/"):
         return False
 
-    # In private chat, every ordinary text message starts/continues Alexa chat.
+    # Private chat remains a direct one-to-one conversation.
     if message.chat.type == ChatType.PRIVATE:
         return True
 
+    session_key = (message.chat.id, message.from_user.id)
+
+    # Mentioning another member ends this sender's Alexa conversation immediately.
+    # Do not let a simultaneous Alexa name/mention override that hand-off.
+    if _message_mentions_another_member(message, text):
+        _active_conversations.discard(session_key)
+        return False
+
     replied = message.reply_to_message
     if replied and replied.from_user and replied.from_user.id == message.bot.id:
+        _active_conversations.add(session_key)
         return True
 
-    # Replies to another member are not Alexa triggers.
-    if (
-        replied
-        and replied.from_user
-        and replied.from_user.id != message.bot.id
-        and message.chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}
-    ):
+    # Replies to another member are not Alexa triggers or session continuations.
+    if replied and replied.from_user and replied.from_user.id != message.bot.id:
+        _active_conversations.discard(session_key)
         return False
 
     if _bot_username is None:
@@ -495,15 +469,9 @@ async def is_alexa_trigger(message: Message) -> bool:
     ):
         return True
 
-    # Never treat a message mentioning another member as an Alexa trigger.
-    if _message_mentions_another_member(message, text):
-        return False
-
-    # Continue a recent one-to-one Alexa conversation without requiring
-    # another mention. The session is scoped to this sender, so other members'
-    # messages do not erase the conversation they already started with Alexa.
-    session_key = (message.chat.id, message.from_user.id)
-    if time.monotonic() < _active_until.get(session_key, 0.0):
+    # Continue only this member's active conversation until they hand it to
+    # another member by mentioning/replying to them.
+    if session_key in _active_conversations:
         return True
 
     # Recognize Alexa's name anywhere in a group message, not only at the start.
@@ -514,10 +482,15 @@ async def is_alexa_trigger(message: Message) -> bool:
     if _ALEXA_PREFIX_RE.match(text):
         return True
 
-    # Join group conversation selectively: greetings, questions, jokes and
-    # meaningful statements pass the candidate filter and cooldowns. Do not
-    # turn every ordinary group message into an AI request.
-    return _should_smart_reply(message, text)
+    # Unaddressed messages are limited to simple greetings only.
+    if not _should_smart_reply(message, text):
+        return False
+
+    # Apply a short per-user/per-group cooldown to prevent rapid duplicate replies.
+    now = time.monotonic()
+    if now - _last_alexa_reply_at.get(session_key, 0.0) < _ALEXA_REPLY_COOLDOWN_SECONDS:
+        return False
+    return True
 
 
 async def _ask_ai_with_typing(
@@ -674,15 +647,15 @@ async def alexa_ai_chat(message: Message) -> None:
         re.search(r"(?i)(?<!\w)alexa(?!\w)", original_text)
         or (username and re.search(rf"(?<!\w)@{re.escape(username)}\b", original_text, re.IGNORECASE))
     )
-    session_was_active = time.monotonic() < _active_until.get(key, 0.0)
+    session_was_active = key in _active_conversations
     smart_mode = (
         message.chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}
         and not directly_addressed
         and not session_was_active
     )
-    # Only explicit Alexa conversations refresh the session; smart sampling must not.
-    if message.chat.type != ChatType.PRIVATE and not smart_mode:
-        _active_until[key] = time.monotonic() + _SESSION_SECONDS
+    # Explicitly calling Alexa opens a persistent per-user/per-group session.
+    if message.chat.type != ChatType.PRIVATE and directly_addressed:
+        _active_conversations.add(key)
     history = _conversations[key]
     try:
         # Reload from disk every turn: previous chats survive restarts and deployments.
@@ -770,11 +743,14 @@ async def alexa_ai_chat(message: Message) -> None:
         # Telegram reply failures should not interrupt bot polling, but must be visible in host logs.
         logger.warning("Telegram rejected Alexa AI reply for chat_id=%s: %s", message.chat.id, type(exc).__name__)
         return
-    # Every successful group reply starts a per-group 60-second cooldown.
-    # Explicit calls still bypass this gate; unaddressed smart replies do not.
+    # Record the short cooldown for this sender in this group. Conversation
+    # mode remains active until the sender explicitly addresses someone else.
     if message.chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}:
         replied_at = time.monotonic()
-        _smart_reply_last_check[message.chat.id] = replied_at
-        _active_until[key] = replied_at + _SESSION_SECONDS
+        _last_alexa_reply_at[key] = replied_at
+        if directly_addressed or session_was_active:
+            _active_conversations.add(key)
+        else:
+            _smart_reply_last_check[message.chat.id] = replied_at
     asyncio.create_task(_maybe_send_sticker(message, text))
 
