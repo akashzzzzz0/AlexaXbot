@@ -124,10 +124,11 @@ async def get_rankings(group_id: int, period: str):
                 ORDER BY message_count DESC, first_name COLLATE NOCASE ASC LIMIT 10
             """
             params = (group_id,)
-            total_row = await db.execute_fetchone(
+            total_cursor = await db.execute(
                 "SELECT COALESCE(SUM(message_count),0) AS total FROM ranking_totals WHERE group_id=?",
                 (group_id,),
             )
+            total_row = await total_cursor.fetchone()
         else:
             if period == "today":
                 start_day = now.date().isoformat()
@@ -140,10 +141,11 @@ async def get_rankings(group_id: int, period: str):
                 ORDER BY message_count DESC, first_name COLLATE NOCASE ASC LIMIT 10
             """
             params = (group_id, start_day)
-            total_row = await db.execute_fetchone(
+            total_cursor = await db.execute(
                 "SELECT COALESCE(SUM(message_count),0) AS total FROM ranking_daily WHERE group_id=? AND day_key>=?",
                 (group_id, start_day),
             )
+            total_row = await total_cursor.fetchone()
         cursor = await db.execute(query, params)
         rows = await cursor.fetchall()
         return [dict(row) for row in rows], int(total_row["total"] or 0)
