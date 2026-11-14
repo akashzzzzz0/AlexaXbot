@@ -171,7 +171,7 @@ async def _channelguard_warn_and_mute(bot, db_session: AsyncSession, group_id: i
         Warning(
             group_id=group_id,
             user_id=user_id,
-            admin_id=bot.id,
+            admin_id=None,
             reason="ChannelGuard: profile link detected",
         )
     )
