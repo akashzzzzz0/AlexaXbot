@@ -159,14 +159,32 @@ async def _channelguard_warn_and_mute(bot, db_session: AsyncSession, group_id: i
     if member.is_whitelisted:
         return None, 0
 
-    count, reached = await warn_user(
+    channelguard_count = await db_session.scalar(
+        select(func.count()).select_from(Warning).where(
+            Warning.group_id == group_id,
+            Warning.user_id == user_id,
+            Warning.reason.like("ChannelGuard:%"),
+        )
+    ) or 0
+    count = int(channelguard_count) + 1
+    db_session.add(
+        Warning(
+            group_id=group_id,
+            user_id=user_id,
+            admin_id=bot.id,
+            reason="ChannelGuard: profile link detected",
+        )
+    )
+    member.warn_count = (member.warn_count or 0) + 1
+    await log_action(
         db_session,
         group_id,
+        "warn",
         user_id,
         bot.id,
-        "Link found in profile bio or connected channel (ChannelGuard)",
-        max_warns=3,
+        {"reason": "ChannelGuard: profile link detected"},
     )
+    reached = count >= 3
     if reached:
         muted = await mute_user(
             bot,
