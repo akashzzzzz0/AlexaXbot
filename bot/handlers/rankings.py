@@ -1,34 +1,99 @@
 """Group chat activity leaderboard with Today / Overall / Week views."""
 import asyncio
 import html
+import os
+from io import BytesIO
 
 from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    BufferedInputFile, CallbackQuery, InlineKeyboardButton,
+    InlineKeyboardMarkup, InputMediaPhoto, Message,
+)
+from PIL import Image, ImageDraw, ImageFont
 
 from bot.services.rankings_store import get_rankings, get_recap_messages
 
 router = Router(name="group_rankings")
 _PERIODS = {
-    "today": ("📅 Today", "Today"),
     "overall": ("🌍 Overall", "Overall"),
+    "today": ("📅 Today", "Today"),
     "week": ("📊 Week", "Last 7 days"),
 }
+_HEADER_EMOJI_ID = "6093382540784046658"
+_NAME_EMOJI_ID = "6258164063516233396"
+_CROWN_EMOJI_ID = "6093382540784046658"
 
 
 def _keyboard(selected: str) -> InlineKeyboardMarkup:
-    buttons = []
+    row = []
     for key, (label, _) in _PERIODS.items():
-        shown = f"✓ {label}" if key == selected else label
-        buttons.append(InlineKeyboardButton(text=shown, callback_data=f"rankings:{key}"))
-    return InlineKeyboardMarkup(inline_keyboard=[buttons])
+        row.append(InlineKeyboardButton(
+            text=f"✓ {label}" if key == selected else label,
+            callback_data=f"rankings:{key}",
+        ))
+    return InlineKeyboardMarkup(inline_keyboard=[row])
+
+
+def _leaderboard_image(period: str) -> BufferedInputFile:
+    """Create a compact neon banner locally so /rankings always has an attached image."""
+    width, height = 1200, 560
+    image = Image.new("RGB", (width, height), (9, 5, 25))
+    pixels = image.load()
+    for y in range(height):
+        for x in range(width):
+            glow = max(0.0, 1.0 - abs(x - 620) / 850) * max(0.0, 1.0 - y / 900)
+            pixels[x, y] = (int(9 + 25 * glow), int(5 + 4 * glow), int(25 + 58 * glow))
+    draw = ImageDraw.Draw(image)
+    paths = (
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+    )
+    try:
+        path = next(p for p in paths if os.path.exists(p))
+        title_font = ImageFont.truetype(path, 78)
+        tab_font = ImageFont.truetype(path, 34)
+        row_font = ImageFont.truetype(path, 25)
+    except Exception:
+        title_font = tab_font = row_font = ImageFont.load_default()
+
+    draw.rounded_rectangle((22, 22, 1178, 538), radius=42,
+                           outline=(174, 65, 255), width=5)
+    draw.rounded_rectangle((42, 42, 1158, 230), radius=32,
+                           fill=(19, 8, 45), outline=(123, 48, 220), width=3)
+    title = "LEADERBOARD"
+    bbox = draw.textbbox((0, 0), title, font=title_font)
+    draw.text(((width - bbox[2] + bbox[0]) / 2, 85), title, font=title_font,
+              fill=(250, 239, 255), stroke_width=2, stroke_fill=(154, 58, 255))
+
+    for index, (label, key) in enumerate((("Overall", "overall"), ("Today", "today"), ("Week", "week"))):
+        left = 55 + index * 365
+        active = key == period
+        draw.rounded_rectangle((left, 265, left + 350, 345), radius=23,
+                               fill=(91, 25, 168) if active else (24, 13, 49),
+                               outline=(226, 158, 255) if active else (112, 58, 170), width=4)
+        box = draw.textbbox((0, 0), label, font=tab_font)
+        draw.text((left + (350 - box[2] + box[0]) / 2, 285), label,
+                  font=tab_font, fill=(255, 245, 255))
+
+    medals = ((255, 190, 56), (205, 207, 235), (218, 133, 79))
+    for i, color in enumerate(medals):
+        top = 375 + i * 48
+        draw.rounded_rectangle((65, top, 1135, top + 38), radius=15,
+                               fill=(17, 12, 35), outline=color, width=2)
+        draw.ellipse((82, top + 3, 117, top + 38), fill=color)
+        draw.text((94, top + 4), str(i + 1), font=row_font, fill=(20, 12, 30))
+        draw.text((145, top + 6), ("TOP CHATTER" if i == 0 else "GROUP RANKING"),
+                  font=row_font, fill=(221, 205, 255))
+    output = BytesIO()
+    image.save(output, format="PNG", optimize=True)
+    return BufferedInputFile(output.getvalue(), filename="alexa-leaderboard.png")
 
 
 def _render(rows, total: int, period: str, recap: str) -> str:
     label = _PERIODS[period][1]
-    medals = ("🥇", "🥈", "🥉")
     lines = [
-        "📈 <b>LEADERBOARD</b>",
+        f'<tg-emoji emoji-id="{_HEADER_EMOJI_ID}">👑</tg-emoji> <b>LEADERBOARD</b>',
         f"<i>{html.escape(label)} · TOP 10 CHATTERS</i>",
         "",
     ]
@@ -39,20 +104,26 @@ def _render(rows, total: int, period: str, recap: str) -> str:
                 name = f'<a href="https://t.me/{html.escape(row["username"], quote=True)}">{name}</a>'
             else:
                 name = f'<a href="tg://user?id={int(row["user_id"])}">{name}</a>'
-            rank = medals[index - 1] if index <= 3 else f"{index}."
-            lines.append(f"{rank} {name} · <b>{int(row['message_count']):,}</b>")
+            sticker = f'<tg-emoji emoji-id="{_NAME_EMOJI_ID}">👑</tg-emoji>'
+            crown = f' <tg-emoji emoji-id="{_CROWN_EMOJI_ID}">👑</tg-emoji>' if index == 1 else ""
+            lines.append(f"{index}. {sticker}{crown} {name} • <b>{int(row['message_count']):,}</b>")
     else:
         lines.append("<i>No messages recorded for this period yet.</i>")
     lines.extend(["", f"✉️ <b>Total messages:</b> {total:,}", "", "✨ <b>ChatFight AI Summary</b>"])
     if recap:
-        lines.append(html.escape(recap))
+        lines.append(html.escape(recap[:180]))
     else:
         lines.append("<i>Not enough text messages for a recap yet.</i>")
     if period == "overall":
         lines.append("<i>AI recap uses recent messages from the last 7 days; Overall ranking is all-time.</i>")
-    lines.append("")
-    lines.append("<i>AI recap text is kept in a separate database for up to 7 days; all-time counts are retained.</i>")
-    return "\n".join(lines)
+    caption = "\n".join(lines)
+    # Telegram photo captions are limited to 1024 characters.
+    if len(caption) > 1000:
+        lines = lines[:]
+        if recap:
+            lines[-1] = html.escape(recap[:80]) if period != "overall" else "<i>Overall ranking is all-time.</i>"
+        caption = "\n".join(lines)
+    return caption[:1024]
 
 
 async def _build_view(group_id: int, period: str):
@@ -88,8 +159,12 @@ async def rankings_command(message: Message):
         await message.answer("📈 Use /rankings inside a group to view its chat leaderboard.")
         return
     try:
-        text = await _build_view(message.chat.id, "today")
-        await message.answer(text, reply_markup=_keyboard("today"), disable_web_page_preview=True)
+        caption = await _build_view(message.chat.id, "today")
+        await message.answer_photo(
+            photo=_leaderboard_image("today"),
+            caption=caption,
+            reply_markup=_keyboard("today"),
+        )
     except Exception:
         await message.answer("⚠️ Alexa could not load the leaderboard right now. Please try again.")
 
@@ -105,9 +180,10 @@ async def rankings_period_callback(callback: CallbackQuery):
         return
     await callback.answer()
     try:
-        text = await _build_view(callback.message.chat.id, period)
-        await callback.message.edit_text(
-            text, reply_markup=_keyboard(period), disable_web_page_preview=True
+        caption = await _build_view(callback.message.chat.id, period)
+        await callback.message.edit_media(
+            media=InputMediaPhoto(media=_leaderboard_image(period), caption=caption),
+            reply_markup=_keyboard(period),
         )
     except Exception:
         await callback.message.answer("⚠️ Could not refresh rankings. Please try again.")
