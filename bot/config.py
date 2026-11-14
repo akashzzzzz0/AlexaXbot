@@ -17,11 +17,6 @@ class Settings(BaseSettings):
     GROK_API_KEY: str = ""
     GROK_MODEL: str = "grok-3-mini"
 
-    # Cloudflare Workers AI is the final conversational chat fallback.
-    CLOUDFLARE_ACCOUNT_ID: str = ""
-    CLOUDFLARE_API_TOKEN: str = ""
-    CLOUDFLARE_AI_MODEL: str = "@cf/zai-org/glm-4.7-flash"
-
     # OpenAI key is supplied only through private host environment settings.
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4.1-mini"
