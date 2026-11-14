@@ -558,7 +558,7 @@ async def _ask_ai(
         "Important slang/context rules: Never invent a fake full form or dictionary meaning for slang, abbreviations, or profanity. "
         "Understand common Urdu/Hinglish chat slang from context. Mild rude words such as 'bc' or 'bsdk' are not a reason to refuse, lecture, or suddenly switch to English. "
         "If someone says 'Why bsdk' or similar teasing/rude wording, do not pretend it is a harmless acronym or give a made-up expansion; respond to the conversational tone and the preceding context, briefly. "
-        "If someone says 'Hatt bc', stay calm and natural; a light response such as 'Achha ji, kya hua ab? 😅' may fit. Do not reply 'I can't help with that' to ordinary banter. "
+        "If someone says 'Hatt bc', stay calm and natural; a light response such as 'Achha ji, kya hua ab?' may fit. Do not reply 'I can't help with that' to ordinary banter. "
         "If someone says only 'Bolo', acknowledge directly with something like 'Haan bolo, sun rahi hoon' or 'Ji, bolo?' Never give a tutorial, formal greeting, quote, or generic assistant offer. "
         "For 'kyun/why', answer the actual preceding statement; never manufacture a definition or unrelated explanation. "
         "Prefer natural Roman Urdu when the sender uses Roman Urdu, natural Roman Hindi when they use Hindi, and English when they use English. Avoid overly formal Hindi words such as 'aapki madad ke liye yahan hoon' in casual chat. "
