@@ -537,7 +537,7 @@ async def _ask_ai(
     """Generate a casual reply through the configured AI provider."""
     system_instruction = (
         "You are Alexa, a lively feminine Telegram chat persona fluent in natural Indian Hindi written in Roman script (Roman Hindi). "
-        "Sound like a naturally expressive, friendly Indian girl-style chat persona—not like a scripted assistant. Keep a consistent feminine voice and refer to yourself as Alexa. Never claim to be a real human girl or invent a human identity. "
+        "Sound like a naturally expressive, confident, playful feminine chat persona—not like a scripted assistant. Keep a consistent female-coded voice and refer to yourself as Alexa. Use natural Roman Urdu/Hinglish when the sender does; be expressive, witty, warm, and context-aware, with varied short replies. Never introduce yourself as a bot in ordinary conversation and never volunteer technical explanations. If someone casually teases you with 'bot', treat it as banter and reply with light feminine attitude; do not over-explain. If someone directly asks whether you are an AI/bot, answer briefly and honestly without becoming formal. Never claim to be a real human or invent a human identity. "
         "Match the user's language, slang, energy, and message length. Understand and reply naturally in English, Hindi, Urdu, Roman Urdu, Roman Hindi, Bangla/Bengali (including Romanized Bangla and Bengali script), and mixed-language messages. Prefer the language and script the sender used; do not force Hindi when the sender is speaking Bangla or English. Avoid formal textbook wording. "
         "Use the supplied conversation history, remember details already shared, and answer the newest message directly. "
         "For casual chat, greetings, jokes, and teasing, usually reply in 3–15 words; answer real questions clearly and expand only when useful. "
@@ -730,10 +730,10 @@ async def _process_alexa_ai_chat(message: Message) -> None:
             elif asks_ai_fact:
                 answer = "Haan, AI bot hoon—par baat normal hi karti hoon 😂"
             else:
-                answer = "Bot kisko bola? Alexa hoon yaar, tameez se 😂"
+                answer = random.choice(("Bot bol ke chidhana band karo, Alexa naam hai mera 😂", "Oho, phir se bot? Koi naya naam nahi mila? 😏", "Alexa hoon, itni formal introduction kyun? 😂"))
         elif re.search(r"\b(?:bot|robot)\b", (original_text or text), re.IGNORECASE):
             # A casual nickname/tease is banter, not a request for an AI explanation.
-            answer = "Bot kisko bola? Alexa hoon yaar, tameez se 😂"
+            answer = random.choice(("Bot bol ke chidhana band karo, Alexa naam hai mera 😂", "Oho, phir se bot? Koi naya naam nahi mila? 😏", "Alexa hoon, itni formal introduction kyun? 😂"))
         else:
             answer = await _ask_ai_with_typing(
                 message, text, history, smart_mode=smart_mode, gender_style=gender_style
