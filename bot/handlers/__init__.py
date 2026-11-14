@@ -58,7 +58,9 @@ class DailyGroupMessageCounterMiddleware:
 
 def get_main_router() -> Router:
     router = Router()
-    from bot.middlewares.rankings import RankingsTrackingMiddleware\n    router.message.outer_middleware(RankingsTrackingMiddleware())\n    router.message.outer_middleware(DailyGroupMessageCounterMiddleware())
+    from bot.middlewares.rankings import RankingsTrackingMiddleware
+    router.message.outer_middleware(RankingsTrackingMiddleware())
+    router.message.outer_middleware(DailyGroupMessageCounterMiddleware())
     router.message.outer_middleware(StartMenuAutoDeleteMessageMiddleware())
     router.callback_query.outer_middleware(StartMenuAutoDeleteCallbackMiddleware())
     # Register command and feature routers before welcome's broad group-message
@@ -78,7 +80,8 @@ def get_main_router() -> Router:
     router.include_router(games.router)
     router.include_router(missing_games.router)
     router.include_router(duels.router)
-    router.include_router(statistics.router)\n    router.include_router(rankings.router)
+    router.include_router(statistics.router)
+    router.include_router(rankings.router)
     router.include_router(settings.router)
     router.include_router(help.router)
     router.include_router(tournaments.router)
