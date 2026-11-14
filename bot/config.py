@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     MONTHLY_REWARD: int = 2000
     REFERRAL_REWARD: int = 150
     PROTECT_COST_PER_DAY: int = 500
-    REVIVE_COST: int = 250
+    REVIVE_COST: int = 1000
     MAX_ROB_AMOUNT: int = 500
     ACTIVITY_XP_PER_MSG: int = 2
     MAX_WARN_COUNT: int = 3
