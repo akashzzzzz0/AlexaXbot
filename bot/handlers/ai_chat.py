@@ -671,16 +671,54 @@ def _is_identity_question(text: str) -> bool:
 
 
 
-def _local_chat_fallback(user_text: str) -> str:
-    """Keep the conversation responsive if every remote AI provider is unavailable."""
-    value = (user_text or "").casefold().strip()
-    if re.fullmatch(r"(hi|hello|hey|helo|hii+|salam|assalamualaikum)[!. ]*", value):
-        return random.choice(("Heyyy! Kya haal hai?", "Hiii! Bolo, kya scene hai?", "Oyyyy! Kya haal chaal?"))
+def _local_chat_fallback(user_text: str, history=None) -> str:
+    """Use recent turns to avoid repetitive or pushy replies when providers are down."""
+    value = re.sub(r"[.!?,\\s]+", " ", (user_text or "").casefold()).strip()
+    recent = list(history or [])
+    previous_user = next(
+        (str(item[1]).casefold().strip() for item in reversed(recent) if item[0] == "user"),
+        "",
+    )
+    previous_alexa = next(
+        (str(item[1]).casefold().strip() for item in reversed(recent) if item[0] == "model"),
+        "",
+    )
+
+    # Respect a clear "nothing happened / stop asking" response. Do not ask again.
+    nothing_patterns = (
+        r"^(?:kuch\s+(?:bhi\s+)?nahi(?:\s+hua)?|kuch\s+na(?:h|j)i|nothing(?:\s+happened)?|nothing\s+much)$",
+        r"^(?:kuch\s+nahi\s+hua\s+bola\s+na|bola\s+na\s+kuch\s+nahi|maine\s+bola\s+na\s+kuch\s+nahi)$",
+    )
+    if any(re.fullmatch(pattern, value) for pattern in nothing_patterns):
+        if "bola na" in value or "bola" in value:
+            return "Achha baba, samajh gayi. Ab nahi poochungi."
+        return "Achha, theek hai. Phir rehne dete hain."
+
+    if re.fullmatch(r"(?:kya\s+)?(?:btaun|bataun|btaoo|bataoo|btau|batau)(?:\s+toh)?", value):
+        if previous_alexa and re.search(r"phir kya hua|aur batao|aage batao|bolo na", previous_alexa):
+            return "Jo mann ho woh bata dena, warna kisi aur baat pe aa jate hain."
+        return "Jo share karna ho bata do; warna koi aur topic kar lete hain."
+
+    if re.fullmatch(r"(hi|hello|hey|helo|hii+|salam|assalamualaikum)", value):
+        return random.choice(("Heyyy! Kya haal hai?", "Hiii! Kya scene hai?", "Oyyyy!"))
     if value in {"alexa", "oye alexa", "hey alexa"}:
-        return random.choice(("Haan bolo?", "Ji, sun rahi hoon.", "Bolo, kya hua?"))
+        return random.choice(("Haan bolo?", "Ji?", "Kya hua?"))
+
+    if re.search(r"\\b(?:chhoro|choro|rehne do|leave it|bas karo|mat pooch|nahi batana)\\b", value):
+        return "Theek hai, nahi poochungi. Jab mann ho tab baat kar lena."
+
     if value.endswith("?"):
-        return random.choice(("Hmm, is ka jawab abhi clear nahi hai. Zara doosre tareeqe se poochho?", "Achaa, ek baar thora aur context do na?", "Is par abhi pakka jawab nahi de paungi—thori der baad phir pooch lena."))
-    return random.choice(("Achaa, samajh rahi hoon. Phir kya hua?", "Haan, sun rahi hoon—bolo na.", "Oho, acha! Aage batao?", "Hmm, acha acha. Main sun rahi hoon."))
+        if previous_user and previous_user == value:
+            return "Iska pakka jawab abhi nahi de pa rahi."
+        return "Iska jawab abhi clear nahi hai; galat baat nahi bataungi."
+
+    # Acknowledge the actual turn without forcing another question or recycling lines.
+    if previous_alexa and any(
+        phrase in previous_alexa
+        for phrase in ("phir kya hua", "aage batao", "bolo na", "kya hua")
+    ):
+        return "Achha, samajh gayi. Tumhari marzi—topic badal sakte hain."
+    return "Achha, samajh gayi."
 
 async def _process_alexa_ai_chat(message: Message) -> None:
     text = (message.text or "").strip()
@@ -776,7 +814,7 @@ async def _process_alexa_ai_chat(message: Message) -> None:
     # If all four remote providers fail, keep casual conversation going locally.
     # This is a short conversational fallback, not a fabricated factual answer.
     if not answer:
-        answer = _local_chat_fallback(original_text or text)
+        answer = _local_chat_fallback(original_text or text, history)
         logger.warning(
             "Alexa used local chat fallback after all remote providers failed",
             extra={"chat_id": message.chat.id, "user_id": message.from_user.id},
