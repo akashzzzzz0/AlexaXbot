@@ -235,7 +235,7 @@ async def _maybe_send_sticker(message: Message, user_text: str) -> None:
     if not message.from_user or message.from_user.is_bot:
         return
     emoji_markup = _pick_mood_custom_emoji(_emotion_category(user_text))
-    if not emoji_markup or random.random() >= 0.50:
+    if not emoji_markup:
         return
     key = (message.chat.id, message.from_user.id)
     now = time.monotonic()
@@ -607,6 +607,16 @@ async def _ask_ai(
     is_alexa_trigger,
 )
 async def alexa_ai_chat(message: Message) -> None:
+    # Show typing immediately, including while persisted conversation history loads.
+    # _ask_ai_with_typing keeps refreshing it during the actual provider request.
+    try:
+        await message.bot.send_chat_action(
+            chat_id=message.chat.id,
+            action="typing",
+        )
+    except Exception as exc:
+        logger.debug("Alexa initial typing indicator unavailable: %s", type(exc).__name__)
+
     text = (message.text or "").strip()
     if message.chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}:
         logger.info(
@@ -728,7 +738,7 @@ async def alexa_ai_chat(message: Message) -> None:
         # The model sometimes adds ordinary Unicode emojis despite the prompt.
         # Remove those so Alexa's supplied animated custom emoji is used instead.
         answer = re.sub(
-            r"[\U0001F000-\U0001FAFF\u2600-\u27BF][\uFE0E\uFE0F]?(?:\u200D[\U0001F000-\U0001FAFF])*(?:\U0001F3FB-\U0001F3FF)?",
+            r"[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0E\u200D\u20E3]",
             "",
             answer,
         ).strip()
