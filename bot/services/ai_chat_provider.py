@@ -369,6 +369,7 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
     deadline = loop.time() + 34.0
     for name, provider, configured, timeout_seconds in providers:
         if not configured:
+            print("Alexa chat provider skipped:", name + ":missing_runtime_configuration")
             continue
         remaining = deadline - loop.time()
         if remaining <= 0:
