@@ -6,12 +6,12 @@ def moderation_menu_kb(_, is_group=False, bio_link_enabled=False):
     for text,cb in items:
         b.button(text=text,callback_data=cb)
     status = "🟢" if bio_link_enabled else "🔴"
-    b.button(text="🛡️ Bio Link Protection", callback_data="mod:bio_link_protection")
+    b.button(text="🛡️ ChannelGuard", callback_data="mod:bio_link_protection")
     b.adjust(2,2,2,2,2,2,2,1); return b.as_markup()
 def bio_link_protection_kb(enabled=False):
     b = InlineKeyboardBuilder()
     status = "🟢 ON" if enabled else "🔴 OFF"
-    b.button(text=f"Bio Link Protection: {status}", callback_data="mod:bio_link_status")
+    b.button(text=f"ChannelGuard: {status}", callback_data="mod:bio_link_status")
     if enabled:
         b.button(text="🔴 Turn OFF", callback_data="mod:bio_link_off")
     else:
