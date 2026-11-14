@@ -1,7 +1,7 @@
-"""Alexa chat provider chain: Cloudflare Workers AI -> Groq -> OpenAI.
+"""Alexa chat provider chain: Cloudflare Workers AI -> Gemini only.
 
-Gemini and Ollama remain available to other bot features, but are deliberately
-excluded from conversational chat. Provider keys stay runtime-only.
+If both providers fail, return an empty response so Alexa stays silent.
+Other Gemini/Ollama integrations remain independent.
 """
 import asyncio
 import os
@@ -9,7 +9,7 @@ import re
 
 import httpx
 
-from bot.config import settings
+from bot.config import get_gemini_api_key, settings
 
 
 
@@ -67,6 +67,54 @@ async def _cloudflare_chat(messages, *, system="", temperature=0.7, max_tokens=5
     answer = str(result.get("response") or choice_content or data.get("response") or "").strip()
     if not answer:
         raise RuntimeError("cloudflare_empty_response")
+    return answer
+
+
+def _gemini_api_key() -> str:
+    return get_gemini_api_key()
+
+
+async def _gemini_chat(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False) -> str:
+    api_key = _gemini_api_key()
+    if not api_key:
+        raise RuntimeError("gemini_not_configured")
+    contents = []
+    for item in messages:
+        role = str(item.get("role", "user"))
+        if role == "assistant":
+            role = "model"
+        if role not in {"user", "model"}:
+            continue
+        content = str(item.get("content", item.get("text", ""))).strip()
+        if content:
+            contents.append({"role": role, "parts": [{"text": content}]})
+    if not contents and system.strip():
+        contents.append({"role": "user", "parts": [{"text": system.strip()}]})
+    if not contents:
+        raise ValueError("empty_prompt")
+    model = (getattr(settings, "GEMINI_MODEL", "") or os.getenv("GEMINI_MODEL", "") or "gemini-2.5-flash").strip()
+    model = model.removeprefix("models/")
+    payload = {"contents": contents, "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens}}
+    if system.strip():
+        payload["systemInstruction"] = {"parts": [{"text": system.strip()}]}
+    if json_mode:
+        payload["generationConfig"]["responseMimeType"] = "application/json"
+    timeout = httpx.Timeout(14.0, connect=5.0)
+    url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent"
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(url, params={"key": api_key}, json=payload)
+        if response.status_code >= 400:
+            try:
+                detail = response.json().get("error", {}).get("message", response.text[:300])
+            except (ValueError, AttributeError):
+                detail = response.text[:300]
+            raise httpx.HTTPStatusError("Gemini HTTP " + str(response.status_code) + ": " + str(detail)[:220], request=response.request, response=response)
+        data = response.json()
+    candidates = data.get("candidates") or []
+    parts = ((candidates[0].get("content") or {}).get("parts") or []) if candidates else []
+    answer = "".join(str(part.get("text", "")) for part in parts if isinstance(part, dict)).strip()
+    if not answer:
+        raise RuntimeError("gemini_empty_response")
     return answer
 
 def _groq_api_key() -> str:
@@ -223,40 +271,22 @@ def _safe_provider_error(name: str, exc: Exception) -> str:
 
 
 async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False):
-    """Use Cloudflare Workers AI first, then Groq and OpenAI for Alexa conversational chat only."""
-    provider_errors = []
-
-    # Gemini and Ollama are intentionally not part of this chat chain.
-    # Their independent non-chat integrations elsewhere in the bot are untouched.
+    """Try Cloudflare, then Gemini; stay silent if neither returns a reply."""
     providers = [
         ("cloudflare", _cloudflare_chat, bool(_cloudflare_account_id() and _cloudflare_api_token()), 14.0),
-        ("groq", _groq_chat, bool(_groq_api_key()), 10.0),
-        ("openai", _openai_chat, bool(_openai_api_key()), 12.0),
+        ("gemini", _gemini_chat, bool(_gemini_api_key()), 14.0),
     ]
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + 36.0
+    deadline = loop.time() + 30.0
     for name, provider, configured, timeout_seconds in providers:
         if not configured:
-            provider_errors.append(f"{name}:not_configured")
             continue
         remaining = deadline - loop.time()
         if remaining <= 0:
-            provider_errors.append(f"{name}:overall_timeout")
             break
         try:
-            return await asyncio.wait_for(
-                provider(
-                    messages,
-                    system=system,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    json_mode=json_mode,
-                ),
-                timeout=min(timeout_seconds, remaining),
-            )
-        except asyncio.TimeoutError:
-            provider_errors.append(f"{name}:timeout")
+            return await asyncio.wait_for(provider(messages, system=system, temperature=temperature, max_tokens=max_tokens, json_mode=json_mode), timeout=min(timeout_seconds, remaining))
         except Exception as exc:
-            provider_errors.append(_safe_provider_error(name, exc))
-
-    raise RuntimeError("all_ai_providers_failed:" + ",".join(provider_errors))
+            # Keep provider failures out of user-facing chat; continue to the sole fallback.
+            print("Alexa chat provider failed:", _safe_provider_error(name, exc))
+    return ""
