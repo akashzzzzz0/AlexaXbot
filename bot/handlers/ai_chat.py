@@ -653,8 +653,8 @@ def _is_identity_question(text: str) -> bool:
     """Recognize direct casual questions about Alexa's identity."""
     value = (text or "").casefold().strip()
     patterns = (
-        r"\b(?:tum|tu|aap)\s+(?:bot|robot|ai)\s+ho\b",
-        r"\b(?:kya\s+)?(?:tum|tu|aap)\s+(?:bot|robot|ai)\s+(?:ho|hain)\b",
+        r"\b(?:tum|tu|aap)\s+(?:bot|robot|ai)\s+(?:ho|hai|hain)\b",
+        r"\b(?:kya\s+)?(?:tum|tu|aap)\s+(?:bot|robot|ai)\s+(?:ho|hai|hain)\b",
         r"\b(?:are\s+you|r\s+you)\s+(?:a\s+)?(?:bot|robot|ai)\b",
         r"\b(?:you\s+are\s+)?(?:a\s+)?(?:bot|robot|ai)\s+ho\b",
     )
@@ -662,7 +662,6 @@ def _is_identity_question(text: str) -> bool:
 
 
 async def _process_alexa_ai_chat(message: Message) -> None:
-    turn_started_at = time.monotonic()
     text = (message.text or "").strip()
     if message.chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}:
         logger.info(
@@ -732,6 +731,9 @@ async def _process_alexa_ai_chat(message: Message) -> None:
                 answer = "Haan, AI bot hoon—par baat normal hi karti hoon 😂"
             else:
                 answer = "Bot kisko bola? Alexa hoon yaar, tameez se 😂"
+        elif re.search(r"\b(?:bot|robot)\b", (original_text or text), re.IGNORECASE):
+            # A casual nickname/tease is banter, not a request for an AI explanation.
+            answer = "Bot kisko bola? Alexa hoon yaar, tameez se 😂"
         else:
             answer = await _ask_ai_with_typing(
                 message, text, history, smart_mode=smart_mode, gender_style=gender_style
