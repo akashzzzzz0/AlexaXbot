@@ -743,9 +743,9 @@ async def _process_alexa_ai_chat(message: Message) -> None:
             if short_reply is not None:
                 answer = short_reply
             else:
-            answer = await _ask_ai_with_typing(
-                message, text, history, smart_mode=smart_mode, gender_style=gender_style
-            )
+                answer = await _ask_ai_with_typing(
+                    message, text, history, smart_mode=smart_mode, gender_style=gender_style
+                )
     except (httpx.HTTPError, ValueError, TypeError, RuntimeError) as exc:
         logger.warning(
             "Alexa AI reply failed for chat_id=%s: %s (%s)",
