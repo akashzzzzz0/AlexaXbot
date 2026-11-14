@@ -649,7 +649,20 @@ async def alexa_ai_chat(message: Message) -> None:
             pass
 
 
+def _is_identity_question(text: str) -> bool:
+    """Recognize direct casual questions about Alexa's identity."""
+    value = (text or "").casefold().strip()
+    patterns = (
+        r"\b(?:tum|tu|aap)\s+(?:bot|robot|ai)\s+ho\b",
+        r"\b(?:kya\s+)?(?:tum|tu|aap)\s+(?:bot|robot|ai)\s+(?:ho|hain)\b",
+        r"\b(?:are\s+you|r\s+you)\s+(?:a\s+)?(?:bot|robot|ai)\b",
+        r"\b(?:you\s+are\s+)?(?:a\s+)?(?:bot|robot|ai)\s+ho\b",
+    )
+    return any(re.search(pattern, value, re.IGNORECASE) for pattern in patterns)
+
+
 async def _process_alexa_ai_chat(message: Message) -> None:
+    turn_started_at = time.monotonic()
     text = (message.text or "").strip()
     if message.chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}:
         logger.info(
@@ -708,9 +721,14 @@ async def _process_alexa_ai_chat(message: Message) -> None:
             history.extend(persisted_history)
             _history_loaded.add(key)
         gender_style = _detect_user_gender_style(history, original_text or text)
-        answer = await _ask_ai_with_typing(
-            message, text, history, smart_mode=smart_mode, gender_style=gender_style
-        )
+        if _is_identity_question(original_text or text):
+            # Keep identity replies playful and in-character instead of a stiff
+            # assistant-style disclosure; never claim to be a human.
+            answer = "Main Alexa hoon yaar, itna interview kyun? 😏"
+        else:
+            answer = await _ask_ai_with_typing(
+                message, text, history, smart_mode=smart_mode, gender_style=gender_style
+            )
     except (httpx.HTTPError, ValueError, TypeError, RuntimeError) as exc:
         logger.warning(
             "Alexa AI reply failed for chat_id=%s: %s (%s)",
@@ -780,6 +798,12 @@ async def _process_alexa_ai_chat(message: Message) -> None:
             _emotion_category(answer) or _emotion_category(original_text or text)
         )
         mood_suffix = f" {mood_emoji}" if mood_emoji else ""
+        # Telegram clients can miss a very short typing action if the model
+        # answers immediately. Keep the indicator active for a brief minimum
+        # visible interval before sending the reply.
+        typing_visible_for = time.monotonic() - turn_started_at
+        if typing_visible_for < 2.0:
+            await asyncio.sleep(2.0 - typing_visible_for)
         await message.reply(f"{html.escape(answer)}{mood_suffix}", parse_mode="HTML")
     except Exception as exc:
         # Telegram reply failures should not interrupt bot polling, but must be visible in host logs.
