@@ -12,7 +12,12 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     GROQ_MODEL: str = "openai/gpt-oss-20b"
 
-    # Cloudflare Workers AI is the primary conversational chat provider.
+    # xAI Grok chat credentials are provided only through private host settings.
+    XAI_API_KEY: str = ""
+    GROK_API_KEY: str = ""
+    GROK_MODEL: str = "grok-3-mini"
+
+    # Cloudflare Workers AI is the final conversational chat fallback.
     CLOUDFLARE_ACCOUNT_ID: str = ""
     CLOUDFLARE_API_TOKEN: str = ""
     CLOUDFLARE_AI_MODEL: str = "@cf/zai-org/glm-4.7-flash"
