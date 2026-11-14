@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 from aiogram import Router, F
 from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.types import Message, ChatMemberUpdated, ChatPermissions, CallbackQuery
@@ -127,6 +126,22 @@ async def _channelguard_profile_links(bot, user_id: int):
 async def _channelguard_warn_and_mute(bot, db_session: AsyncSession, group_id: int, user, display_name: str):
     """Record one ChannelGuard warning and apply the fixed 3-warning/1-hour rule."""
     user_id = user.id
+    stored_user = await db_session.get(User, user_id)
+    if stored_user is None:
+        stored_user, _created = await _insert_or_get(
+            db_session,
+            User(
+                id=user_id,
+                telegram_id=user_id,
+                first_name=getattr(user, "first_name", None) or display_name or "User",
+                last_name=getattr(user, "last_name", None),
+                username=getattr(user, "username", None),
+                is_bot=False,
+            ),
+            User,
+            User.id == user_id,
+        )
+        await db_session.flush()
     member = await db_session.scalar(
         select(GroupMember).where(
             GroupMember.group_id == group_id,
