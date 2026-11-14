@@ -25,7 +25,7 @@ _PERIODS = {
 }
 _HEADER_EMOJI_ID = "6093382540784046658"
 _NAME_EMOJI_ID = "6258164063516233396"
-_CROWN_EMOJI_ID = "6093382540784046658"
+_CROWN_EMOJI_ID = "6093786598422353987"
 
 
 def _keyboard(selected: str) -> InlineKeyboardMarkup:
@@ -121,7 +121,7 @@ def _render(rows, total: int, period: str, recap: str) -> str:
                 name = f'<a href="tg://user?id={int(row["user_id"])}">{name}</a>'
             sticker = f'<tg-emoji emoji-id="{_NAME_EMOJI_ID}">👑</tg-emoji>'
             crown = f' <tg-emoji emoji-id="{_CROWN_EMOJI_ID}">👑</tg-emoji>' if index == 1 else ""
-            lines.append(f"{index}. {sticker}{crown} {name} • <b>{int(row['message_count']):,}</b>")
+            lines.append(f"{index}. {sticker} {name}{crown} • <b>{int(row['message_count']):,}</b>")
     else:
         lines.append("<i>No messages recorded for this period yet.</i>")
     lines.extend(["", f"✉️ <b>Total messages:</b> {total:,}"])
