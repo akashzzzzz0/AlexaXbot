@@ -84,7 +84,7 @@ async def configure_command_visibility(bot) -> None:
     # in the Telegram slash-command menu.
     public_commands = [
         ("start", "Start ALEXA"), ("help", "Open full command guide"),
-        ("setintro", "Create or update your intro card"), ("intro", "Show a member intro card"), ("delintro", "Delete your intro card"), ("g", "World Event typing / legacy number guess"), ("n", "Guess the rest of a name"),
+        ("setintro", "Create or update your intro card"), ("intro", "Show a member intro card"), ("delintro", "Delete your intro card"), ("g", "Play legacy number guessing game"), ("n", "Guess the rest of a name"),
         ("menu", "Open main menu"), ("games", "Open games"),
         ("dice", "Play dice"), ("rps", "Play Rock Paper Scissors"),
         ("quiz", "Play quiz"), ("wheel", "Spin the wheel"),
@@ -260,13 +260,6 @@ async def on_startup(bot) -> None:
     logger.info('Bot startup complete', db_ready=db_ok)
 
     try:
-        from bot.handlers.world_events import start_event_scheduler
-        start_event_scheduler(bot)
-        logger.info('Alexa World Events scheduler started')
-    except Exception as exc:
-        logger.warning('Alexa World Events scheduler could not start', error=str(exc))
-
-    try:
         from bot.services.daily_group_promotion import start_daily_promotion_scheduler
         if db_ok:
             start_daily_promotion_scheduler(bot)
@@ -293,11 +286,6 @@ async def on_startup(bot) -> None:
 
 async def on_shutdown(bot, runner) -> None:
     logger.info('Bot shutting down')
-    try:
-        from bot.handlers.world_events import stop_event_scheduler
-        await stop_event_scheduler()
-    except Exception:
-        pass
     try:
         from bot.services.daily_group_promotion import stop_daily_promotion_scheduler
         await stop_daily_promotion_scheduler()
