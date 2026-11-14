@@ -1,5 +1,6 @@
 import asyncio
 import unittest
+from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
 
 from aiogram.enums import ChatType
@@ -115,6 +116,26 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
                 self.assertIsNotNone(ai_chat._GREETING_RE.match(greeting))
         self.assertEqual(ai_chat._emotion_category("good afternoon"), "greeting")
         self.assertEqual(ai_chat._emotion_category("good evening"), "greeting")
+
+
+    def test_ai_prompt_restores_natural_multilingual_chat_style(self):
+        provider = AsyncMock(return_value="Haan, samajh gayi.")
+        with patch.object(ai_chat, "ai_chat_completion", provider):
+            asyncio.run(ai_chat._ask_ai("kya haal hai?", [], smart_mode=False))
+        system = provider.await_args.kwargs["system"]
+        self.assertIn("Roman Urdu", system)
+        self.assertIn("Bangla/Bengali", system)
+        self.assertIn("Prefer the language and script the sender used", system)
+        self.assertIn("Avoid chatbot clichés", system)
+        self.assertNotIn("Sirf casual Roman Hindi/Hinglish", system)
+
+    def test_smart_group_prompt_does_not_force_hindi_for_other_languages(self):
+        provider = AsyncMock(return_value="I'm good, thanks.")
+        with patch.object(ai_chat, "ai_chat_completion", provider):
+            asyncio.run(ai_chat._ask_ai("How are you?", [], smart_mode=True))
+        system = provider.await_args.kwargs["system"]
+        self.assertIn("sender’s language and script naturally", system)
+        self.assertNotIn("Use natural Indian Roman Hindi/Hinglish", system)
 
 
 if __name__ == "__main__":
