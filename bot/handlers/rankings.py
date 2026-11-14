@@ -11,10 +11,12 @@ from aiogram.types import (
     InlineKeyboardMarkup, InputMediaPhoto, Message,
 )
 from PIL import Image, ImageDraw, ImageFont
+import structlog
 
 from bot.services.rankings_store import get_rankings, get_recap_messages
 
 router = Router(name="group_rankings")
+logger = structlog.get_logger()
 _PERIODS = {
     "overall": ("🌍 Overall", "Overall"),
     "today": ("📅 Today", "Today"),
@@ -116,14 +118,10 @@ def _render(rows, total: int, period: str, recap: str) -> str:
         lines.append("<i>Not enough text messages for a recap yet.</i>")
     if period == "overall":
         lines.append("<i>AI recap uses recent messages from the last 7 days; Overall ranking is all-time.</i>")
-    caption = "\n".join(lines)
-    # Telegram photo captions are limited to 1024 characters.
-    if len(caption) > 1000:
-        lines = lines[:]
-        if recap:
-            lines[-1] = html.escape(recap[:80]) if period != "overall" else "<i>Overall ranking is all-time.</i>"
-        caption = "\n".join(lines)
-    return caption[:1024]
+    # Telegram applies its caption limit to the rendered text, not the raw
+    # HTML markup. Slicing the raw HTML at 1024 can cut an entity/tag in half
+    # and make Telegram reject the entire leaderboard message.
+    return "\n".join(lines)
 
 
 async def _build_view(group_id: int, period: str):
@@ -166,6 +164,7 @@ async def rankings_command(message: Message):
             reply_markup=_keyboard("today"),
         )
     except Exception:
+        logger.exception("Could not load group leaderboard", group_id=message.chat.id)
         await message.answer("⚠️ Alexa could not load the leaderboard right now. Please try again.")
 
 
@@ -186,4 +185,5 @@ async def rankings_period_callback(callback: CallbackQuery):
             reply_markup=_keyboard(period),
         )
     except Exception:
+        logger.exception("Could not refresh group leaderboard", group_id=callback.message.chat.id, period=period)
         await callback.message.answer("⚠️ Could not refresh rankings. Please try again.")
