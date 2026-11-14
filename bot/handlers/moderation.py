@@ -381,7 +381,7 @@ async def save_bio_link_settings(callback: CallbackQuery, db_session: AsyncSessi
     if config is None:
         config = await _insert_or_get(
             db_session,
-            BioLinkProtectionConfig(group_id=chat.id, action=draft["action"], mute_duration=draft["duration"]),
+            BioLinkProtectionConfig(group_id=chat.id, action="warn_mute", mute_duration=3600),
             BioLinkProtectionConfig, BioLinkProtectionConfig.group_id == chat.id,
         )
     config.action = "warn_mute"
