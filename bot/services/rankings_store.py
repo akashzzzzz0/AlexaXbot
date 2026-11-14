@@ -135,9 +135,10 @@ async def get_rankings(group_id: int, period: str):
             else:
                 start_day = (now.date() - timedelta(days=6)).isoformat()
             query = """
-                SELECT user_id,username,first_name,SUM(message_count) AS message_count
+                SELECT user_id,MAX(username) AS username,MAX(first_name) AS first_name,
+                       SUM(message_count) AS message_count
                 FROM ranking_daily WHERE group_id=? AND day_key>=?
-                GROUP BY user_id,username,first_name
+                GROUP BY user_id
                 ORDER BY message_count DESC, first_name COLLATE NOCASE ASC LIMIT 10
             """
             params = (group_id, start_day)
