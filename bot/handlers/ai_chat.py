@@ -446,6 +446,10 @@ async def is_alexa_trigger(message: Message) -> bool:
         _active_conversations.discard(session_key)
         return False
 
+    # Apply the cooldown to every Alexa reply in this group, including direct calls.
+    if time.monotonic() - _last_alexa_reply_at.get(session_key, 0.0) < _ALEXA_REPLY_COOLDOWN_SECONDS:
+        return False
+
     replied = message.reply_to_message
     if replied and replied.from_user and replied.from_user.id == message.bot.id:
         _active_conversations.add(session_key)
@@ -485,10 +489,6 @@ async def is_alexa_trigger(message: Message) -> bool:
     if not _should_smart_reply(message, text):
         return False
 
-    # Apply a short per-user/per-group cooldown to prevent rapid duplicate replies.
-    now = time.monotonic()
-    if now - _last_alexa_reply_at.get(session_key, 0.0) < _ALEXA_REPLY_COOLDOWN_SECONDS:
-        return False
     return True
 
 
