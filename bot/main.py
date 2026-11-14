@@ -178,6 +178,7 @@ async def configure_command_visibility(bot) -> None:
         ("weekly", "Claim weekly coins"), ("monthly", "Claim monthly coins"),
         ("transfer", "Transfer coins"), ("referral", "Get referral link"),
         ("achievements", "View achievements"), ("security", "Group security panel"),
+        ("channelguard", "Configure profile-link protection"),
         ("settings", "Group settings"), ("ban", "Ban a member"),
         ("unban", "Unban a member"), ("kick", "Kick a member"),
         ("mute", "Mute a member"), ("unmute", "Unmute a member"),
