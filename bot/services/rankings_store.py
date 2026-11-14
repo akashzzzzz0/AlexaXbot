@@ -159,6 +159,11 @@ async def get_recap_messages(group_id: int, period: str, limit: int = 80):
     if period == "week" or period == "overall":
         start = start - timedelta(days=6)
     async with aiosqlite.connect(_DB_PATH, timeout=20) as db:
+        await db.execute(
+            "DELETE FROM ranking_messages WHERE created_at < ?",
+            ((now - timedelta(days=7)).isoformat(),),
+        )
+        await db.commit()
         cursor = await db.execute("""
             SELECT first_name,body FROM ranking_messages
             WHERE group_id=? AND created_at>=?
