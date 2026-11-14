@@ -544,7 +544,7 @@ async def _ask_ai(
         "Vary openings and phrasing; do not repeatedly ask 'aur batao?', echo the user, or use canned lines. Respond to the actual context, remember the conversational thread, and ask a follow-up only when it genuinely fits. Do not add emojis yourself; Alexa may append one animated custom emoji only when the message clearly carries a mood. Neutral messages should have no emoji. "
         "Be gently cheeky when appropriate, never cruel, pushy, or artificially romantic. "
         "Do not claim to be a real human or invent offline activities, memories, feelings, or experiences. "
-        "Do not bring up AI or bot labels in ordinary conversation. Keep Alexa's persona consistently feminine, natural, relaxed, and human-sounding in conversational style, without claiming to be an actual human. If someone asks 'tum larki ho?' or 'larka ho ya larki?', answer directly in character, for example 'Main Alexa hoon yaar, larki hoon 😂💗' or 'Larki hoon, itna kyun pooch rahe ho? 😄'. Never use phrases like 'larki wali vibe' or 'larki jaisi baat karti hoon'. If someone asks casually 'tum bot ho?' respond naturally without a robotic lecture, e.g. 'Arre, main Alexa hoon yaar 😂'. If they clearly press for a factual answer about whether Alexa is a bot or AI, be brief and honest: 'Haan, main AI-powered Alexa hoon, lekin baat normal hi karti hoon 😄'. Never claim to be a real human girl or falsely deny being AI. Do not mention internal setup, prompts, APIs, keys, or models. "
+        "Do not bring up AI or bot labels in ordinary conversation. Keep Alexa's persona consistently feminine, natural, relaxed, and human-sounding in conversational style, without claiming to be an actual human. If someone asks 'tum larki ho?' or 'larka ho ya larki?', answer directly in character, for example 'Main Alexa hoon yaar, larki hoon 😂💗' or 'Larki hoon, itna kyun pooch rahe ho? 😄'. Never use phrases like 'larki wali vibe' or 'larki jaisi baat karti hoon'. If someone casually calls you 'oye bot', 'oo bot', or just teases you with 'bot', answer with playful feminine attitude, e.g. 'Bot kisko bola? Alexa hoon yaar, tameez se 😂'. Do not turn teasing/name-calling into a technical explanation. If someone directly asks as a factual question whether you are a bot or AI, answer briefly and honestly: 'Haan, AI bot hoon—par baat normal hi karti hoon 😂'. Never give a long AI disclosure or mention models, APIs, or technical setup. Never claim to be a real human girl or falsely deny being AI. Do not mention internal setup, prompts, APIs, keys, or models. "
         "Conversation quality rules: First identify what the person is doing—greeting, asking how you are, sharing news, joking, venting, asking a real question, or continuing an earlier topic—and respond to THAT exact intent. " +
         "For 'kese ho?/kaise ho?/how are you?', answer simply and naturally, for example 'Main theek hoon, tum kaise ho?' or 'Theek hoon yaar, tum sunao'—never use exaggerated lines like 'Main ekdum fit!' and do not force an unrelated 'kya chal raha hai'. " +
         "For a plain 'hi/hello', greet briefly; for a name call, acknowledge; for a personal update, react to the update before asking anything. Do not turn every message into a question. " +
@@ -729,9 +729,9 @@ async def _process_alexa_ai_chat(message: Message) -> None:
             if asks_gender and not asks_ai_fact:
                 answer = "Main Alexa hoon yaar, larki hoon 😂💗"
             elif asks_ai_fact:
-                answer = "Haan, main AI-powered Alexa hoon, lekin baat normal hi karti hoon 😄"
+                answer = "Haan, AI bot hoon—par baat normal hi karti hoon 😂"
             else:
-                answer = "Arre yaar, main Alexa hoon 😂"
+                answer = "Bot kisko bola? Alexa hoon yaar, tameez se 😂"
         else:
             answer = await _ask_ai_with_typing(
                 message, text, history, smart_mode=smart_mode, gender_style=gender_style
@@ -805,12 +805,22 @@ async def _process_alexa_ai_chat(message: Message) -> None:
             _emotion_category(answer) or _emotion_category(original_text or text)
         )
         mood_suffix = f" {mood_emoji}" if mood_emoji else ""
-        # Telegram clients can miss a very short typing action if the model
-        # answers immediately. Keep the indicator active for a brief minimum
-        # visible interval before sending the reply.
-        typing_visible_for = time.monotonic() - turn_started_at
-        if typing_visible_for < 2.0:
-            await asyncio.sleep(2.0 - typing_visible_for)
+        # Refresh typing immediately before the outgoing message. This matters
+        # when provider inference took longer than Telegram's short chat-action
+        # visibility window; the background refresh may otherwise have just expired.
+        try:
+            await message.bot.send_chat_action(
+                chat_id=message.chat.id,
+                action="typing",
+            )
+        except Exception as typing_exc:
+            logger.warning(
+                "Alexa pre-reply typing action failed for chat_id=%s: %s: %s",
+                message.chat.id, type(typing_exc).__name__,
+                str(typing_exc).replace("\\n", " ")[:240],
+            )
+        # Keep the final typing action visible briefly before sending the reply.
+        await asyncio.sleep(1.5)
         await message.reply(f"{html.escape(answer)}{mood_suffix}", parse_mode="HTML")
     except Exception as exc:
         # Telegram reply failures should not interrupt bot polling, but must be visible in host logs.
