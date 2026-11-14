@@ -110,4 +110,4 @@ async def rankings_period_callback(callback: CallbackQuery):
             text, reply_markup=_keyboard(period), disable_web_page_preview=True
         )
     except Exception:
-        await callback.answer("Could not refresh rankings. Please try again.", show_alert=True)
+        await callback.message.answer("⚠️ Could not refresh rankings. Please try again.")
