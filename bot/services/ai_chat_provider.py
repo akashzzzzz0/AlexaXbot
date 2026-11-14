@@ -10,96 +10,6 @@ from bot.config import get_gemini_api_key, settings
 
 
 
-def _cloudflare_account_id() -> str:
-    return (getattr(settings, "CLOUDFLARE_ACCOUNT_ID", "") or os.getenv("CLOUDFLARE_ACCOUNT_ID", "")).strip()
-
-
-def _cloudflare_api_token() -> str:
-    return (getattr(settings, "CLOUDFLARE_API_TOKEN", "") or os.getenv("CLOUDFLARE_API_TOKEN", "")).strip()
-
-
-async def _cloudflare_chat(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False) -> str:
-    account_id = _cloudflare_account_id()
-    api_token = _cloudflare_api_token()
-    if not account_id or not api_token:
-        raise RuntimeError("cloudflare_not_configured")
-
-    chat_messages = []
-    if system.strip():
-        chat_messages.append({"role": "system", "content": system.strip()})
-    for item in messages:
-        role = str(item.get("role", "user"))
-        if role == "model":
-            role = "assistant"
-        if role not in {"system", "user", "assistant"}:
-            continue
-        content = str(item.get("content", item.get("text", ""))).strip()
-        if content:
-            chat_messages.append({"role": role, "content": content})
-    if not chat_messages:
-        raise ValueError("empty_prompt")
-
-    model = (getattr(settings, "CLOUDFLARE_AI_MODEL", "") or os.getenv("CLOUDFLARE_AI_MODEL", "") or "@cf/zai-org/glm-4.7-flash").strip()
-    payload = {"messages": chat_messages, "temperature": temperature, "max_tokens": max_tokens}
-    if json_mode:
-        payload["response_format"] = {"type": "json_object"}
-
-    timeout = httpx.Timeout(14.0, connect=5.0)
-    endpoint = "https://api.cloudflare.com/client/v4/accounts/" + account_id + "/ai/run/" + model
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.post(endpoint, json=payload, headers={"Authorization": "Bearer " + api_token, "Content-Type": "application/json"})
-        if response.status_code >= 400:
-            try:
-                data = response.json()
-                detail = data.get("errors") or data.get("error") or response.text[:300]
-            except (ValueError, AttributeError):
-                detail = response.text[:300]
-            raise httpx.HTTPStatusError("Cloudflare Workers AI HTTP " + str(response.status_code) + ": " + str(detail)[:220], request=response.request, response=response)
-        data = response.json()
-
-    result = data.get("result") or {}
-
-    def _content_text(value):
-        if isinstance(value, str):
-            return value.strip()
-        if isinstance(value, list):
-            return "".join(_content_text(part.get("text", "") if isinstance(part, dict) else part) for part in value).strip()
-        if isinstance(value, dict):
-            for key in ("text", "content", "response", "output_text"):
-                if value.get(key):
-                    extracted = _content_text(value[key])
-                    if extracted:
-                        return extracted
-        return ""
-
-    choices = result.get("choices") or data.get("choices") or []
-    choice_content = ""
-    if choices and isinstance(choices[0], dict):
-        message = choices[0].get("message") or choices[0].get("delta") or {}
-        choice_content = _content_text(message.get("content", "") if isinstance(message, dict) else message)
-        if not choice_content:
-            choice_content = _content_text(choices[0].get("text", ""))
-    answer = (
-        _content_text(result.get("response"))
-        or choice_content
-        or _content_text(result.get("output_text"))
-        or _content_text(result.get("output"))
-        or _content_text(result.get("content"))
-        or _content_text(data.get("response"))
-    )
-    if not answer:
-        # Log only structural metadata, never prompts, replies, tokens, or IDs.
-        logger = __import__("logging").getLogger(__name__)
-        logger.warning(
-            "Cloudflare Workers AI returned HTTP 200 without recognized text; "
-            "top_keys=%s result_keys=%s",
-            sorted(data.keys()) if isinstance(data, dict) else type(data).__name__,
-            sorted(result.keys()) if isinstance(result, dict) else type(result).__name__,
-        )
-        raise RuntimeError("cloudflare_empty_response")
-    return answer
-
-
 def _gemini_api_key() -> str:
     return get_gemini_api_key()
 
@@ -358,15 +268,14 @@ def _safe_provider_error(name: str, exc: Exception) -> str:
 
 
 async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False):
-    """Try Gemini, Grok, OpenAI, then Cloudflare; continue after errors or empty replies."""
+    """Try Gemini, Grok, then OpenAI; continue after errors or empty replies."""
     providers = [
-        ("gemini", _gemini_chat, bool(_gemini_api_key()), 8.0),
-        ("grok", _xai_chat, bool(_xai_api_key()), 8.0),
-        ("openai", _openai_chat, bool(_openai_api_key()), 8.0),
-        ("cloudflare", _cloudflare_chat, bool(_cloudflare_account_id() and _cloudflare_api_token()), 8.0),
+        ("gemini", _gemini_chat, bool(_gemini_api_key()), 6.0),
+        ("grok", _xai_chat, bool(_xai_api_key()), 6.0),
+        ("openai", _openai_chat, bool(_openai_api_key()), 6.0),
     ]
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + 34.0
+    deadline = loop.time() + 20.0
     for name, provider, configured, timeout_seconds in providers:
         if not configured:
             print("Alexa chat provider skipped:", name + ":missing_runtime_configuration")
