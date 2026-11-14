@@ -97,7 +97,7 @@ async def configure_command_visibility(bot) -> None:
         ("bal", "View game balance"), ("give", "Send coins to a user"), ("kill", "Virtual game action"),
         ("rob", "Try a virtual robbery"), ("revive", "Revive game profile"),
         ("protect", "Buy virtual protection"), ("unprotect", "Remove protection"),
-        ("rank", "View your rank"), ("leaders", "View player leaderboard"),
+        ("rank", "View your rank"), ("rankings", "View group chat leaderboard"), ("leaders", "View player leaderboard"),
         ("topkill", "Top virtual kill scores"), ("toprich", "Richest players"),
         ("toprob", "Top successful robs"), ("items", "View game items"),
         ("task", "View game tasks"), ("bomb", "Play Bomb"), ("bluff", "Play Bluff"),
