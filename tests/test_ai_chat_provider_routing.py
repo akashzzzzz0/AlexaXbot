@@ -12,8 +12,6 @@ class AlexaChatProviderRoutingTests(unittest.IsolatedAsyncioTestCase):
             patch.object(ai_chat_provider, "_gemini_api_key", return_value="gemini-key"),
             patch.object(ai_chat_provider, "_xai_api_key", return_value="xai-key"),
             patch.object(ai_chat_provider, "_openai_api_key", return_value="openai-key"),
-            patch.object(ai_chat_provider, "_cloudflare_account_id", return_value="account"),
-            patch.object(ai_chat_provider, "_cloudflare_api_token", return_value="cf-token"),
             patch.object(ai_chat_provider, "_gemini_chat", gemini),
             patch.object(ai_chat_provider, "_xai_chat", grok),
         ):
@@ -30,8 +28,6 @@ class AlexaChatProviderRoutingTests(unittest.IsolatedAsyncioTestCase):
             patch.object(ai_chat_provider, "_gemini_api_key", return_value="gemini-key"),
             patch.object(ai_chat_provider, "_xai_api_key", return_value="xai-key"),
             patch.object(ai_chat_provider, "_openai_api_key", return_value="openai-key"),
-            patch.object(ai_chat_provider, "_cloudflare_account_id", return_value="account"),
-            patch.object(ai_chat_provider, "_cloudflare_api_token", return_value="cf-token"),
             patch.object(ai_chat_provider, "_gemini_chat", gemini),
             patch.object(ai_chat_provider, "_xai_chat", grok),
             patch.object(ai_chat_provider, "_openai_chat", openai),
@@ -46,126 +42,34 @@ class AlexaChatProviderRoutingTests(unittest.IsolatedAsyncioTestCase):
         gemini = AsyncMock(side_effect=RuntimeError("Gemini unavailable"))
         grok = AsyncMock(side_effect=RuntimeError("Grok unavailable"))
         openai = AsyncMock(return_value="OpenAI reply")
-        cloudflare = AsyncMock()
         with (
             patch.object(ai_chat_provider, "_gemini_api_key", return_value="gemini-key"),
             patch.object(ai_chat_provider, "_xai_api_key", return_value="xai-key"),
             patch.object(ai_chat_provider, "_openai_api_key", return_value="openai-key"),
-            patch.object(ai_chat_provider, "_cloudflare_account_id", return_value="account"),
-            patch.object(ai_chat_provider, "_cloudflare_api_token", return_value="cf-token"),
             patch.object(ai_chat_provider, "_gemini_chat", gemini),
             patch.object(ai_chat_provider, "_xai_chat", grok),
             patch.object(ai_chat_provider, "_openai_chat", openai),
-            patch.object(ai_chat_provider, "_cloudflare_chat", cloudflare),
         ):
             result = await ai_chat_provider.ai_chat_completion([{"role": "user", "content": "Hi"}])
         self.assertEqual(result, "OpenAI reply")
         openai.assert_awaited_once()
-        cloudflare.assert_not_awaited()
-
-    async def test_uses_cloudflare_as_last_provider(self):
-        gemini = AsyncMock(side_effect=RuntimeError("Gemini unavailable"))
-        grok = AsyncMock(side_effect=RuntimeError("Grok unavailable"))
-        openai = AsyncMock(side_effect=RuntimeError("OpenAI unavailable"))
-        cloudflare = AsyncMock(return_value="Cloudflare reply")
-        with (
-            patch.object(ai_chat_provider, "_gemini_api_key", return_value="gemini-key"),
-            patch.object(ai_chat_provider, "_xai_api_key", return_value="xai-key"),
-            patch.object(ai_chat_provider, "_openai_api_key", return_value="openai-key"),
-            patch.object(ai_chat_provider, "_cloudflare_account_id", return_value="account"),
-            patch.object(ai_chat_provider, "_cloudflare_api_token", return_value="cf-token"),
-            patch.object(ai_chat_provider, "_gemini_chat", gemini),
-            patch.object(ai_chat_provider, "_xai_chat", grok),
-            patch.object(ai_chat_provider, "_openai_chat", openai),
-            patch.object(ai_chat_provider, "_cloudflare_chat", cloudflare),
-        ):
-            result = await ai_chat_provider.ai_chat_completion([{"role": "user", "content": "Hi"}])
-        self.assertEqual(result, "Cloudflare reply")
-        cloudflare.assert_awaited_once()
 
     async def test_skips_unconfigured_providers(self):
         gemini = AsyncMock()
         grok = AsyncMock()
         openai = AsyncMock()
-        cloudflare = AsyncMock()
         with (
             patch.object(ai_chat_provider, "_gemini_api_key", return_value=""),
             patch.object(ai_chat_provider, "_xai_api_key", return_value=""),
             patch.object(ai_chat_provider, "_openai_api_key", return_value=""),
-            patch.object(ai_chat_provider, "_cloudflare_account_id", return_value=""),
-            patch.object(ai_chat_provider, "_cloudflare_api_token", return_value=""),
             patch.object(ai_chat_provider, "_gemini_chat", gemini),
             patch.object(ai_chat_provider, "_xai_chat", grok),
             patch.object(ai_chat_provider, "_openai_chat", openai),
-            patch.object(ai_chat_provider, "_cloudflare_chat", cloudflare),
         ):
             result = await ai_chat_provider.ai_chat_completion([{"role": "user", "content": "Hi"}])
         self.assertEqual(result, "")
-        for provider in (gemini, grok, openai, cloudflare):
+        for provider in (gemini, grok, openai):
             provider.assert_not_awaited()
-
-
-    async def test_cloudflare_reads_standard_response_field(self):
-        class FakeResponse:
-            status_code = 200
-            request = object()
-            def json(self):
-                return {"result": {"response": "Cloudflare answer"}, "success": True}
-
-        class FakeClient:
-            def __init__(self, *args, **kwargs):
-                pass
-            async def __aenter__(self):
-                return self
-            async def __aexit__(self, *args):
-                return False
-            async def post(self, *args, **kwargs):
-                return FakeResponse()
-
-        with (
-            patch.object(ai_chat_provider, "_cloudflare_account_id", return_value="account"),
-            patch.object(ai_chat_provider, "_cloudflare_api_token", return_value="token"),
-            patch("bot.services.ai_chat_provider.httpx.AsyncClient", FakeClient),
-        ):
-            answer = await ai_chat_provider._cloudflare_chat(
-                [{"role": "user", "content": "Hello"}]
-            )
-        self.assertEqual(answer, "Cloudflare answer")
-
-    async def test_cloudflare_reads_openai_compatible_content_blocks(self):
-        class FakeResponse:
-            status_code = 200
-            request = object()
-            def json(self):
-                return {
-                    "result": {
-                        "choices": [{
-                            "message": {
-                                "content": [{"type": "text", "text": "Cloudflare block answer"}]
-                            }
-                        }]
-                    }
-                }
-
-        class FakeClient:
-            def __init__(self, *args, **kwargs):
-                pass
-            async def __aenter__(self):
-                return self
-            async def __aexit__(self, *args):
-                return False
-            async def post(self, *args, **kwargs):
-                return FakeResponse()
-
-        with (
-            patch.object(ai_chat_provider, "_cloudflare_account_id", return_value="account"),
-            patch.object(ai_chat_provider, "_cloudflare_api_token", return_value="token"),
-            patch("bot.services.ai_chat_provider.httpx.AsyncClient", FakeClient),
-        ):
-            answer = await ai_chat_provider._cloudflare_chat(
-                [{"role": "user", "content": "Hello"}]
-            )
-        self.assertEqual(answer, "Cloudflare block answer")
 
 
 if __name__ == "__main__":
