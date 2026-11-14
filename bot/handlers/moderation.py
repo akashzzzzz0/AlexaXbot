@@ -250,10 +250,7 @@ async def _bio_link_protection_enabled(db_session: AsyncSession, chat_id: int) -
     if setting is not None:
         return bool(setting.enabled)
     # Keep the previous behavior until an admin makes an explicit choice.
-    security = await db_session.scalar(
-        select(SecuritySettings).where(SecuritySettings.group_id == chat_id)
-    )
-    return bool(security and security.anti_link)
+    return False
 
 
 @router.callback_query(F.data == "menu:moderation")
@@ -295,8 +292,8 @@ async def open_bio_link_protection(callback: CallbackQuery, db_session: AsyncSes
     enabled = await _bio_link_protection_enabled(db_session, chat.id)
     await callback.message.edit_text(
         "🛡️ <b>Bio Link Protection</b>\n\n"
-        "When enabled, ALEXA checks for links in member bios where Telegram makes the bio available, "
-        "and applies the group's configured protection.\n\n"
+        "When enabled, ChannelGuard checks actual links in member bios and exposed connected-channel descriptions. "
+        "A connected channel by itself is not a violation.\n\n"
         f"Current status: <b>{'🟢 ON' if enabled else '🔴 OFF'}</b>",
         parse_mode="HTML",
         reply_markup=bio_link_protection_kb(enabled),
@@ -318,15 +315,14 @@ async def open_bio_link_settings(callback: CallbackQuery, db_session: AsyncSessi
         await callback.answer("Could not verify your group-admin permissions.", show_alert=True)
         return
     config = await db_session.scalar(select(BioLinkProtectionConfig).where(BioLinkProtectionConfig.group_id == chat.id))
-    action = config.action if config else "warn_mute"
-    duration = config.mute_duration if config else 3600
+    action = "warn_mute"
+    duration = 3600
     _bio_link_settings_drafts[(chat.id, callback.from_user.id)] = {"action": action, "duration": duration}
     await callback.message.edit_text(
         "⚙️ <b>Bio Link Protection Settings</b>\n\n"
-        "Choose what ALEXA should do when a member's bio contains a link. "
-        "Select an action and, if using mute, a duration. Then press Save Settings.\n\n"
-        f"Selected action: <b>{action.upper()}</b>\n"
-        f"Mute duration: <b>{duration // 60} minutes</b>",
+        "ChannelGuard has one fixed action: 3 warnings, then a 1-hour mute. "
+        "Save Settings to apply this rule to the group.\n\n"
+        "Selected action: <b>3 WARNINGS → 1 HOUR MUTE</b>",
         parse_mode="HTML",
         reply_markup=bio_link_action_kb(action, duration),
     )
@@ -336,13 +332,14 @@ async def open_bio_link_settings(callback: CallbackQuery, db_session: AsyncSessi
 @router.callback_query(F.data.startswith("mod:bio_action:"))
 async def select_bio_link_action(callback: CallbackQuery, **kwargs):
     action = callback.data.rsplit(":", 1)[-1]
-    if action not in ("warn_mute", "warn_ban", "mute", "ban"):
+    if action != "warn_mute":
         await callback.answer("Invalid action.", show_alert=True)
         return
     key = (callback.message.chat.id, callback.from_user.id)
     draft = _bio_link_settings_drafts.setdefault(key, {"action": "warn_mute", "duration": 3600})
-    draft["action"] = action
-    await callback.message.edit_reply_markup(reply_markup=bio_link_action_kb(draft["action"], draft["duration"]))
+    draft["action"] = "warn_mute"
+    draft["duration"] = 3600
+    await callback.message.edit_reply_markup(reply_markup=bio_link_action_kb("warn_mute", 3600))
     await callback.answer(f"Action selected: {action.upper()}. Save to apply.")
 
 
@@ -353,13 +350,14 @@ async def select_bio_link_duration(callback: CallbackQuery, **kwargs):
     except ValueError:
         await callback.answer("Invalid duration.", show_alert=True)
         return
-    if duration not in (900, 1800, 3600, 21600, 43200, 86400):
+    if duration != 3600:
         await callback.answer("Invalid duration.", show_alert=True)
         return
     key = (callback.message.chat.id, callback.from_user.id)
     draft = _bio_link_settings_drafts.setdefault(key, {"action": "warn_mute", "duration": 3600})
-    draft["duration"] = duration
-    await callback.message.edit_reply_markup(reply_markup=bio_link_action_kb(draft["action"], duration))
+    draft["action"] = "warn_mute"
+    draft["duration"] = 3600
+    await callback.message.edit_reply_markup(reply_markup=bio_link_action_kb("warn_mute", 3600))
     await callback.answer("Mute duration selected. Save to apply.")
 
 
@@ -386,8 +384,8 @@ async def save_bio_link_settings(callback: CallbackQuery, db_session: AsyncSessi
             BioLinkProtectionConfig(group_id=chat.id, action=draft["action"], mute_duration=draft["duration"]),
             BioLinkProtectionConfig, BioLinkProtectionConfig.group_id == chat.id,
         )
-    config.action = draft["action"]
-    config.mute_duration = draft["duration"]
+    config.action = "warn_mute"
+    config.mute_duration = 3600
     try:
         await db_session.commit()
     except Exception as exc:
@@ -398,8 +396,7 @@ async def save_bio_link_settings(callback: CallbackQuery, db_session: AsyncSessi
     _bio_link_settings_drafts.pop(key, None)
     await callback.message.edit_text(
         "✅ <b>Bio Link Protection settings saved</b>\n\n"
-        f"Action: <b>{config.action.upper()}</b>\n"
-        f"Mute duration: <b>{config.mute_duration // 60} minutes</b>\n\n"
+        "Action: <b>3 WARNINGS → 1 HOUR MUTE</b>\n\n"
         "These settings apply only to this group.",
         parse_mode="HTML",
         reply_markup=bio_link_protection_kb(await _bio_link_protection_enabled(db_session, chat.id)),
@@ -446,8 +443,8 @@ async def _set_bio_link_protection(callback: CallbackQuery, db_session: AsyncSes
 
     await callback.message.edit_text(
         "🛡️ <b>Bio Link Protection</b>\n\n"
-        "When enabled, ALEXA checks for links in member bios where Telegram makes the bio available, "
-        "and applies the group's configured protection.\n\n"
+        "When enabled, ChannelGuard checks actual links in member bios and exposed connected-channel descriptions. "
+        "A connected channel by itself is not a violation.\n\n"
         f"Current status: <b>{'🟢 ON' if enabled else '🔴 OFF'}</b>",
         parse_mode="HTML",
         reply_markup=bio_link_protection_kb(enabled),
