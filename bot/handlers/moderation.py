@@ -149,7 +149,7 @@ async def confirm_anonymous_action(callback: CallbackQuery, bot: Bot, db_session
         await callback.answer(f"Action failed: {str(exc)[:150]}", show_alert=True)
 
 router.message.outer_middleware(AdminActionMiddleware(
-    commands={"ban", "sban", "dban", "tban", "unban", "kick", "mute", "smute", "unmute", "warn", "unwarn", "warns", "warnings", "history", "note", "del", "purg", "pin", "unpin", "ro", "setrole", "clearrole", "role", "resetwarn", "resetwarns", "approvebio", "promote", "demote"}
+    commands={"ban", "sban", "dban", "tban", "unban", "kick", "mute", "smute", "unmute", "warn", "unwarn", "warns", "warnings", "history", "note", "del", "purg", "pin", "unpin", "ro", "setrole", "clearrole", "role", "resetwarn", "resetwarns", "approvebio", "channelguard", "promote", "demote"}
 ))
 router.callback_query.outer_middleware(AdminActionMiddleware(prefixes=("mod:", "mute_duration:", "ban_duration:", "warn_action:", "ban_confirm:", "anon_confirm:", "anon_cancel:")))
 
@@ -253,6 +253,63 @@ async def _bio_link_protection_enabled(db_session: AsyncSession, chat_id: int) -
     return False
 
 
+@router.message(Command("channelguard"))
+async def cmd_channelguard(message: Message, db_session: AsyncSession, **kwargs):
+    """Manage ChannelGuard: actual URLs in exposed bios/connected-channel descriptions."""
+    if message.chat.type not in ("group", "supergroup") or not message.from_user:
+        await message.reply("Use /channelguard inside a group.")
+        return
+    try:
+        actor = await message.bot.get_chat_member(message.chat.id, message.from_user.id)
+        status = str(getattr(actor.status, "value", actor.status))
+        if status not in ("administrator", "creator", "owner"):
+            await message.reply("Only group admins can manage ChannelGuard.")
+            return
+    except Exception:
+        await message.reply("Could not verify your group-admin permissions.")
+        return
+
+    parts = (message.text or "").split()
+    requested = parts[1].lower() if len(parts) > 1 else ""
+    if requested not in ("", "on", "off"):
+        await message.reply("Usage: /channelguard on, /channelguard off, or /channelguard for status.")
+        return
+
+    setting = await db_session.scalar(
+        select(BioLinkProtectionSetting).where(
+            BioLinkProtectionSetting.group_id == message.chat.id
+        )
+    )
+    if requested:
+        enabled = requested == "on"
+        if setting is None:
+            setting, _created = await _insert_or_get(
+                db_session,
+                BioLinkProtectionSetting(group_id=message.chat.id, enabled=enabled),
+                BioLinkProtectionSetting,
+                BioLinkProtectionSetting.group_id == message.chat.id,
+            )
+        setting.enabled = enabled
+        try:
+            await db_session.commit()
+        except Exception as exc:
+            await db_session.rollback()
+            logger.warning("Could not save ChannelGuard switch", group_id=message.chat.id, error=str(exc))
+            await message.reply("Could not save ChannelGuard right now. Try again.")
+            return
+    else:
+        enabled = bool(setting and setting.enabled)
+
+    state = "🟢 ON" if enabled else "🔴 OFF"
+    await message.reply(
+        f"🛡️ <b>ChannelGuard: {state}</b>\n\n"
+        "Checks actual links in a member's bio and, when Telegram exposes it, the connected channel description. "
+        "A connected channel by itself is not a violation.\n"
+        "Rule: 3 warnings → 1 hour mute. Buttons: Whitelist and Unmute.",
+        parse_mode="HTML",
+    )
+
+
 @router.callback_query(F.data == "menu:moderation")
 async def moderation_menu(callback: CallbackQuery, _: callable, db_session: AsyncSession, **kwargs):
     enabled = await _bio_link_protection_enabled(db_session, callback.message.chat.id)
@@ -291,7 +348,7 @@ async def open_bio_link_protection(callback: CallbackQuery, db_session: AsyncSes
         return
     enabled = await _bio_link_protection_enabled(db_session, chat.id)
     await callback.message.edit_text(
-        "🛡️ <b>Bio Link Protection</b>\n\n"
+        "🛡️ <b>ChannelGuard</b>\n\n"
         "When enabled, ChannelGuard checks actual links in member bios and exposed connected-channel descriptions. "
         "A connected channel by itself is not a violation.\n\n"
         f"Current status: <b>{'🟢 ON' if enabled else '🔴 OFF'}</b>",
@@ -319,7 +376,7 @@ async def open_bio_link_settings(callback: CallbackQuery, db_session: AsyncSessi
     duration = 3600
     _bio_link_settings_drafts[(chat.id, callback.from_user.id)] = {"action": action, "duration": duration}
     await callback.message.edit_text(
-        "⚙️ <b>Bio Link Protection Settings</b>\n\n"
+        "⚙️ <b>ChannelGuard Settings</b>\n\n"
         "ChannelGuard has one fixed action: 3 warnings, then a 1-hour mute. "
         "Save Settings to apply this rule to the group.\n\n"
         "Selected action: <b>3 WARNINGS → 1 HOUR MUTE</b>",
@@ -395,7 +452,7 @@ async def save_bio_link_settings(callback: CallbackQuery, db_session: AsyncSessi
         return
     _bio_link_settings_drafts.pop(key, None)
     await callback.message.edit_text(
-        "✅ <b>Bio Link Protection settings saved</b>\n\n"
+        "✅ <b>ChannelGuard settings saved</b>\n\n"
         "Action: <b>3 WARNINGS → 1 HOUR MUTE</b>\n\n"
         "These settings apply only to this group.",
         parse_mode="HTML",
@@ -407,7 +464,7 @@ async def save_bio_link_settings(callback: CallbackQuery, db_session: AsyncSessi
 @router.callback_query(F.data == "mod:bio_link_status")
 async def bio_link_status(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
     enabled = await _bio_link_protection_enabled(db_session, callback.message.chat.id)
-    await callback.answer("Bio Link Protection is " + ("ON." if enabled else "OFF."), show_alert=True)
+    await callback.answer("ChannelGuard is " + ("ON." if enabled else "OFF."), show_alert=True)
 
 
 async def _set_bio_link_protection(callback: CallbackQuery, db_session: AsyncSession, enabled: bool):
@@ -442,14 +499,14 @@ async def _set_bio_link_protection(callback: CallbackQuery, db_session: AsyncSes
         return
 
     await callback.message.edit_text(
-        "🛡️ <b>Bio Link Protection</b>\n\n"
+        "🛡️ <b>ChannelGuard</b>\n\n"
         "When enabled, ChannelGuard checks actual links in member bios and exposed connected-channel descriptions. "
         "A connected channel by itself is not a violation.\n\n"
         f"Current status: <b>{'🟢 ON' if enabled else '🔴 OFF'}</b>",
         parse_mode="HTML",
         reply_markup=bio_link_protection_kb(enabled),
     )
-    await callback.answer("Bio Link Protection " + ("enabled." if enabled else "disabled."))
+    await callback.answer("ChannelGuard " + ("enabled." if enabled else "disabled."))
 
 
 @router.callback_query(F.data == "mod:bio_link_on")
@@ -495,7 +552,7 @@ async def cmd_approvebio(message: Message, db_session: AsyncSession, **kwargs):
         await message.reply("❌ Could not save this approval. Please check the database logs.")
         return
     await message.reply(
-        f"✅ {escape(safe_username(target))} is approved for Bio Link Protection and can keep links in their bio.",
+        f"✅ {escape(safe_username(target))} is approved for ChannelGuard and can keep links in their bio.",
         parse_mode="HTML",
     )
 
