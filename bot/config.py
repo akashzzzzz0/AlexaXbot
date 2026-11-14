@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     GROQ_MODEL: str = "openai/gpt-oss-20b"
 
+    # Cloudflare Workers AI is the primary conversational chat provider.
+    CLOUDFLARE_ACCOUNT_ID: str = ""
+    CLOUDFLARE_API_TOKEN: str = ""
+    CLOUDFLARE_AI_MODEL: str = "@cf/zai-org/glm-4.7-flash"
+
     # OpenAI key is supplied only through private host environment settings.
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4.1-mini"
