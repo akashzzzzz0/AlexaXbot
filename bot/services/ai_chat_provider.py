@@ -13,7 +13,7 @@ from bot.services.ollama_ai import get_ollama_api_key, ollama_chat
 # Avoid hammering providers during quota/network outages. Each provider is
 # retried automatically after its short cooldown; no persistent state is used.
 _provider_retry_after: dict[str, float] = {}
-_PROVIDER_429_COOLDOWN = 120.0
+_PROVIDER_429_COOLDOWN = 300.0
 _PROVIDER_ERROR_COOLDOWN = 30.0
 
 
