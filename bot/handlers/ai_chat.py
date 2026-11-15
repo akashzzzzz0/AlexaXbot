@@ -871,17 +871,42 @@ async def _process_alexa_ai_chat(message: Message) -> None:
             "Alexa AI reply failed for chat_id=%s: %s (%s)",
             message.chat.id, type(exc).__name__, str(exc)[:1200],
         )
+        if not smart_mode:
+            try:
+                await message.reply("Abhi reply generate nahi ho pa raha. Thori der baad dobara try karna.")
+            except Exception as send_exc:
+                logger.warning(
+                    "Alexa temporary-unavailable notice failed for chat_id=%s: %s",
+                    message.chat.id, type(send_exc).__name__,
+                )
         return
     except Exception as exc:
         logger.exception("Unexpected Alexa AI chat failure for chat_id=%s", message.chat.id)
+        if not smart_mode:
+            try:
+                await message.reply("Abhi reply generate nahi ho pa raha. Thori der baad dobara try karna.")
+            except Exception as send_exc:
+                logger.warning(
+                    "Alexa temporary-unavailable notice failed for chat_id=%s: %s",
+                    message.chat.id, type(send_exc).__name__,
+                )
         return
 
-    # Never replace failed AI output with canned filler.
+    # Do not fabricate a conversational answer when both AI providers fail.
+    # For private chats and explicit Alexa mentions, tell the sender clearly.
     if not answer:
         logger.warning(
-            "Alexa AI providers returned no usable reply; staying silent",
+            "Alexa AI providers returned no usable reply",
             extra={"chat_id": message.chat.id, "user_id": message.from_user.id},
         )
+        if not smart_mode:
+            try:
+                await message.reply("Abhi reply generate nahi ho pa raha. Thori der baad dobara try karna.")
+            except Exception as send_exc:
+                logger.warning(
+                    "Alexa temporary-unavailable notice failed for chat_id=%s: %s",
+                    message.chat.id, type(send_exc).__name__,
+                )
         return
     if answer.strip().casefold() == "__ignore__":
         return
