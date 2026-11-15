@@ -9,7 +9,6 @@ class AlexaChatProviderRoutingTests(unittest.IsolatedAsyncioTestCase):
         groq = AsyncMock(return_value="Groq reply")
         grok = AsyncMock(return_value="Grok reply")
         openai = AsyncMock(return_value="OpenAI reply")
-        gemini = AsyncMock(return_value="Gemini reply")
         with (
             patch.object(ai_chat_provider, "_groq_api_key", return_value="groq-key"),
             patch.object(ai_chat_provider, "_xai_api_key", return_value="xai-key"),
@@ -72,6 +71,7 @@ class AlexaChatProviderRoutingTests(unittest.IsolatedAsyncioTestCase):
         groq = AsyncMock()
         grok = AsyncMock()
         openai = AsyncMock()
+        gemini = AsyncMock()
         with (
             patch.object(ai_chat_provider, "_groq_api_key", return_value=""),
             patch.object(ai_chat_provider, "_xai_api_key", return_value=""),
@@ -80,6 +80,7 @@ class AlexaChatProviderRoutingTests(unittest.IsolatedAsyncioTestCase):
             patch.object(ai_chat_provider, "_groq_chat", groq),
             patch.object(ai_chat_provider, "_xai_chat", grok),
             patch.object(ai_chat_provider, "_openai_chat", openai),
+            patch.object(ai_chat_provider, "_gemini_chat", gemini),
         ):
             result = await ai_chat_provider.ai_chat_completion([{"role": "user", "content": "Hi"}])
         self.assertEqual(result, "")
