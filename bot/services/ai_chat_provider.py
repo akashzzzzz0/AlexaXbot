@@ -258,7 +258,9 @@ def _safe_provider_error(name: str, exc: Exception) -> str:
     """Keep HTTP diagnostics useful without logging credentials or request URLs."""
     response = getattr(exc, "response", None)
     status = getattr(response, "status_code", None)
-    detail = str(exc).splitlines()[0][:220]
+    # asyncio.TimeoutError often has an empty string; keep logging safe.
+    detail_lines = str(exc).splitlines()
+    detail = (detail_lines[0] if detail_lines else type(exc).__name__)[:220]
     detail = re.sub(r"(?i)(api[_-]?key|authorization|bearer)" + chr(92) + "s*[:=]" + chr(92) + "s*[^ ,;]+", "[REDACTED]", detail)
     detail = re.sub(r"AIza[0-9A-Za-z_-]{20,}", "[REDACTED]", detail)
     detail = re.sub(r"(?i)https?://\S+", "[URL]", detail)
