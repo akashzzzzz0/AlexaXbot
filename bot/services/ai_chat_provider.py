@@ -268,14 +268,15 @@ def _safe_provider_error(name: str, exc: Exception) -> str:
 
 
 async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False):
-    """Try Gemini, Grok, then OpenAI; continue after errors or empty replies."""
+    """Try Grok first, then OpenAI, with a short total deadline for chat replies."""
+    # Gemini is intentionally excluded from Alexa's conversational route.
+    # Keep Grok as primary and OpenAI as the only fallback provider.
     providers = [
-        ("gemini", _gemini_chat, bool(_gemini_api_key()), 6.0),
-        ("grok", _xai_chat, bool(_xai_api_key()), 6.0),
-        ("openai", _openai_chat, bool(_openai_api_key()), 6.0),
+        ("grok", _xai_chat, bool(_xai_api_key()), 4.0),
+        ("openai", _openai_chat, bool(_openai_api_key()), 4.0),
     ]
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + 20.0
+    deadline = loop.time() + 8.0
     for name, provider, configured, timeout_seconds in providers:
         if not configured:
             print("Alexa chat provider skipped:", name + ":missing_runtime_configuration")
