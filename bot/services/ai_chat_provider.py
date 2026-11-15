@@ -270,18 +270,19 @@ def _safe_provider_error(name: str, exc: Exception) -> str:
 
 
 async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False):
-    """Try Groq first, then Grok and OpenAI as fallbacks.
+    """Try Groq first, then Grok, with Gemini as the final chat fallback.
 
-    Gemini and Ollama remain intentionally excluded from Alexa's conversational
-    route; their other existing features are unaffected.
+    OpenAI is intentionally excluded from Alexa's conversational route.
+    Gemini remains available here as a final fallback; other existing
+    Gemini-powered features are unaffected.
     """
     providers = [
         ("groq", _groq_chat, bool(_groq_api_key()), 8.0),
         ("grok", _xai_chat, bool(_xai_api_key()), 6.0),
-        ("openai", _openai_chat, bool(_openai_api_key()), 8.0),
+        ("gemini", _gemini_chat, bool(_gemini_api_key()), 8.0),
     ]
     loop = asyncio.get_running_loop()
-    # Keep the complete Groq -> Grok -> OpenAI chain bounded for fast replies.
+    # Bound the complete Groq -> Grok -> Gemini chain for responsive replies.
     deadline = loop.time() + 22.0
     for name, provider, configured, timeout_seconds in providers:
         if not configured:
@@ -306,5 +307,5 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
             raise RuntimeError(name + "_empty_response")
         except Exception as exc:
             print("Alexa chat provider failed:", _safe_provider_error(name, exc))
-    print("Alexa chat providers exhausted: no usable reply from Groq, Grok, or OpenAI")
+    print("Alexa chat providers exhausted: no usable reply from Groq, Grok, or Gemini")
     return ""
