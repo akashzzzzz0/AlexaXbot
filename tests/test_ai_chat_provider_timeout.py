@@ -10,6 +10,7 @@ class AlexaChatProviderTimeoutTests(unittest.IsolatedAsyncioTestCase):
         grok = AsyncMock(side_effect=asyncio.TimeoutError())
         openai = AsyncMock(return_value="OpenAI reply")
         with (
+            patch.object(ai_chat_provider, "_groq_api_key", return_value=""),
             patch.object(ai_chat_provider, "_xai_api_key", return_value="grok-key"),
             patch.object(ai_chat_provider, "_openai_api_key", return_value="openai-key"),
             patch.object(ai_chat_provider, "_xai_chat", grok),
