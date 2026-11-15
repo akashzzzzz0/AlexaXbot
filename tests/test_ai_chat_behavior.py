@@ -11,6 +11,7 @@ from bot.handlers import ai_chat
 def _group_message(text: str, chat_id: int = -100123):
     return SimpleNamespace(
         text=text,
+        message_id=(abs(hash((chat_id, text))) % 2000000000) + 1,
         from_user=SimpleNamespace(id=12345, is_bot=False),
         chat=SimpleNamespace(id=chat_id, type=ChatType.SUPERGROUP),
         reply_to_message=None,
