@@ -94,6 +94,36 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
                     ai_chat.is_alexa_trigger(_group_message(text, chat_id=-100800-index))
                 ))
 
+    def test_good_morning_gets_a_natural_reply_and_repeats_are_contextual(self):
+        first = ai_chat._short_social_reply("Good morning", [])
+        self.assertIn(first, (
+            "Good morning! Kese ho? ☀️",
+            "Morning! Neend poori hui? 😄",
+            "Good morning! Aaj kya haal hai? 🌼",
+        ))
+        repeated = ai_chat._short_social_reply(
+            "Good morning",
+            [("user", "Good morning"), ("model", "Good morning! Kese ho?")],
+        )
+        self.assertIn(repeated, (
+            "Arrey, dobara good morning? 😂 Kya baat hai?",
+            "Haan haan, good morning phir se! 😄",
+            "Itni baar good morning? Aaj mood achha lag raha hai 😂",
+        ))
+
+    def test_short_followups_use_the_previous_turn(self):
+        self.assertEqual(
+            ai_chat._short_social_reply(
+                "Kya samjhi",
+                [("user", "Good morning"), ("model", "Good morning! Kese ho?")],
+            ),
+            "Yehi ke tum mujhe good morning keh rahe ho 😂",
+        )
+        self.assertIn(
+            ai_chat._short_social_reply("Abe", []),
+            ("Abe kya? Bolo, sun rahi hoon. 😂", "Haan ji, kya hua? 😄"),
+        )
+
     def test_short_social_reply_handler_returns_only_short_varied_lines(self):
         examples = {
             "oy": ("Oyyyy 😂", "Kyaaa? 😂", "Haan bolo?"),
