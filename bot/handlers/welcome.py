@@ -205,9 +205,13 @@ async def _channelguard_warn_and_mute(bot, db_session: AsyncSession, group_id: i
 def _channelguard_notice(user_id: int, display_name: str, state: str, count: int):
     user_link = mention_user(user_id, display_name or f"User {user_id}")
     if state == "warned":
+        warning_emoji = '<tg-emoji emoji-id="6267144651153609853">⚠️</tg-emoji>'
         return (
-            f"⚠️ Warning {user_link}, please remove the link from your bio or connected channel. "
-            f"Warning: {min(count, 3)}/3",
+            f"{warning_emoji} <b>Warning Issued</b> {warning_emoji}\n"
+            f"User: {user_link}\n"
+            "Reason: Link found in profile bio\n"
+            f"Warning: {min(count, 3)}/3\n"
+            "Please remove any links from your bio to avoid further restrictions.",
             None,
         )
     if state == "muted":
@@ -448,7 +452,7 @@ async def on_new_member(event: ChatMemberUpdated, db_session: AsyncSession, **kw
                 evidence, profile_available = await _channelguard_profile_links(event.bot, user.id)
                 if evidence:
                     state, count = await _channelguard_warn_and_mute(
-                        event.bot, db_session, chat.id, user, user.full_name or user.first_name or "User"
+                        event.bot, db_session, chat.id, user, (f"@{user.username}" if user.username else (user.full_name or user.first_name or "User"))
                     )
                     notice, keyboard_builder = _channelguard_notice(
                         user.id, user.full_name or user.first_name or "User", state, count
