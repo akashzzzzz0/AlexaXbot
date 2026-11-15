@@ -47,15 +47,20 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
                 ))
 
     def test_non_greeting_group_chat_does_not_trigger_unsolicited_reply(self):
-        for text in ("kya haal hai?", "aaj group mein kya scene hai", "nice"):
+        for index, text in enumerate(("kya haal hai?", "aaj group mein kya scene hai", "nice")):
             with self.subTest(text=text):
-                self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(_group_message(text))))
+                # Fresh groups isolate the normal-message cadence from burst detection.
+                self.assertFalse(asyncio.run(
+                    ai_chat.is_alexa_trigger(_group_message(text, chat_id=-100900-index))
+                ))
 
     def test_group_smart_reply_cooldowns_prevent_spam(self):
         message = _group_message("hello")
         self.assertTrue(asyncio.run(ai_chat.is_alexa_trigger(message)))
-        # A second non-greeting smart reply in the same group is held by cooldown.
-        self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(_group_message("kya scene hai?"))))
+        # A different sender is subject to the group cooldown, not same-sender burst bypass.
+        second = _group_message("kya scene hai?")
+        second.from_user = SimpleNamespace(id=67890, is_bot=False)
+        self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(second)))
 
     def test_smart_reply_ignores_active_member_to_member_conversation(self):
         chat_id = -100555
