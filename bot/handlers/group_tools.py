@@ -347,26 +347,34 @@ async def _send_admin_report(message: Message, reason: str):
         # A direct @admin request reports the requester's own message and still alerts every admin.
         reported_content = message.text or message.caption or reason or "[Message]"
         report_reason = "Direct @admin request"
+    # Notify the replied-to member (when present) and every group admin in
+    # one combined mention list, rather than sending repeated five-admin alerts.
+    notify_mentions = []
+    seen_ids = set()
+    if replied and replied.from_user:
+        replied_user = replied.from_user
+        replied_name = replied_user.full_name or replied_user.first_name or str(replied_user.id)
+        notify_mentions.append(f'<a href="tg://user?id={replied_user.id}">{escape(replied_name)}</a>')
+        seen_ids.add(replied_user.id)
+    for item in admins:
+        user = item.user
+        if user.is_bot or user.id in seen_ids:
+            continue
+        label = user.full_name or user.first_name or str(user.id)
+        notify_mentions.append(f'<a href="tg://user?id={user.id}">{escape(label)}</a>')
+        seen_ids.add(user.id)
+
     report_text = (
         "🚩 <b>Member Report</b>\n"
         + f'Reported: <a href="tg://user?id={target.id}">{escape(target.full_name or target.first_name or str(target.id))}</a> (<code>{target.id}</code>)\n'
         + f'Reported by: <a href="tg://user?id={reporter.id}">{escape(reporter.full_name or reporter.first_name or str(reporter.id))}</a> (<code>{reporter.id}</code>)\n'
-        + "Message: " + escape(reported_content[:1500]) + "\n"
-        + "Reason: " + escape(report_reason)
+        + "Message: " + escape(reported_content[:1000]) + "\n"
+        + "Reason: " + escape(report_reason[:500]) + "\n\n"
+        + "📣 <b>Admin attention required</b>\n"
+        + "A new report needs review.\n"
+        + "Notify: " + " ".join(notify_mentions)
     )
-    await message.reply(report_text, parse_mode="HTML")
-
-    # Telegram's notification limit can leave later mentions silent when too many
-    # admins are tagged in one message. Send dedicated alerts with at most five
-    # admin mentions per message so every batch gets its own notification event.
-    for start in range(0, len(mentions), 5):
-        admin_batch = mentions[start:start + 5]
-        alert_text = (
-            "📣 <b>Admin attention required</b>\n"
-            "A new report was posted above. Please review it.\n"
-            + "Group admins: " + " ".join(admin_batch)
-        )
-        await message.answer(alert_text, parse_mode="HTML", disable_web_page_preview=True)
+    await message.reply(report_text[:4000], parse_mode="HTML", disable_web_page_preview=True)
 
 
 @router.message(Command("report"))
