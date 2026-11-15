@@ -260,14 +260,6 @@ async def on_startup(bot) -> None:
 
     logger.info('Bot startup complete', db_ready=db_ok)
 
-    try:
-        from bot.services.daily_group_promotion import start_daily_promotion_scheduler
-        if db_ok:
-            start_daily_promotion_scheduler(bot)
-            logger.info('Alexa daily group promotion scheduler started (10:00 and 19:00 Asia/Karachi)')
-    except Exception as exc:
-        logger.warning('Alexa daily group promotion scheduler could not start', error=str(exc))
-
     # Notify the configured owner privately whenever ALEXA starts successfully.
     owner_id = settings.effective_owner_id
     if owner_id:
@@ -287,11 +279,6 @@ async def on_startup(bot) -> None:
 
 async def on_shutdown(bot, runner) -> None:
     logger.info('Bot shutting down')
-    try:
-        from bot.services.daily_group_promotion import stop_daily_promotion_scheduler
-        await stop_daily_promotion_scheduler()
-    except Exception:
-        pass
     try:
         from bot.database.connection import close_db
         await close_db()
