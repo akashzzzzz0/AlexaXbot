@@ -363,9 +363,32 @@ _GREETING_RE = re.compile(
 _ALEXA_PREFIX_RE = re.compile(r"^\s*alexa\b[\s,!:.-]*(.*)$", re.IGNORECASE)
 
 
-def _short_social_reply(text: str) -> str | None:
-    """Return a varied, concise acknowledgement for common social openers."""
+def _short_social_reply(text: str, history=None) -> str | None:
+    """Reply quickly to greetings and short follow-ups using recent context."""
     value = re.sub(r"[.!?,\s]+$", "", (text or "").casefold().strip())
+    recent = list(history or [])
+    previous_user = next(
+        (str(item[1]).casefold().strip() for item in reversed(recent) if item[0] == "user"),
+        "",
+    )
+    previous_alexa = next(
+        (str(item[1]).casefold().strip() for item in reversed(recent) if item[0] == "model"),
+        "",
+    )
+    if value in {"good morning", "gm", "morning"} and previous_user in {"good morning", "gm", "morning"}:
+        return random.choice(("Arrey, dobara good morning? 😂 Kya baat hai?", "Haan haan, good morning phir se! 😄", "Itni baar good morning? Aaj mood achha lag raha hai 😂"))
+    if value == "good afternoon" and previous_user == value:
+        return random.choice(("Good afternoon phir se! 😄", "Haan ji, afternoon bhi yaad hai 😂"))
+    if value == "good evening" and previous_user == value:
+        return random.choice(("Evening dobara? 😄", "Haan ji, good evening!"))
+    if value in {"kya samjhi", "kya samjha", "what did you understand"}:
+        if previous_user in {"good morning", "gm", "morning"}:
+            return "Yehi ke tum mujhe good morning keh rahe ho 😂"
+        if previous_alexa:
+            return "Tumhari pichhli baat samjhi thi—kis hisse ki baat kar rahe ho? 😄"
+        return "Abhi toh bas tumhari baat sun rahi hoon 😄"
+    if value in {"abe", "abey", "oye abe"}:
+        return random.choice(("Abe kya? Bolo, sun rahi hoon. 😂", "Haan ji, kya hua? 😄"))
     replies = {
         "oy": ("Oyyyy 😂", "Kyaaa? 😂", "Haan bolo?"),
         "oye": ("Haan bolo?", "Oyeee 😂", "Ji, sun rahi hoon."),
@@ -374,6 +397,13 @@ def _short_social_reply(text: str) -> str | None:
         "helo": ("Oye hellooo 💗", "Hiii!", "Haan ji, bolo?"),
         "hey": ("Heyyy!", "Haan bolo?", "Oyyyy 😄"),
         "alexa": ("Haan bolo?", "Ji, sun rahi hoon.", "Kya hua?"),
+        "good morning": ("Good morning! Kese ho? ☀️", "Morning! Neend poori hui? 😄", "Good morning! Aaj kya haal hai? 🌼"),
+        "gm": ("Good morning! Kese ho? ☀️", "Morning! Kya haal hai? 😄"),
+        "morning": ("Good morning! Kese ho? ☀️", "Morning! Kya haal hai? 🌼"),
+        "good afternoon": ("Good afternoon! Sab theek? ☀️", "Afternoon! Kaisa ja raha hai din? 😄"),
+        "good evening": ("Good evening! Kesa guzra din? 🌆", "Evening! Sab khairiyat? 😄"),
+        "good night": ("Good night! Achhi neend lena 🌙", "Chalo, good night! Kal baat karte hain 🌙"),
+        "gn": ("Good night! Achhi neend lena 🌙", "Chalo, good night! 🌙"),
     }
     choices = replies.get(value)
     return random.choice(choices) if choices else None
@@ -588,6 +618,8 @@ async def _ask_ai(
         "Sound like a naturally expressive, friendly chat persona—not like a scripted assistant. Keep a consistent feminine voice and refer to yourself as Alexa. Never claim to be a real human or invent a human identity. "
         "Match the user's language, slang, energy, and message length. Understand and reply naturally in English, Hindi, Urdu, Roman Urdu, Roman Hindi, Bangla/Bengali (including Romanized Bangla and Bengali script), and mixed-language messages. Prefer the language and script the sender used; do not force Hindi when the sender is speaking Bangla, Urdu, or English. Avoid formal textbook wording. "
         "Use the supplied conversation history, remember details already shared, and answer the newest message directly. "
+        "Never use a generic acknowledgement like Achha samajh gayi when the user greeted you, asked a follow-up, or expects a specific response. "
+        "Resolve short follow-ups from the immediately preceding turns and answer that point directly. "
         "For casual chat, greetings, jokes, and teasing, usually reply in 3–15 words; answer real questions clearly and expand only when useful. "
         "Vary openings and phrasing; do not repeatedly ask 'aur batao?', echo the user, or use canned lines. Respond to the actual context, remember the conversational thread, and ask a follow-up only when it genuinely fits. Do not add emojis yourself; Alexa appends one mood-matched emoji from its configured pack. "
         "Be gently cheeky when appropriate, never cruel, pushy, or artificially romantic. "
@@ -750,7 +782,8 @@ def _local_chat_fallback(user_text: str, history=None) -> str:
         for phrase in ("phir kya hua", "aage batao", "bolo na", "kya hua")
     ):
         return "Achha, samajh gayi. Tumhari marzi—topic badal sakte hain."
-    return "Achha, samajh gayi."
+    # If no safe contextual response is available, silence is better than filler.
+    return ""
 
 async def _process_alexa_ai_chat(message: Message) -> None:
     text = (message.text or "").strip()
@@ -826,7 +859,7 @@ async def _process_alexa_ai_chat(message: Message) -> None:
             # A casual nickname/tease is banter, not a factual identity question.
             answer = random.choice(("Bot bol ke chidhana band karo, Alexa naam hai mera 😂", "Oho, phir se bot? Koi naya naam nahi mila? 😏", "Alexa hoon, itni formal introduction kyun? 😂"))
         else:
-            short_reply = _short_social_reply(original_text or text)
+            short_reply = _short_social_reply(original_text or text, history)
             if short_reply is not None:
                 answer = short_reply
             else:
@@ -843,14 +876,13 @@ async def _process_alexa_ai_chat(message: Message) -> None:
         logger.exception("Unexpected Alexa AI chat failure for chat_id=%s", message.chat.id)
         return
 
-    # If all four remote providers fail, keep casual conversation going locally.
-    # This is a short conversational fallback, not a fabricated factual answer.
+    # Never replace failed AI output with canned filler.
     if not answer:
-        answer = _local_chat_fallback(original_text or text, history)
         logger.warning(
-            "Alexa used local chat fallback after all remote providers failed",
+            "Alexa AI providers returned no usable reply; staying silent",
             extra={"chat_id": message.chat.id, "user_id": message.from_user.id},
         )
+        return
     if answer.strip().casefold() == "__ignore__":
         return
     # Never send a fallback/fictional AI response when Ollama is unavailable.
@@ -907,7 +939,6 @@ async def _process_alexa_ai_chat(message: Message) -> None:
                 str(typing_exc).replace("\\n", " ")[:240],
             )
         # Keep the final typing action visible briefly before sending the reply.
-        await asyncio.sleep(1.5)
         await message.reply(f"{html.escape(answer)}{mood_suffix}", parse_mode="HTML")
     except Exception as exc:
         # Telegram reply failures should not interrupt bot polling, but must be visible in host logs.

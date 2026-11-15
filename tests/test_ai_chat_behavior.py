@@ -11,6 +11,7 @@ from bot.handlers import ai_chat
 def _group_message(text: str, chat_id: int = -100123):
     return SimpleNamespace(
         text=text,
+        message_id=(abs(hash((chat_id, text))) % 2000000000) + 1,
         from_user=SimpleNamespace(id=12345, is_bot=False),
         chat=SimpleNamespace(id=chat_id, type=ChatType.SUPERGROUP),
         reply_to_message=None,
@@ -24,6 +25,12 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
         ai_chat._bot_username = ""
         ai_chat._smart_reply_last_check.clear()
         ai_chat._smart_reply_user_last_check.clear()
+        ai_chat._smart_reply_message_count.clear()
+        ai_chat._smart_reply_user_recent_messages.clear()
+        ai_chat._smart_reply_spam_last_message.clear()
+        ai_chat._smart_reply_spam_burst.clear()
+        ai_chat._last_alexa_reply_at.clear()
+        ai_chat._active_conversations.clear()
         ai_chat._group_recent_activity.clear()
 
     def test_untagged_group_messages_from_any_member_trigger_chat(self):
@@ -40,15 +47,20 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
                 ))
 
     def test_non_greeting_group_chat_does_not_trigger_unsolicited_reply(self):
-        for text in ("kya haal hai?", "aaj group mein kya scene hai", "nice"):
+        for index, text in enumerate(("kya haal hai?", "aaj group mein kya scene hai", "nice")):
             with self.subTest(text=text):
-                self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(_group_message(text))))
+                # Fresh groups isolate the normal-message cadence from burst detection.
+                self.assertFalse(asyncio.run(
+                    ai_chat.is_alexa_trigger(_group_message(text, chat_id=-100900-index))
+                ))
 
     def test_group_smart_reply_cooldowns_prevent_spam(self):
         message = _group_message("hello")
         self.assertTrue(asyncio.run(ai_chat.is_alexa_trigger(message)))
-        # A second non-greeting smart reply in the same group is held by cooldown.
-        self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(_group_message("kya scene hai?"))))
+        # A different sender is subject to the group cooldown, not same-sender burst bypass.
+        second = _group_message("kya scene hai?")
+        second.from_user = SimpleNamespace(id=67890, is_bot=False)
+        self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(second)))
 
     def test_smart_reply_ignores_active_member_to_member_conversation(self):
         chat_id = -100555
@@ -93,6 +105,36 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
                 self.assertTrue(asyncio.run(
                     ai_chat.is_alexa_trigger(_group_message(text, chat_id=-100800-index))
                 ))
+
+    def test_good_morning_gets_a_natural_reply_and_repeats_are_contextual(self):
+        first = ai_chat._short_social_reply("Good morning", [])
+        self.assertIn(first, (
+            "Good morning! Kese ho? ☀️",
+            "Morning! Neend poori hui? 😄",
+            "Good morning! Aaj kya haal hai? 🌼",
+        ))
+        repeated = ai_chat._short_social_reply(
+            "Good morning",
+            [("user", "Good morning"), ("model", "Good morning! Kese ho?")],
+        )
+        self.assertIn(repeated, (
+            "Arrey, dobara good morning? 😂 Kya baat hai?",
+            "Haan haan, good morning phir se! 😄",
+            "Itni baar good morning? Aaj mood achha lag raha hai 😂",
+        ))
+
+    def test_short_followups_use_the_previous_turn(self):
+        self.assertEqual(
+            ai_chat._short_social_reply(
+                "Kya samjhi",
+                [("user", "Good morning"), ("model", "Good morning! Kese ho?")],
+            ),
+            "Yehi ke tum mujhe good morning keh rahe ho 😂",
+        )
+        self.assertIn(
+            ai_chat._short_social_reply("Abe", []),
+            ("Abe kya? Bolo, sun rahi hoon. 😂", "Haan ji, kya hua? 😄"),
+        )
 
     def test_short_social_reply_handler_returns_only_short_varied_lines(self):
         examples = {
