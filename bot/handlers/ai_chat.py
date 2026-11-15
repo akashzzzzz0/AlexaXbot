@@ -859,7 +859,9 @@ async def _process_alexa_ai_chat(message: Message) -> None:
             # A casual nickname/tease is banter, not a factual identity question.
             answer = random.choice(("Bot bol ke chidhana band karo, Alexa naam hai mera 😂", "Oho, phir se bot? Koi naya naam nahi mila? 😏", "Alexa hoon, itni formal introduction kyun? 😂"))
         else:
-            short_reply = _short_social_reply(original_text or text, history)
+            # Unaddressed group greetings must use a real AI provider.
+            # This prevents local canned replies while every AI provider is down.
+            short_reply = None if smart_mode else _short_social_reply(original_text or text, history)
             if short_reply is not None:
                 answer = short_reply
             else:
@@ -911,12 +913,8 @@ async def _process_alexa_ai_chat(message: Message) -> None:
     if answer.strip().casefold() == "__ignore__":
         return
     # Never send a fallback/fictional AI response when Ollama is unavailable.
-    if smart_mode and (not answer or answer.strip().casefold() == "__ignore__"):
-        answer = _smart_group_reply_fallback(original_text or text)
-        logger.warning(
-            "Alexa smart group reply used deterministic fallback",
-            extra={"chat_id": message.chat.id, "user_id": message.from_user.id},
-        )
+    # Smart group replies stay silent unless a real provider returned an answer.
+    # Do not replace provider outages with canned greeting/help text.
     if not answer:
         logger.warning(
             "Alexa AI returned no usable reply",
