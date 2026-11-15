@@ -5,7 +5,7 @@ from bot.handlers.ai_chat import _local_chat_fallback
 
 class AlexaLocalChatFallbackTests(unittest.TestCase):
     def test_unknown_message_does_not_get_generic_filler(self):
-        self.assertEqual(_local_chat_fallback("Abe kya?", []), "Iska jawab abhi clear nahi hai; galat baat nahi bataungi.")
+        self.assertEqual(_local_chat_fallback("Abe kya?", []), "")
         self.assertEqual(_local_chat_fallback("bas aise hi", []), "")
 
     def test_respects_kuch_nahi_without_asking_again(self):
