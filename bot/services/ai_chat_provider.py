@@ -2,10 +2,19 @@
 import asyncio
 import os
 import re
+import time
 
 import httpx
 
 from bot.config import get_gemini_api_key, settings
+from bot.services.ollama_ai import get_ollama_api_key, ollama_chat
+
+
+# Avoid hammering providers during quota/network outages. Each provider is
+# retried automatically after its short cooldown; no persistent state is used.
+_provider_retry_after: dict[str, float] = {}
+_PROVIDER_429_COOLDOWN = 120.0
+_PROVIDER_ERROR_COOLDOWN = 30.0
 
 
 
@@ -270,27 +279,32 @@ def _safe_provider_error(name: str, exc: Exception) -> str:
 
 
 async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False):
-    """Try Groq first, then Grok, with Gemini as the final chat fallback.
+    """Try configured chat providers in order with bounded timeouts and cooldowns.
 
-    OpenAI is intentionally excluded from Alexa's conversational route.
-    Gemini remains available here as a final fallback; other existing
-    Gemini-powered features are unaffected.
+    OpenAI remains intentionally excluded from Alexa's conversational route.
     """
     providers = [
-        ("groq", _groq_chat, bool(_groq_api_key()), 8.0),
-        ("grok", _xai_chat, bool(_xai_api_key()), 6.0),
-        ("gemini", _gemini_chat, bool(_gemini_api_key()), 8.0),
+        ("groq", _groq_chat, bool(_groq_api_key()), 6.0),
+        ("grok", _xai_chat, bool(_xai_api_key()), 5.0),
+        ("gemini", _gemini_chat, bool(_gemini_api_key()), 6.0),
+        ("ollama", ollama_chat, bool(get_ollama_api_key()), 8.0),
     ]
     loop = asyncio.get_running_loop()
-    # Bound the complete Groq -> Grok -> Gemini chain for responsive replies.
-    deadline = loop.time() + 22.0
+    deadline = loop.time() + 25.0
+    now = time.monotonic()
+    attempted = False
     for name, provider, configured, timeout_seconds in providers:
         if not configured:
             print("Alexa chat provider skipped:", name + ":missing_runtime_configuration")
             continue
+        retry_at = _provider_retry_after.get(name, 0.0)
+        if now < retry_at:
+            print("Alexa chat provider skipped:", name + ":temporary_cooldown")
+            continue
         remaining = deadline - loop.time()
         if remaining <= 0:
             break
+        attempted = True
         try:
             answer = await asyncio.wait_for(
                 provider(
@@ -303,9 +317,16 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
                 timeout=min(timeout_seconds, remaining),
             )
             if isinstance(answer, str) and answer.strip():
+                _provider_retry_after.pop(name, None)
                 return answer.strip()
             raise RuntimeError(name + "_empty_response")
         except Exception as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            cooldown = _PROVIDER_429_COOLDOWN if status == 429 else _PROVIDER_ERROR_COOLDOWN
+            _provider_retry_after[name] = time.monotonic() + cooldown
             print("Alexa chat provider failed:", _safe_provider_error(name, exc))
-    print("Alexa chat providers exhausted: no usable reply from Groq, Grok, or Gemini")
+    if attempted:
+        print("Alexa chat providers exhausted: no usable reply from Groq, Grok, Gemini, or Ollama")
+    else:
+        print("Alexa chat providers unavailable: all configured providers are in cooldown or missing")
     return ""
