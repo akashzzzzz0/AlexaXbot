@@ -12,6 +12,14 @@ from bot.config import get_gemini_api_key, settings
 # Avoid hammering providers during quota/network outages. Each provider is
 # retried automatically after its short cooldown; no persistent state is used.
 _provider_retry_after: dict[str, float] = {}
+_provider_events: list[str] = []
+
+
+def drain_provider_events() -> list[str]:
+    events = list(_provider_events)
+    _provider_events.clear()
+    return events
+
 _PROVIDER_429_COOLDOWN = 300.0
 # HTTP 402 is a billing/credit condition, not a transient network error.
 # Recheck periodically without repeatedly hitting an unpaid provider.
@@ -326,6 +334,7 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
             status = getattr(getattr(exc, "response", None), "status_code", None)
             if status == 429:
                 cooldown = _PROVIDER_429_COOLDOWN
+                _provider_events.append(name)
             elif status == 402:
                 cooldown = _PROVIDER_402_COOLDOWN
             else:
