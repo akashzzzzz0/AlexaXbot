@@ -53,7 +53,7 @@ def _detect_user_gender_style(history, current_text: str) -> str:
 
 def _reaction_for_text(text: str) -> str | None:
     """Understand meaningful words and emojis before choosing a selective reaction."""
-    value = re.sub(r"\s+", " ", text.casefold()).strip()
+    value = re.sub(r"\s+", " ", (text or "").casefold()).strip()
     if not value:
         return None
 
@@ -365,7 +365,7 @@ _ALEXA_PREFIX_RE = re.compile(r"^\s*alexa\b[\s,!:.-]*(.*)$", re.IGNORECASE)
 
 def _short_social_reply(text: str, history=None) -> str | None:
     """Reply quickly to greetings and short follow-ups using recent context."""
-    value = re.sub(r"[.!?,\s]+$", "", (text or "").casefold().strip())
+    value = re.sub(r"\s+", " ", (text or "").casefold()).strip()
     recent = list(history or [])
     previous_user = next(
         (str(item[1]).casefold().strip() for item in reversed(recent) if item[0] == "user"),
@@ -477,8 +477,8 @@ def _should_smart_reply(message: Message, text: str) -> bool:
     chat_id = message.chat.id
     user_key = (chat_id, message.from_user.id)
     is_greeting = _looks_like_smart_reply_candidate(text)
-    value = re.sub(r"\\s+", " ", (text or "").casefold()).strip()
-    words = re.findall(r"[\\w']+", value)
+    value = re.sub(r"\s+", " ", (text or "").casefold()).strip()
+    words = re.findall(r"[\w']+", value)
 
     # If multiple people are actively talking, Alexa waits for a direct call.
     if _group_conversation_is_active(chat_id):
@@ -491,10 +491,10 @@ def _should_smart_reply(message: Message, text: str) -> bool:
         meaningful_signal = bool(
             "?" in value
             or re.search(
-                r"\\b(kya|kaise|kaisa|kyun|kab|kahan|kon|kaun|what|why|when|where|who|how|"
+                r"\b(kya|kaise|kaisa|kyun|kab|kahan|kon|kaun|what|why|when|where|who|how|"
                 r"help|madad|suggest|opinion|congrats|mubarak|shabash|well done|"
                 r"funny|mazaak|mazak|haha|lol|sad|dukhi|pareshan|mood off|"
-                r"amazing|zabardast|kamal|wow|seriously|really)\\b",
+                r"amazing|zabardast|kamal|wow|seriously|really)\b",
                 value,
             )
         )
@@ -776,7 +776,7 @@ def _is_identity_question(text: str) -> bool:
 
 def _local_chat_fallback(user_text: str, history=None) -> str:
     """Use recent turns to avoid repetitive or pushy replies when providers are down."""
-    value = re.sub(r"[.!?,\s]+", " ", (user_text or "").casefold()).strip()
+    value = re.sub(r"\s+", " ", (text or "").casefold()).strip()
     recent = list(history or [])
     previous_user = next(
         (str(item[1]).casefold().strip() for item in reversed(recent) if item[0] == "user"),
