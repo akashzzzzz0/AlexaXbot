@@ -365,7 +365,7 @@ _ALEXA_PREFIX_RE = re.compile(r"^\s*alexa\b[\s,!:.-]*(.*)$", re.IGNORECASE)
 
 def _short_social_reply(text: str, history=None) -> str | None:
     """Reply quickly to greetings and short follow-ups using recent context."""
-    value = re.sub(r"\s+", " ", (text or "").casefold()).strip()
+    value = re.sub(r"[.!?,\s]+$", "", (text or "").casefold().strip())
     recent = list(history or [])
     previous_user = next(
         (str(item[1]).casefold().strip() for item in reversed(recent) if item[0] == "user"),
@@ -776,7 +776,7 @@ def _is_identity_question(text: str) -> bool:
 
 def _local_chat_fallback(user_text: str, history=None) -> str:
     """Use recent turns to avoid repetitive or pushy replies when providers are down."""
-    value = re.sub(r"\s+", " ", (text or "").casefold()).strip()
+    value = re.sub(r"[.!?,\s]+", " ", (user_text or "").casefold()).strip()
     recent = list(history or [])
     previous_user = next(
         (str(item[1]).casefold().strip() for item in reversed(recent) if item[0] == "user"),
