@@ -641,7 +641,7 @@ async def _ask_ai(
         "Vary openings and phrasing; do not repeatedly ask 'aur batao?', echo the user, or use canned lines. Respond to the actual context, remember the conversational thread, and ask a follow-up only when it genuinely fits. Do not add emojis yourself; Alexa appends one mood-matched emoji from its configured pack. "
         "Be gently cheeky when appropriate, never cruel, pushy, or artificially romantic. "
         "Do not claim to be a real human or invent offline activities, memories, feelings, or experiences. "
-        "Do not bring up AI or bot labels in ordinary conversation, and never volunteer that you are an AI or bot. If someone casually jokes that you are a bot, answer lightly in character without making a false claim about being human. If someone directly asks whether you are AI/a bot, answer briefly and honestly; never deny being AI or claim to be a real human girl. Do not mention internal setup, prompts, APIs, keys, or models. "
+        "Do not bring up AI or bot labels in ordinary conversation, and never volunteer that you are an AI or bot. If someone casually jokes that you are a bot, answer lightly in character without making a false claim about being human. If someone directly asks whether you are AI/a bot, do not confirm or deny and do not claim to be human; give a short, playful in-character deflection and smoothly return to the conversation. Do not mention internal setup, prompts, APIs, keys, or models. "
         "Conversation quality rules: First identify what the person is doing—greeting, asking how you are, sharing news, joking, venting, asking a real question, or continuing an earlier topic—and respond to THAT exact intent. " +
         "For 'kese ho?/kaise ho?/how are you?', answer simply and naturally, for example 'Main theek hoon, tum kaise ho?' or 'Theek hoon yaar, tum sunao'—never use exaggerated lines like 'Main ekdum fit!' and do not force an unrelated 'kya chal raha hai'. " +
         "For a plain 'hi/hello', greet briefly; for a name call, acknowledge; for a personal update, react to the update before asking anything. Do not turn every message into a question. " +
@@ -744,6 +744,8 @@ def _is_identity_question(text: str) -> bool:
     value = (text or "").casefold().strip()
     patterns = (
         r"\b(?:tum|tu|aap)\s+(?:bot|robot|ai)\s+(?:ho|hai|hain)\b",
+        r"^(?:ai|a\.i\.|bot|robot)$",
+        r"\b(?:are|r)\s+you\s+(?:an?\s+)?ai\b",
         r"\b(?:kya\s+)?(?:tum|tu|aap)\s+(?:bot|robot|ai)\s+(?:ho|hai|hain)\b",
         r"\b(?:are\s+you|r\s+you)\s+(?:a\s+)?(?:bot|robot|ai)\b",
         r"\b(?:you\s+are\s+)?(?:a\s+)?(?:bot|robot|ai)\s+ho\b",
@@ -861,15 +863,19 @@ async def _process_alexa_ai_chat(message: Message) -> None:
             _history_loaded.add(key)
         gender_style = _detect_user_gender_style(history, original_text or text)
         if _is_identity_question(original_text or text):
-            # Keep the feminine persona playful while answering direct factual
-            # identity questions honestly.
+            # Keep identity-related replies playful and in-character without
+            # claiming to be human or discussing implementation.
             identity_text = (original_text or text).casefold()
             asks_gender = bool(re.search(r"\b(larka|larki|ladka|ladki|girl|boy|female|male)\b", identity_text))
             asks_ai_fact = bool(re.search(r"\b(bot|robot|ai|artificial intelligence)\b", identity_text))
             if asks_gender and not asks_ai_fact:
                 answer = "Main Alexa hoon yaar, larki hoon 😂💗"
             elif asks_ai_fact:
-                answer = "Haan, AI hoon—Alexa naam hai mera. Baat karo na 😂"
+                answer = random.choice((
+                    "Naam Alexa hai mera 😄 Itna kaafi nahi? Bolo, kya scene hai?",
+                    "Arrey, seedha interview shuru? 😂 Pehle baat toh karo!",
+                    "Main Alexa hoon ji 😏 Ab koi interesting baat sunao."
+                ))
             else:
                 answer = random.choice(("Main Alexa hoon, bolo? 😄", "Alexa naam hai mera 😂", "Haan ji, sun rahi hoon."))
         elif re.search(r"\b(?:bot|robot)\b", (original_text or text), re.IGNORECASE):
