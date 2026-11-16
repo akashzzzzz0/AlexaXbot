@@ -62,6 +62,36 @@ def _parse_retry_delay(value) -> float | None:
     return days * 86400 + hours * 3600 + minutes * 60 + seconds
 
 
+def _is_groq_daily_token_quota_error(exc: Exception) -> bool:
+    """Detect organization/model daily token quota errors (shared by API keys)."""
+    response = getattr(exc, "response", None)
+    details = str(getattr(response, "text", "") or "")
+    try:
+        payload = response.json()
+        details += " " + str(payload)
+    except (AttributeError, TypeError, ValueError):
+        pass
+    normalized = details.lower()
+    return "tokens per day" in normalized or bool(re.search(r"\\btpd\\b", normalized))
+
+
+def _mark_groq_keys_rate_limited(key_count: int, cooldown: float) -> None:
+    """Apply an organization-level quota cooldown to every configured Groq key."""
+    retry_at = time.monotonic() + cooldown
+    for index in range(1, key_count + 1):
+        name = f"groq_key_{index}"
+        _provider_retry_after[name] = retry_at
+        _provider_rate_limited_until[name] = retry_at
+
+
+def _groq_daily_quota_cooldown(exc: Exception) -> float:
+    """Prefer the provider reset header; otherwise avoid retrying a daily quota for 24h."""
+    cooldown = _groq_rate_limit_cooldown(exc)
+    if cooldown == _PROVIDER_429_COOLDOWN:
+        return 86400.0
+    return cooldown
+
+
 def _groq_rate_limit_cooldown(exc: Exception) -> float:
     """Use Groq's actual reset headers; fall back safely when headers are absent."""
     response = getattr(exc, "response", None)
@@ -427,15 +457,24 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
         except Exception as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
             if status == 429:
-                cooldown = (
-                    _groq_rate_limit_cooldown(exc)
-                    if groq_index is not None
-                    else _PROVIDER_429_COOLDOWN
-                )
                 if groq_index is not None:
-                    groq_429_count += 1
-                    _provider_rate_limited_until[name] = time.monotonic() + cooldown
+                    if _is_groq_daily_token_quota_error(exc):
+                        cooldown = _groq_daily_quota_cooldown(exc)
+                        # Groq daily token limits are shared at organization/model
+                        # level, so rotating API keys cannot bypass this quota.
+                        _mark_groq_keys_rate_limited(len(groq_keys), cooldown)
+                        groq_429_count = len(groq_keys)
+                        print(
+                            "Alexa Groq organization daily token quota exhausted; "
+                            "all configured keys cooling down:",
+                            str(round(cooldown, 1)) + "s",
+                        )
+                    else:
+                        cooldown = _groq_rate_limit_cooldown(exc)
+                        groq_429_count += 1
+                        _provider_rate_limited_until[name] = time.monotonic() + cooldown
                 else:
+                    cooldown = _PROVIDER_429_COOLDOWN
                     _provider_events.append(name)
             elif status == 402:
                 cooldown = _PROVIDER_402_COOLDOWN
