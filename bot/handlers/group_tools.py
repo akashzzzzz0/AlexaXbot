@@ -545,47 +545,20 @@ async def add_filter(message: Message, db_session: AsyncSession, **kwargs):
         return
     parts = (message.text or "").split(None, 2)
     if len(parts) < 2:
-        await message.reply("Usage: /filter <keyword> <reply text>, or reply to text/sticker with /filter <keyword> [@username or user ID]."); return
+        await message.reply("Usage: reply to a message with /filter <keyword>, or use /filter <keyword> <reply text>."); return
     keyword = parts[1].strip().lower()[:128]
     replied = message.reply_to_message
     target_user_id = None
     target_username = None
     response_type = "text"
     if replied:
-        # Copy the original replied-to Telegram message at trigger time. This
-        # preserves text entities/links and supports all Telegram media.
+        # Saved-message filters are always group-wide. No user ID or username
+        # is required: anyone in this group can trigger the configured keyword.
         response = json.dumps({
             "chat_id": message.chat.id,
             "message_id": replied.message_id,
         })
         response_type = "copy"
-
-        # Reply-saved filters are group-wide by default, regardless of who
-        # originally sent the sticker/photo/link/audio/video/text.
-        # An explicit third argument can still restrict the filter to a user.
-        if len(parts) > 2:
-            token = parts[2].strip()
-            if token.startswith("@"):
-                requested_username = token[1:].lower()[:64]
-                target = await db_session.scalar(
-                    select(User).where(func.lower(func.replace(User.username, "@", "")) == requested_username)
-                )
-                if target is None:
-                    await message.reply("ALEXA doesn't know that username yet. Reply directly to the user's message or use their numeric ID.")
-                    return
-                target_user_id = target.id
-                target_username = (target.username or requested_username).lstrip("@").lower()
-            else:
-                try:
-                    target_user_id = int(token)
-                except ValueError:
-                    await message.reply("Use a numeric user ID or reply directly to the user's message.")
-                    return
-                if target_user_id <= 0:
-                    await message.reply("Enter a valid numeric user ID.")
-                    return
-                target = await db_session.get(User, target_user_id)
-                target_username = (target.username or "").lstrip("@").lower() or None if target else None
     else:
         response = parts[2] if len(parts) > 2 else None
         if not response:
