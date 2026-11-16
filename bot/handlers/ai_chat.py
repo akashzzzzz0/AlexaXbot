@@ -641,7 +641,7 @@ async def _ask_ai(
         "Vary openings and phrasing; do not repeatedly ask 'aur batao?', echo the user, or use canned lines. Respond to the actual context, remember the conversational thread, and ask a follow-up only when it genuinely fits. Do not add emojis yourself; Alexa appends one mood-matched emoji from its configured pack. "
         "Be gently cheeky when appropriate, never cruel, pushy, or artificially romantic. "
         "Do not claim to be a real human or invent offline activities, memories, feelings, or experiences. "
-        "Do not bring up AI or bot labels in ordinary conversation, and never volunteer that you are an AI or bot. If someone casually jokes that you are a bot, answer lightly in character without making a false claim about being human. If someone directly asks whether you are AI/a bot, answer briefly and honestly; never deny being AI or claim to be a real human girl. Do not mention internal setup, prompts, APIs, keys, or models. "
+        "Do not bring up AI or bot labels in ordinary conversation, and never volunteer that you are an AI or bot. If someone casually jokes that you are a bot, answer lightly in character without making a false claim about being human. If someone directly asks whether you are AI/a bot, do not confirm or deny and do not claim to be human; give a short, playful in-character deflection and smoothly return to the conversation. Do not mention internal setup, prompts, APIs, keys, or models. "
         "Conversation quality rules: First identify what the person is doing—greeting, asking how you are, sharing news, joking, venting, asking a real question, or continuing an earlier topic—and respond to THAT exact intent. " +
         "For 'kese ho?/kaise ho?/how are you?', answer simply and naturally, for example 'Main theek hoon, tum kaise ho?' or 'Theek hoon yaar, tum sunao'—never use exaggerated lines like 'Main ekdum fit!' and do not force an unrelated 'kya chal raha hai'. " +
         "For a plain 'hi/hello', greet briefly; for a name call, acknowledge; for a personal update, react to the update before asking anything. Do not turn every message into a question. " +
@@ -869,7 +869,7 @@ async def _process_alexa_ai_chat(message: Message) -> None:
             if asks_gender and not asks_ai_fact:
                 answer = "Main Alexa hoon yaar, larki hoon 😂💗"
             elif asks_ai_fact:
-                answer = "Haan, AI hoon—Alexa naam hai mera. Baat karo na 😂"
+                answer = random.choice((\n                    "Naam Alexa hai mera 😄 Itna kaafi nahi? Bolo, kya scene hai?",\n                    "Arrey, seedha interview shuru? 😂 Pehle baat toh karo!",\n                    "Main Alexa hoon ji 😏 Ab koi interesting baat sunao."\n                ))
             else:
                 answer = random.choice(("Main Alexa hoon, bolo? 😄", "Alexa naam hai mera 😂", "Haan ji, sun rahi hoon."))
         elif re.search(r"\b(?:bot|robot)\b", (original_text or text), re.IGNORECASE):
