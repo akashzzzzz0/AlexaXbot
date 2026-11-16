@@ -14,6 +14,9 @@ from bot.services.ollama_ai import get_ollama_api_key, ollama_chat
 # retried automatically after its short cooldown; no persistent state is used.
 _provider_retry_after: dict[str, float] = {}
 _PROVIDER_429_COOLDOWN = 300.0
+# HTTP 402 is a billing/credit condition, not a transient network error.
+# Recheck periodically without repeatedly hitting an unpaid provider.
+_PROVIDER_402_COOLDOWN = 3600.0
 _PROVIDER_ERROR_COOLDOWN = 30.0
 
 
@@ -322,7 +325,12 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
             raise RuntimeError(name + "_empty_response")
         except Exception as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
-            cooldown = _PROVIDER_429_COOLDOWN if status == 429 else _PROVIDER_ERROR_COOLDOWN
+            if status == 429:
+                cooldown = _PROVIDER_429_COOLDOWN
+            elif status == 402:
+                cooldown = _PROVIDER_402_COOLDOWN
+            else:
+                cooldown = _PROVIDER_ERROR_COOLDOWN
             _provider_retry_after[name] = time.monotonic() + cooldown
             print("Alexa chat provider failed:", _safe_provider_error(name, exc))
     if attempted:
