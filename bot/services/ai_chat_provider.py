@@ -3,6 +3,8 @@ import asyncio
 import os
 import re
 import time
+from datetime import timezone
+from email.utils import parsedate_to_datetime
 
 import httpx
 
@@ -12,6 +14,7 @@ from bot.config import get_gemini_api_key, settings
 # Avoid hammering providers during quota/network outages. Each provider is
 # retried automatically after its short cooldown; no persistent state is used.
 _provider_retry_after: dict[str, float] = {}
+_provider_rate_limited_until: dict[str, float] = {}
 _provider_events: list[str] = []
 
 
@@ -27,6 +30,67 @@ _PROVIDER_402_COOLDOWN = 3600.0
 _PROVIDER_ERROR_COOLDOWN = 30.0
 
 
+def _parse_retry_delay(value) -> float | None:
+    """Parse Retry-After seconds/date or a reset duration such as 2m3.5s."""
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        pass
+    try:
+        retry_at = parsedate_to_datetime(raw)
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=timezone.utc)
+        return max(0.0, retry_at.timestamp() - time.time())
+    except (TypeError, ValueError, OverflowError):
+        pass
+    match = re.fullmatch(
+        r"\s*(?:(\d+(?:\.\d+)?)d)?\s*"
+        r"(?:(\d+(?:\.\d+)?)h)?\s*"
+        r"(?:(\d+(?:\.\d+)?)m)?\s*"
+        r"(?:(\d+(?:\.\d+)?)s)?\s*",
+        raw,
+        re.IGNORECASE,
+    )
+    if not match or not any(part is not None for part in match.groups()):
+        return None
+    days, hours, minutes, seconds = (float(part or 0) for part in match.groups())
+    return days * 86400 + hours * 3600 + minutes * 60 + seconds
+
+
+def _groq_rate_limit_cooldown(exc: Exception) -> float:
+    """Use Groq's actual reset headers; fall back safely when headers are absent."""
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", {}) or {}
+    retry_after = _parse_retry_delay(headers.get("retry-after"))
+    if retry_after is not None:
+        return max(1.0, retry_after)
+
+    exhausted_resets = []
+    for remaining_header, reset_header in (
+        ("x-ratelimit-remaining-requests", "x-ratelimit-reset-requests"),
+        ("x-ratelimit-remaining-tokens", "x-ratelimit-reset-tokens"),
+    ):
+        if str(headers.get(remaining_header, "")).strip() == "0":
+            delay = _parse_retry_delay(headers.get(reset_header))
+            if delay is not None:
+                exhausted_resets.append(delay)
+    if exhausted_resets:
+        return max(1.0, max(exhausted_resets))
+
+    reset_delays = [
+        delay for delay in (
+            _parse_retry_delay(headers.get("x-ratelimit-reset-requests")),
+            _parse_retry_delay(headers.get("x-ratelimit-reset-tokens")),
+        ) if delay is not None
+    ]
+    if reset_delays:
+        return max(1.0, max(reset_delays))
+    return _PROVIDER_429_COOLDOWN
 
 
 def _gemini_api_key() -> str:
@@ -335,9 +399,11 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
         retry_at = _provider_retry_after.get(name, 0.0)
         if now < retry_at:
             print("Alexa chat provider skipped:", name + ":temporary_cooldown")
-            if groq_index is not None:
+            if groq_index is not None and _provider_rate_limited_until.get(name, 0.0) > now:
                 groq_429_count += 1
             continue
+        _provider_retry_after.pop(name, None)
+        _provider_rate_limited_until.pop(name, None)
         remaining = deadline - loop.time()
         if remaining <= 0:
             break
@@ -355,21 +421,31 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
             )
             if isinstance(answer, str) and answer.strip():
                 _provider_retry_after.pop(name, None)
+                _provider_rate_limited_until.pop(name, None)
                 return answer.strip()
             raise RuntimeError(name + "_empty_response")
         except Exception as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
             if status == 429:
-                cooldown = _PROVIDER_429_COOLDOWN
+                cooldown = (
+                    _groq_rate_limit_cooldown(exc)
+                    if groq_index is not None
+                    else _PROVIDER_429_COOLDOWN
+                )
                 if groq_index is not None:
                     groq_429_count += 1
+                    _provider_rate_limited_until[name] = time.monotonic() + cooldown
                 else:
                     _provider_events.append(name)
             elif status == 402:
                 cooldown = _PROVIDER_402_COOLDOWN
+                _provider_rate_limited_until.pop(name, None)
             else:
                 cooldown = _PROVIDER_ERROR_COOLDOWN
+                _provider_rate_limited_until.pop(name, None)
             _provider_retry_after[name] = time.monotonic() + cooldown
+            if status == 429 and groq_index is not None:
+                print("Alexa Groq rate limit cooldown:", name, str(round(cooldown, 1)) + "s")
             print("Alexa chat provider failed:", _safe_provider_error(name, exc))
     if groq_keys and groq_429_count >= len(groq_keys):
         # Notify the owner only when every configured Groq key is rate-limited.
