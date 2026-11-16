@@ -5,89 +5,87 @@ from bot.services import ai_chat_provider
 
 
 class AlexaChatProviderRoutingTests(unittest.IsolatedAsyncioTestCase):
-    async def test_groq_is_primary_and_stops_chain_on_success(self):
-        groq = AsyncMock(return_value="Groq reply")
-        grok = AsyncMock(return_value="Grok reply")
-        openai = AsyncMock(return_value="OpenAI reply")
-        with (
-            patch.object(ai_chat_provider, "_groq_api_key", return_value="groq-key"),
-            patch.object(ai_chat_provider, "_xai_api_key", return_value="xai-key"),
-            patch.object(ai_chat_provider, "_openai_api_key", return_value="openai-key"),
-            patch.object(ai_chat_provider, "_groq_chat", groq),
-            patch.object(ai_chat_provider, "_xai_chat", grok),
-            patch.object(ai_chat_provider, "_openai_chat", openai),
-            patch.object(ai_chat_provider, "_gemini_api_key", return_value="gemini-key"),
-            patch.object(ai_chat_provider, "_gemini_chat", AsyncMock()) as gemini,
-        ):
-            result = await ai_chat_provider.ai_chat_completion([{"role": "user", "content": "Hi"}])
-        self.assertEqual(result, "Groq reply")
-        groq.assert_awaited_once()
-        grok.assert_not_awaited()
-        openai.assert_not_awaited()
-        gemini.assert_not_awaited()
+    async def asyncSetUp(self):
+        ai_chat_provider._provider_retry_after.clear()
+        ai_chat_provider._provider_rate_limited_until.clear()
+        ai_chat_provider._provider_events.clear()
 
-    async def test_falls_back_to_grok_when_groq_fails(self):
-        groq = AsyncMock(side_effect=RuntimeError("Groq unavailable"))
-        grok = AsyncMock(return_value="Grok reply")
-        openai = AsyncMock(return_value="OpenAI reply")
-        with (
-            patch.object(ai_chat_provider, "_groq_api_key", return_value="groq-key"),
-            patch.object(ai_chat_provider, "_xai_api_key", return_value="xai-key"),
-            patch.object(ai_chat_provider, "_openai_api_key", return_value="openai-key"),
-            patch.object(ai_chat_provider, "_groq_chat", groq),
-            patch.object(ai_chat_provider, "_xai_chat", grok),
-            patch.object(ai_chat_provider, "_openai_chat", openai),
-            patch.object(ai_chat_provider, "_gemini_chat", AsyncMock()) as gemini,
-        ):
-            result = await ai_chat_provider.ai_chat_completion([{"role": "user", "content": "Hi"}])
-        self.assertEqual(result, "Grok reply")
-        groq.assert_awaited_once()
-        grok.assert_awaited_once()
-        openai.assert_not_awaited()
-
-    async def test_falls_back_to_gemini_when_groq_and_grok_fail(self):
-        groq = AsyncMock(side_effect=RuntimeError("Groq unavailable"))
-        grok = AsyncMock(side_effect=RuntimeError("Grok unavailable"))
-        openai = AsyncMock(return_value="OpenAI reply")
+    async def test_gemini_is_primary_and_stops_chain_on_success(self):
         gemini = AsyncMock(return_value="Gemini reply")
+        groq = AsyncMock(return_value="Groq reply")
         with (
-            patch.object(ai_chat_provider, "_groq_api_key", return_value="groq-key"),
+            patch.object(ai_chat_provider, "_gemini_api_key", return_value="gemini-key"),
+            patch.object(ai_chat_provider, "_gemini_chat", gemini),
+            patch.object(ai_chat_provider, "_groq_api_keys", return_value=["groq-key"]),
+            patch.object(ai_chat_provider, "_groq_chat", groq),
             patch.object(ai_chat_provider, "_xai_api_key", return_value="xai-key"),
             patch.object(ai_chat_provider, "_openai_api_key", return_value="openai-key"),
-            patch.object(ai_chat_provider, "_gemini_api_key", return_value="gemini-key"),
-            patch.object(ai_chat_provider, "_groq_chat", groq),
-            patch.object(ai_chat_provider, "_xai_chat", grok),
-            patch.object(ai_chat_provider, "_openai_chat", openai),
-            patch.object(ai_chat_provider, "_gemini_chat", gemini),
+            patch.object(ai_chat_provider, "get_ollama_api_key", return_value="ollama-key"),
         ):
             result = await ai_chat_provider.ai_chat_completion([{"role": "user", "content": "Hi"}])
         self.assertEqual(result, "Gemini reply")
-        groq.assert_awaited_once()
-        grok.assert_awaited_once()
-        openai.assert_not_awaited()
         gemini.assert_awaited_once()
+        groq.assert_not_awaited()
 
-    async def test_skips_unconfigured_chat_providers(self):
+    async def test_falls_through_all_providers_until_one_answers(self):
+        gemini = AsyncMock(side_effect=RuntimeError("Gemini unavailable"))
+        groq = AsyncMock(side_effect=RuntimeError("Groq unavailable"))
+        grok = AsyncMock(side_effect=RuntimeError("Grok unavailable"))
+        openai = AsyncMock(side_effect=RuntimeError("OpenAI unavailable"))
+        ollama = AsyncMock(return_value="Ollama reply")
+        with (
+            patch.object(ai_chat_provider, "_gemini_api_key", return_value="gemini-key"),
+            patch.object(ai_chat_provider, "_gemini_chat", gemini),
+            patch.object(ai_chat_provider, "_groq_api_keys", return_value=["groq-key"]),
+            patch.object(ai_chat_provider, "_groq_chat", groq),
+            patch.object(ai_chat_provider, "_xai_api_key", return_value="xai-key"),
+            patch.object(ai_chat_provider, "_xai_chat", grok),
+            patch.object(ai_chat_provider, "_openai_api_key", return_value="openai-key"),
+            patch.object(ai_chat_provider, "_openai_chat", openai),
+            patch.object(ai_chat_provider, "get_ollama_api_key", return_value="ollama-key"),
+            patch.object(ai_chat_provider, "ollama_chat", ollama),
+        ):
+            result = await ai_chat_provider.ai_chat_completion([{"role": "user", "content": "Hi"}])
+        self.assertEqual(result, "Ollama reply")
+        for provider in (gemini, groq, grok, openai, ollama):
+            provider.assert_awaited_once()
+
+    async def test_rotates_groq_keys_before_moving_to_next_provider(self):
+        groq = AsyncMock(side_effect=[RuntimeError("first key failed"), "Second key reply"])
+        with (
+            patch.object(ai_chat_provider, "_gemini_api_key", return_value=""),
+            patch.object(ai_chat_provider, "_groq_api_keys", return_value=["key-1", "key-2"]),
+            patch.object(ai_chat_provider, "_groq_chat", groq),
+            patch.object(ai_chat_provider, "_xai_api_key", return_value="xai-key"),
+            patch.object(ai_chat_provider, "_openai_api_key", return_value=""),
+            patch.object(ai_chat_provider, "get_ollama_api_key", return_value=""),
+        ):
+            result = await ai_chat_provider.ai_chat_completion([{"role": "user", "content": "Hi"}])
+        self.assertEqual(result, "Second key reply")
+        self.assertEqual(groq.await_count, 2)
+
+    async def test_skips_unconfigured_providers(self):
+        gemini = AsyncMock()
         groq = AsyncMock()
         grok = AsyncMock()
         openai = AsyncMock()
-        gemini = AsyncMock()
+        ollama = AsyncMock()
         with (
-            patch.object(ai_chat_provider, "_groq_api_key", return_value=""),
-            patch.object(ai_chat_provider, "_xai_api_key", return_value=""),
-            patch.object(ai_chat_provider, "_openai_api_key", return_value=""),
             patch.object(ai_chat_provider, "_gemini_api_key", return_value=""),
-            patch.object(ai_chat_provider, "_groq_chat", groq),
-            patch.object(ai_chat_provider, "_xai_chat", grok),
-            patch.object(ai_chat_provider, "_openai_chat", openai),
             patch.object(ai_chat_provider, "_gemini_chat", gemini),
+            patch.object(ai_chat_provider, "_groq_api_keys", return_value=[]),
+            patch.object(ai_chat_provider, "_groq_chat", groq),
+            patch.object(ai_chat_provider, "_xai_api_key", return_value=""),
+            patch.object(ai_chat_provider, "_xai_chat", grok),
+            patch.object(ai_chat_provider, "_openai_api_key", return_value=""),
+            patch.object(ai_chat_provider, "_openai_chat", openai),
+            patch.object(ai_chat_provider, "get_ollama_api_key", return_value=""),
+            patch.object(ai_chat_provider, "ollama_chat", ollama),
         ):
             result = await ai_chat_provider.ai_chat_completion([{"role": "user", "content": "Hi"}])
         self.assertEqual(result, "")
-        groq.assert_not_awaited()
-        grok.assert_not_awaited()
-        openai.assert_not_awaited()
-        gemini.assert_not_awaited()
+        for provider in (gemini, groq, grok, openai, ollama):
+            provider.assert_not_awaited()
 
 
 if __name__ == "__main__":
