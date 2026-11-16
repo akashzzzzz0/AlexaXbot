@@ -580,16 +580,22 @@ async def _ask_ai_with_typing(
     )
     owner_id = int(getattr(settings, "effective_owner_id", 0) or 0)
     if owner_id:
+        provider_labels = {
+            "gemini": "Gemini",
+            "groq": "Groq",
+            "grok": "Grok",
+            "openai": "OpenAI",
+            "ollama": "Ollama",
+        }
         for provider_name in drain_provider_events():
-            next_provider = "Groq" if provider_name == "gemini" else "Gemini"
-            label = "Gemini" if provider_name == "gemini" else "Groq"
+            label = provider_labels.get(provider_name, provider_name.title())
             try:
                 await message.bot.send_message(
                     chat_id=owner_id,
                     text=(
                         f"⚠️ {label} API ne HTTP 429 quota/rate limit diya hai. "
-                        f"Alexa ab {next_provider} fallback try kar rahi hai. "
-                        "Nayi API key runtime settings mein update karke bot restart kar dein."
+                        "Alexa aglay configured AI provider par fallback continue kar rahi hai. "
+                        "Agar limit persistent ho to provider ki runtime API settings check kar lein."
                     ),
                 )
             except Exception as notify_exc:

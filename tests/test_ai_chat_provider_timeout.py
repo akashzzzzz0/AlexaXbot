@@ -6,6 +6,11 @@ from bot.services import ai_chat_provider
 
 
 class AlexaChatProviderTimeoutTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        ai_chat_provider._provider_retry_after.clear()
+        ai_chat_provider._provider_rate_limited_until.clear()
+        ai_chat_provider._provider_events.clear()
+
     async def test_grok_timeout_falls_through_to_openai(self):
         grok = AsyncMock(side_effect=asyncio.TimeoutError())
         openai = AsyncMock(return_value="OpenAI reply")

@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     # Gemini key is loaded from private runtime config; never commit a real key.
     GEMINI_API_KEY: str = ""
     API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-3.5-flash-lite"
+    GEMINI_MODEL: str = "gemini-2.5-flash"
 
     # Ollama-compatible AI provider settings; keys remain runtime-only.
     OLLAMA_API_KEY: str = ""
