@@ -180,5 +180,15 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
         self.assertNotIn("Use natural Indian Roman Hindi/Hinglish", system)
 
 
+    def test_direct_group_mention_stays_silent_when_all_ai_providers_fail(self):
+        message = _group_message("Alexa kya haal hai?")
+        message.reply = AsyncMock()
+        key = (message.chat.id, message.from_user.id)
+        ai_chat._history_loaded.add(key)
+        with patch.object(ai_chat, "_ask_ai_with_typing", AsyncMock(return_value="")):
+            asyncio.run(ai_chat._process_alexa_ai_chat(message))
+        message.reply.assert_not_awaited()
+        ai_chat._history_loaded.discard(key)
+
 if __name__ == "__main__":
     unittest.main()
