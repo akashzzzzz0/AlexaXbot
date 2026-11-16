@@ -869,7 +869,11 @@ async def _process_alexa_ai_chat(message: Message) -> None:
             if asks_gender and not asks_ai_fact:
                 answer = "Main Alexa hoon yaar, larki hoon 😂💗"
             elif asks_ai_fact:
-                answer = random.choice((\n                    "Naam Alexa hai mera 😄 Itna kaafi nahi? Bolo, kya scene hai?",\n                    "Arrey, seedha interview shuru? 😂 Pehle baat toh karo!",\n                    "Main Alexa hoon ji 😏 Ab koi interesting baat sunao."\n                ))
+                answer = random.choice((
+                    "Naam Alexa hai mera 😄 Itna kaafi nahi? Bolo, kya scene hai?",
+                    "Arrey, seedha interview shuru? 😂 Pehle baat toh karo!",
+                    "Main Alexa hoon ji 😏 Ab koi interesting baat sunao."
+                ))
             else:
                 answer = random.choice(("Main Alexa hoon, bolo? 😄", "Alexa naam hai mera 😂", "Haan ji, sun rahi hoon."))
         elif re.search(r"\b(?:bot|robot)\b", (original_text or text), re.IGNORECASE):
