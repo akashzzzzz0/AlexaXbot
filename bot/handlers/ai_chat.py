@@ -873,7 +873,7 @@ async def _process_alexa_ai_chat(message: Message) -> None:
             "Alexa AI reply failed for chat_id=%s: %s (%s)",
             message.chat.id, type(exc).__name__, str(exc)[:1200],
         )
-        if not smart_mode:
+        if message.chat.type == ChatType.PRIVATE:
             try:
                 await message.reply("Abhi reply generate nahi ho pa raha. Thori der baad dobara try karna.")
             except Exception as send_exc:
@@ -884,7 +884,7 @@ async def _process_alexa_ai_chat(message: Message) -> None:
         return
     except Exception as exc:
         logger.exception("Unexpected Alexa AI chat failure for chat_id=%s", message.chat.id)
-        if not smart_mode:
+        if message.chat.type == ChatType.PRIVATE:
             try:
                 await message.reply("Abhi reply generate nahi ho pa raha. Thori der baad dobara try karna.")
             except Exception as send_exc:
@@ -901,7 +901,7 @@ async def _process_alexa_ai_chat(message: Message) -> None:
             "Alexa AI providers returned no usable reply",
             extra={"chat_id": message.chat.id, "user_id": message.from_user.id},
         )
-        if not smart_mode:
+        if message.chat.type == ChatType.PRIVATE:
             try:
                 await message.reply("Abhi reply generate nahi ho pa raha. Thori der baad dobara try karna.")
             except Exception as send_exc:
