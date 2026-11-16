@@ -72,7 +72,7 @@ def _is_groq_daily_token_quota_error(exc: Exception) -> bool:
     except (AttributeError, TypeError, ValueError):
         pass
     normalized = details.lower()
-    return "tokens per day" in normalized or bool(re.search(r"\\btpd\\b", normalized))
+    return "tokens per day" in normalized or bool(re.search(r"\btpd\b", normalized))
 
 
 def _mark_groq_keys_rate_limited(key_count: int, cooldown: float) -> None:
