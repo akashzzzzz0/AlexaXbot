@@ -260,6 +260,10 @@ async def _build_cinematic_welcome_gif(bot, user, chat):
     display_name = " ".join(part for part in (user.first_name, user.last_name) if part) or f"Member {user.id}"
     display_name = display_name[:28]
     group_name = (chat.title or "Our Community")[:32]
+    if isinstance(title_font, ImageFont.ImageFont):
+        # Pillow's tiny fallback bitmap font is ASCII-only on some hosts.
+        display_name = display_name.encode("ascii", "replace").decode("ascii")
+        group_name = group_name.encode("ascii", "replace").decode("ascii")
     frames = []
 
     for frame_index in range(3):
