@@ -231,6 +231,81 @@ def _channelguard_notice(user_id: int, display_name: str, state: str, count: int
 
 _recent_welcome_keys = {}
 
+async def _build_cinematic_welcome_gif(bot, user, chat):
+    """Build a lightweight personalized animated welcome card without external assets."""
+    from io import BytesIO
+    from PIL import Image, ImageDraw, ImageFont, ImageOps
+
+    width, height = 720, 480
+    avatar = None
+    try:
+        photos = await bot.get_user_profile_photos(user.id, limit=1)
+        if photos.total_count and photos.photos:
+            photo = photos.photos[0][-1]
+            telegram_file = await bot.get_file(photo.file_id)
+            avatar_buffer = BytesIO()
+            await bot.download_file(telegram_file.file_path, destination=avatar_buffer)
+            avatar_buffer.seek(0)
+            avatar = Image.open(avatar_buffer).convert("RGB")
+    except Exception as exc:
+        logger.debug("Welcome avatar unavailable; using initials", user_id=user.id, error=str(exc))
+
+    try:
+        title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 48)
+        name_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 34)
+        small_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 22)
+    except OSError:
+        title_font = name_font = small_font = ImageFont.load_default()
+
+    display_name = " ".join(part for part in (user.first_name, user.last_name) if part) or f"Member {user.id}"
+    display_name = display_name[:28]
+    group_name = (chat.title or "Our Community")[:32]
+    frames = []
+
+    for frame_index in range(3):
+        frame = Image.new("RGB", (width, height), (10, 7, 22))
+        draw = ImageDraw.Draw(frame)
+        # Subtle violet atmosphere and cinematic frame lines.
+        draw.rectangle((12, 12, width - 12, height - 12), outline=(103, 53, 190), width=3)
+        draw.rectangle((24, 24, width - 24, height - 24), outline=(45, 30, 75), width=2)
+        draw.ellipse((205 - frame_index * 7, 24 - frame_index * 7,
+                      515 + frame_index * 7, 334 + frame_index * 7),
+                     outline=(112, 63 + frame_index * 12, 230), width=5)
+        draw.ellipse((220 - frame_index * 4, 39 - frame_index * 4,
+                      500 + frame_index * 4, 319 + frame_index * 4),
+                     outline=(176, 111, 255), width=2)
+
+        if avatar is not None:
+            avatar_size = 230
+            fitted = ImageOps.fit(avatar, (avatar_size, avatar_size), centering=(0.5, 0.35))
+            mask = Image.new("L", (avatar_size, avatar_size), 0)
+            ImageDraw.Draw(mask).ellipse((0, 0, avatar_size - 1, avatar_size - 1), fill=255)
+            frame.paste(fitted, ((width - avatar_size) // 2, 64), mask)
+        else:
+            initials = "".join(part[0] for part in display_name.split()[:2]).upper() or "?"
+            draw.ellipse((255, 88, 465, 298), fill=(38, 22, 66), outline=(183, 130, 255), width=5)
+            draw.text((360, 190), initials, font=title_font, fill=(238, 220, 255), anchor="mm")
+
+        draw.text((width // 2, 350), "WELCOME", font=title_font, fill=(244, 232, 255), anchor="mm")
+        draw.text((width // 2, 402), display_name, font=name_font, fill=(194, 145, 255), anchor="mm")
+        draw.text((width // 2, 444), group_name, font=small_font, fill=(210, 198, 230), anchor="mm")
+        frames.append(frame)
+
+    output = BytesIO()
+    frames[0].save(
+        output,
+        format="GIF",
+        save_all=True,
+        append_images=frames[1:],
+        duration=450,
+        loop=0,
+        optimize=True,
+    )
+    output.seek(0)
+    output.name = "alexa_cinematic_welcome.gif"
+    return output
+
+
 
 @router.my_chat_member()
 async def on_bot_membership_changed(event: ChatMemberUpdated, db_session: AsyncSession = None, **kwargs):
@@ -371,9 +446,25 @@ async def _send_welcome_message(bot, db_session, chat, user):
     for key, val in replacements.items():
         welcome_text = welcome_text.replace(key, val)
     try:
-        await bot.send_message(chat.id, welcome_text, parse_mode="HTML")
+        animation = await _build_cinematic_welcome_gif(bot, user, chat)
+        # Keep custom group welcome text intact; use a cinematic default otherwise.
+        caption = welcome_text if ws and ws.message else (
+            f"✨ <b>A NEW MEMBER HAS ARRIVED</b> ✨\\n\\n"
+            f"Welcome, {clickable_name}! 💜\\n"
+            f"You are now part of <b>{escape(chat.title or 'our community')}</b>.\\n"
+            "Make yourself at home and enjoy the community!"
+        )
+        if len(caption) > 1000:
+            await bot.send_message(chat.id, welcome_text, parse_mode="HTML")
+            await bot.send_animation(chat.id, animation)
+        else:
+            await bot.send_animation(chat.id, animation, caption=caption, parse_mode="HTML")
     except Exception as exc:
-        logger.warning("Welcome message failed", chat_id=chat.id, user_id=user.id, error=str(exc))
+        logger.warning("Cinematic welcome failed; using text fallback", chat_id=chat.id, user_id=user.id, error=str(exc))
+        try:
+            await bot.send_message(chat.id, welcome_text, parse_mode="HTML")
+        except Exception as fallback_exc:
+            logger.warning("Welcome message failed", chat_id=chat.id, user_id=user.id, error=str(fallback_exc))
 
     # Send a private welcome only to this member if ALEXA successfully sent
     # them the join-request DM button for this exact group and they activated DM.
