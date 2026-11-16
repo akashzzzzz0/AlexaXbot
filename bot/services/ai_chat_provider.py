@@ -76,17 +76,33 @@ async def _gemini_chat(messages, *, system="", temperature=0.7, max_tokens=500, 
         raise RuntimeError("gemini_empty_response")
     return answer
 
-def _groq_api_key() -> str:
-    return (
-        getattr(settings, "GROQ_API_KEY", "")
-        or os.getenv("GROQ_API_KEY", "")
-    ).strip()
+def _groq_api_keys() -> list[str]:
+    """Return configured Groq keys in priority order, without duplicates."""
+    candidates = (
+        getattr(settings, "GROQ_API_KEY", ""),
+        os.getenv("GROQ_API_KEY", ""),
+        getattr(settings, "GROQ_API_KEY_1", ""),
+        os.getenv("GROQ_API_KEY_1", ""),
+        getattr(settings, "GROQ_API_KEY_2", ""),
+        os.getenv("GROQ_API_KEY_2", ""),
+        getattr(settings, "GROQ_API_KEY_3", ""),
+        os.getenv("GROQ_API_KEY_3", ""),
+    )
+    keys = []
+    seen = set()
+    for candidate in candidates:
+        key = str(candidate or "").strip()
+        if key and key not in seen:
+            seen.add(key)
+            keys.append(key)
+    return keys
 
 
 async def _groq_chat(
-    messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False
+    messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False,
+    api_key=None,
 ) -> str:
-    api_key = _groq_api_key()
+    api_key = str(api_key or "").strip()
     if not api_key:
         raise RuntimeError("groq_not_configured")
 
@@ -293,23 +309,34 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
 
     Only Gemini and Groq are used for Alexa's conversational route.
     """
-    # Gemini is preferred; Groq is the only fallback.
-    # A rotated Gemini key is tried first on the next request/restart.
-    providers = [
-        ("gemini", _gemini_chat, bool(_gemini_api_key()), 6.0),
-        ("groq", _groq_chat, bool(_groq_api_key()), 6.0),
-    ]
+    # Gemini stays first. If it is unavailable, try each configured Groq key
+    # in order; a failed/limited key must not prevent the next key from being tried.
+    groq_keys = _groq_api_keys()
+    providers = [("gemini", _gemini_chat, bool(_gemini_api_key()), 6.0, None)]
+    providers.extend(
+        (
+            f"groq_key_{index}",
+            lambda *args, _key=key, **kwargs: _groq_chat(*args, api_key=_key, **kwargs),
+            True,
+            6.0,
+            index,
+        )
+        for index, key in enumerate(groq_keys, start=1)
+    )
     loop = asyncio.get_running_loop()
     deadline = loop.time() + 25.0
     now = time.monotonic()
     attempted = False
-    for name, provider, configured, timeout_seconds in providers:
+    groq_429_count = 0
+    for name, provider, configured, timeout_seconds, groq_index in providers:
         if not configured:
             print("Alexa chat provider skipped:", name + ":missing_runtime_configuration")
             continue
         retry_at = _provider_retry_after.get(name, 0.0)
         if now < retry_at:
             print("Alexa chat provider skipped:", name + ":temporary_cooldown")
+            if groq_index is not None:
+                groq_429_count += 1
             continue
         remaining = deadline - loop.time()
         if remaining <= 0:
@@ -334,15 +361,22 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
             status = getattr(getattr(exc, "response", None), "status_code", None)
             if status == 429:
                 cooldown = _PROVIDER_429_COOLDOWN
-                _provider_events.append(name)
+                if groq_index is not None:
+                    groq_429_count += 1
+                else:
+                    _provider_events.append(name)
             elif status == 402:
                 cooldown = _PROVIDER_402_COOLDOWN
             else:
                 cooldown = _PROVIDER_ERROR_COOLDOWN
             _provider_retry_after[name] = time.monotonic() + cooldown
             print("Alexa chat provider failed:", _safe_provider_error(name, exc))
+    if groq_keys and groq_429_count >= len(groq_keys):
+        # Notify the owner only when every configured Groq key is rate-limited.
+        if "groq" not in _provider_events:
+            _provider_events.append("groq")
     if attempted:
-        print("Alexa chat providers exhausted: no usable reply from Gemini or Groq")
+        print("Alexa chat providers exhausted: no usable reply from Gemini or Groq keys")
     else:
         print("Alexa chat providers unavailable: all configured providers are in cooldown or missing")
     return ""

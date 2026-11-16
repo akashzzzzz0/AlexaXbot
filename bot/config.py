@@ -10,6 +10,9 @@ class Settings(BaseSettings):
 
     # Groq is the primary chat provider; keep its key in host environment settings.
     GROQ_API_KEY: str = ""
+    GROQ_API_KEY_1: str = ""
+    GROQ_API_KEY_2: str = ""
+    GROQ_API_KEY_3: str = ""
     GROQ_MODEL: str = "openai/gpt-oss-20b"
 
     # xAI Grok chat credentials are provided only through private host settings.
