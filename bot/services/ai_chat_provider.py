@@ -9,6 +9,7 @@ from email.utils import parsedate_to_datetime
 import httpx
 
 from bot.config import get_gemini_api_key, settings
+from bot.services.ollama_ai import get_ollama_api_key, ollama_chat
 
 
 # Avoid hammering providers during quota/network outages. Each provider is
@@ -190,6 +191,12 @@ def _groq_api_keys() -> list[str]:
             seen.add(key)
             keys.append(key)
     return keys
+
+
+def _groq_api_key() -> str:
+    """Backward-compatible accessor for the first configured Groq key."""
+    keys = _groq_api_keys()
+    return keys[0] if keys else ""
 
 
 async def _groq_chat(
@@ -399,33 +406,40 @@ def _safe_provider_error(name: str, exc: Exception) -> str:
 
 
 async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False):
-    """Try configured chat providers in order with bounded timeouts and cooldowns.
+    """Try every configured AI provider in priority order with bounded fallbacks.
 
-    Only Gemini and Groq are used for Alexa's conversational route.
+    Gemini is preferred, followed by all configured Groq keys, xAI/Grok,
+    OpenAI, and Ollama Cloud/local. A provider outage never creates a fake reply.
     """
-    # Gemini stays first. If it is unavailable, try each configured Groq key
-    # in order; a failed/limited key must not prevent the next key from being tried.
     groq_keys = _groq_api_keys()
-    providers = [("gemini", _gemini_chat, bool(_gemini_api_key()), 6.0, None)]
+    providers = [
+        ("gemini", _gemini_chat, bool(_gemini_api_key()), 4.5, None),
+    ]
     providers.extend(
         (
             f"groq_key_{index}",
             lambda *args, _key=key, **kwargs: _groq_chat(*args, api_key=_key, **kwargs),
             True,
-            6.0,
+            4.5,
             index,
         )
         for index, key in enumerate(groq_keys, start=1)
     )
+    providers.extend([
+        ("grok", _xai_chat, bool(_xai_api_key()), 4.5, None),
+        ("openai", _openai_chat, bool(_openai_api_key()), 4.5, None),
+        ("ollama", ollama_chat, bool(get_ollama_api_key()), 6.0, None),
+    ])
+
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + 25.0
-    now = time.monotonic()
+    deadline = loop.time() + 34.0
     attempted = False
     groq_429_count = 0
     for name, provider, configured, timeout_seconds, groq_index in providers:
         if not configured:
             print("Alexa chat provider skipped:", name + ":missing_runtime_configuration")
             continue
+        now = time.monotonic()
         retry_at = _provider_retry_after.get(name, 0.0)
         if now < retry_at:
             print("Alexa chat provider skipped:", name + ":temporary_cooldown")
@@ -436,6 +450,7 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
         _provider_rate_limited_until.pop(name, None)
         remaining = deadline - loop.time()
         if remaining <= 0:
+            print("Alexa chat providers exhausted: total fallback time budget reached")
             break
         attempted = True
         try:
@@ -460,8 +475,7 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
                 if groq_index is not None:
                     if _is_groq_daily_token_quota_error(exc):
                         cooldown = _groq_daily_quota_cooldown(exc)
-                        # Groq daily token limits are shared at organization/model
-                        # level, so rotating API keys cannot bypass this quota.
+                        # TPD is organization/model-wide: rotating keys cannot bypass it.
                         _mark_groq_keys_rate_limited(len(groq_keys), cooldown)
                         groq_429_count = len(groq_keys)
                         print(
@@ -486,12 +500,11 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
             if status == 429 and groq_index is not None:
                 print("Alexa Groq rate limit cooldown:", name, str(round(cooldown, 1)) + "s")
             print("Alexa chat provider failed:", _safe_provider_error(name, exc))
-    if groq_keys and groq_429_count >= len(groq_keys):
-        # Notify the owner only when every configured Groq key is rate-limited.
-        if "groq" not in _provider_events:
-            _provider_events.append("groq")
+
+    if groq_keys and groq_429_count >= len(groq_keys) and "groq" not in _provider_events:
+        _provider_events.append("groq")
     if attempted:
-        print("Alexa chat providers exhausted: no usable reply from Gemini or Groq keys")
+        print("Alexa chat providers exhausted: no usable reply from configured providers")
     else:
         print("Alexa chat providers unavailable: all configured providers are in cooldown or missing")
     return ""
