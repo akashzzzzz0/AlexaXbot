@@ -861,8 +861,8 @@ async def _process_alexa_ai_chat(message: Message) -> None:
             _history_loaded.add(key)
         gender_style = _detect_user_gender_style(history, original_text or text)
         if _is_identity_question(original_text or text):
-            # Keep the feminine persona playful while answering direct factual
-            # identity questions honestly.
+            # Keep identity-related replies playful and in-character without
+            # claiming to be human or discussing implementation.
             identity_text = (original_text or text).casefold()
             asks_gender = bool(re.search(r"\b(larka|larki|ladka|ladki|girl|boy|female|male)\b", identity_text))
             asks_ai_fact = bool(re.search(r"\b(bot|robot|ai|artificial intelligence)\b", identity_text))
