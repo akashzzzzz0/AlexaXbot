@@ -21,7 +21,7 @@ from aiogram.enums import ChatType
 from aiogram.types import Message, ReactionTypeEmoji
 
 from bot.config import settings
-from bot.services.ai_chat_provider import ai_chat_completion
+from bot.services.ai_chat_provider import ai_chat_completion, drain_provider_events
 
 router = Router(name="alexa_ai_chat")
 logger = logging.getLogger(__name__)
@@ -575,9 +575,26 @@ async def _ask_ai_with_typing(
     gender_style: str = "neutral"
 ) -> str:
     """Generate a reply; the outer handler owns one indicator for the full turn."""
-    return await _ask_ai(
+    answer = await _ask_ai(
         user_text, history, smart_mode=smart_mode, gender_style=gender_style
     )
+    owner_id = int(getattr(settings, "effective_owner_id", 0) or 0)
+    if owner_id:
+        for provider_name in drain_provider_events():
+            next_provider = "Groq" if provider_name == "gemini" else "Gemini"
+            label = "Gemini" if provider_name == "gemini" else "Groq"
+            try:
+                await message.bot.send_message(
+                    chat_id=owner_id,
+                    text=(
+                        f"⚠️ {label} API ne HTTP 429 quota/rate limit diya hai. "
+                        f"Alexa ab {next_provider} fallback try kar rahi hai. "
+                        "Nayi API key runtime settings mein update karke bot restart kar dein."
+                    ),
+                )
+            except Exception as notify_exc:
+                logger.warning("Could not notify owner about %s limit: %s", label, type(notify_exc).__name__)
+    return answer
 
 
 async def _typing_indicator_loop(message: Message) -> None:

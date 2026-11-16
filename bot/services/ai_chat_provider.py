@@ -7,12 +7,19 @@ import time
 import httpx
 
 from bot.config import get_gemini_api_key, settings
-from bot.services.ollama_ai import get_ollama_api_key, ollama_chat
 
 
 # Avoid hammering providers during quota/network outages. Each provider is
 # retried automatically after its short cooldown; no persistent state is used.
 _provider_retry_after: dict[str, float] = {}
+_provider_events: list[str] = []
+
+
+def drain_provider_events() -> list[str]:
+    events = list(_provider_events)
+    _provider_events.clear()
+    return events
+
 _PROVIDER_429_COOLDOWN = 300.0
 # HTTP 402 is a billing/credit condition, not a transient network error.
 # Recheck periodically without repeatedly hitting an unpaid provider.
@@ -284,13 +291,13 @@ def _safe_provider_error(name: str, exc: Exception) -> str:
 async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False):
     """Try configured chat providers in order with bounded timeouts and cooldowns.
 
-    OpenAI remains intentionally excluded from Alexa's conversational route.
+    Only Gemini and Groq are used for Alexa's conversational route.
     """
+    # Gemini is preferred; Groq is the only fallback.
+    # A rotated Gemini key is tried first on the next request/restart.
     providers = [
-        ("groq", _groq_chat, bool(_groq_api_key()), 6.0),
-        ("grok", _xai_chat, bool(_xai_api_key()), 5.0),
         ("gemini", _gemini_chat, bool(_gemini_api_key()), 6.0),
-        ("ollama", ollama_chat, bool(get_ollama_api_key()), 8.0),
+        ("groq", _groq_chat, bool(_groq_api_key()), 6.0),
     ]
     loop = asyncio.get_running_loop()
     deadline = loop.time() + 25.0
@@ -327,6 +334,7 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
             status = getattr(getattr(exc, "response", None), "status_code", None)
             if status == 429:
                 cooldown = _PROVIDER_429_COOLDOWN
+                _provider_events.append(name)
             elif status == 402:
                 cooldown = _PROVIDER_402_COOLDOWN
             else:
@@ -334,7 +342,7 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
             _provider_retry_after[name] = time.monotonic() + cooldown
             print("Alexa chat provider failed:", _safe_provider_error(name, exc))
     if attempted:
-        print("Alexa chat providers exhausted: no usable reply from Groq, Grok, Gemini, or Ollama")
+        print("Alexa chat providers exhausted: no usable reply from Gemini or Groq")
     else:
         print("Alexa chat providers unavailable: all configured providers are in cooldown or missing")
     return ""
