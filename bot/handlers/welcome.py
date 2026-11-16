@@ -449,9 +449,9 @@ async def _send_welcome_message(bot, db_session, chat, user):
         animation = await _build_cinematic_welcome_gif(bot, user, chat)
         # Keep custom group welcome text intact; use a cinematic default otherwise.
         caption = welcome_text if ws and ws.message else (
-            f"✨ <b>A NEW MEMBER HAS ARRIVED</b> ✨\\n\\n"
-            f"Welcome, {clickable_name}! 💜\\n"
-            f"You are now part of <b>{escape(chat.title or 'our community')}</b>.\\n"
+            f"✨ <b>A NEW MEMBER HAS ARRIVED</b> ✨\n\n"
+            f"Welcome, {clickable_name}! 💜\n"
+            f"You are now part of <b>{escape(chat.title or 'our community')}</b>.\n"
             "Make yourself at home and enjoy the community!"
         )
         if len(caption) > 1000:
