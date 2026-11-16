@@ -27,6 +27,30 @@ class AlexaChatProviderRoutingTests(unittest.IsolatedAsyncioTestCase):
         gemini.assert_awaited_once()
         groq.assert_not_awaited()
 
+    async def test_gemini_gets_enough_time_to_finish_its_http_request(self):
+        gemini = AsyncMock(return_value="Gemini reply")
+        observed_timeouts = []
+
+        async def run_with_recorded_timeout(awaitable, timeout):
+            observed_timeouts.append(timeout)
+            return await awaitable
+
+        with (
+            patch.object(ai_chat_provider, "_gemini_api_key", return_value="gemini-key"),
+            patch.object(ai_chat_provider, "_gemini_chat", gemini),
+            patch.object(ai_chat_provider, "_groq_api_keys", return_value=[]),
+            patch.object(ai_chat_provider, "_xai_api_key", return_value=""),
+            patch.object(ai_chat_provider, "_openai_api_key", return_value=""),
+            patch.object(ai_chat_provider, "get_ollama_api_key", return_value=""),
+            patch.object(ai_chat_provider.asyncio, "wait_for", side_effect=run_with_recorded_timeout),
+        ):
+            result = await ai_chat_provider.ai_chat_completion(
+                [{"role": "user", "content": "Hi"}]
+            )
+
+        self.assertEqual(result, "Gemini reply")
+        self.assertEqual(observed_timeouts, [12.0])
+
     async def test_falls_through_all_providers_until_one_answers(self):
         gemini = AsyncMock(side_effect=RuntimeError("Gemini unavailable"))
         groq = AsyncMock(side_effect=RuntimeError("Groq unavailable"))

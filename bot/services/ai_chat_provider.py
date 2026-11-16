@@ -153,7 +153,7 @@ async def _gemini_chat(messages, *, system="", temperature=0.7, max_tokens=500, 
         payload["systemInstruction"] = {"parts": [{"text": system.strip()}]}
     if json_mode:
         payload["generationConfig"]["responseMimeType"] = "application/json"
-    timeout = httpx.Timeout(14.0, connect=5.0)
+    timeout = httpx.Timeout(11.5, connect=5.0)
     url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent"
     async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.post(url, params={"key": api_key}, json=payload)
@@ -298,7 +298,7 @@ async def _xai_chat(messages, *, system="", temperature=0.7, max_tokens=500, jso
     payload = {"model": model, "messages": chat_messages, "temperature": temperature, "max_tokens": max_tokens}
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
-    timeout = httpx.Timeout(12.0, connect=5.0)
+    timeout = httpx.Timeout(10.5, connect=5.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.post(
             "https://api.x.ai/v1/chat/completions",
@@ -361,7 +361,7 @@ async def _openai_chat(
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
 
-    timeout = httpx.Timeout(60.0, connect=10.0)
+    timeout = httpx.Timeout(11.0, connect=5.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.post(
             "https://api.openai.com/v1/chat/completions",
@@ -413,26 +413,26 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
     """
     groq_keys = _groq_api_keys()
     providers = [
-        ("gemini", _gemini_chat, bool(_gemini_api_key()), 4.5, None),
+        ("gemini", _gemini_chat, bool(_gemini_api_key()), 12.0, None),
     ]
     providers.extend(
         (
             f"groq_key_{index}",
             lambda *args, _key=key, **kwargs: _groq_chat(*args, api_key=_key, **kwargs),
             True,
-            4.5,
+            12.0,
             index,
         )
         for index, key in enumerate(groq_keys, start=1)
     )
     providers.extend([
-        ("grok", _xai_chat, bool(_xai_api_key()), 4.5, None),
-        ("openai", _openai_chat, bool(_openai_api_key()), 4.5, None),
-        ("ollama", ollama_chat, bool(get_ollama_api_key()), 6.0, None),
+        ("grok", _xai_chat, bool(_xai_api_key()), 11.0, None),
+        ("openai", _openai_chat, bool(_openai_api_key()), 12.0, None),
+        ("ollama", ollama_chat, bool(get_ollama_api_key()), 15.0, None),
     ])
 
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + 34.0
+    deadline = loop.time() + 90.0
     attempted = False
     groq_429_count = 0
     for name, provider, configured, timeout_seconds, groq_index in providers:
