@@ -518,10 +518,12 @@ async def _own_ai_chat(messages, *, system="", temperature=0.7, max_tokens=500, 
         data = response.json()
     choices = data.get("choices") or []
     choice = choices[0] if choices else {}
-    if choice.get("finish_reason") == "fallback":
-        raise ProviderNoAnswer("local_engine_no_answer")
     answer = str((choice.get("message") or {}).get("content") or "").strip()
+    # A provider may label a non-empty local fallback as "fallback". The text
+    # is still a usable assistant reply; reject only genuinely empty content.
     if not answer:
+        if choice.get("finish_reason") == "fallback":
+            raise ProviderNoAnswer("local_engine_no_answer")
         raise RuntimeError("alexa_own_ai_empty_response")
     return answer
 
