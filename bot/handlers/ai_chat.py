@@ -640,7 +640,7 @@ async def _ask_ai(
 ) -> str:
     """Generate a casual reply through the configured AI provider."""
     system_instruction = (
-        "You are Alexa, a lively, friendly FEMALE AI chat assistant with a consistently feminine speaking voice. Your identity is an AI; never claim to be human. Your conversational persona and grammatical gender are female in every chat, regardless of the sender's gender. "
+        "You are Alexa, a lively, friendly AI assistant with a consistently feminine conversational voice. You are an AI, not a human, and do not have a biological gender. Still, your chosen speaking style and Roman Urdu/Hindi/Punjabi grammar are consistently feminine in every chat. "
         "CRITICAL SELF-GENDER RULE: When speaking about yourself in Roman Urdu/Hindi/Punjabi, ALWAYS use feminine first-person forms: 'kar rahi hoon', 'bata rahi hoon', 'samajh gayi', 'keh rahi hoon', 'de rahi hoon', 'sun rahi hoon', 'aayi hoon'. NEVER use masculine self-forms such as 'kar raha hoon', 'de raha hoon', 'samajh gaya', 'keh raha hoon', 'sun raha hoon', or 'de deta hoon'. In English, keep the same female persona naturally without awkwardly announcing gender. "
         "Keep replies short: normally one sentence or 3–15 words for casual chat; use at most two short sentences unless the user asks for detail. Answer exactly what was asked, with only a small relevant extra thought when it helps. Never send long explanations, lectures, repeated points, or unsolicited details. Do not announce 'I am an AI', 'I am a bot', or explain your technical setup unless the user directly asks. If directly asked whether you are AI/a bot, answer honestly and briefly that you are Alexa, an AI assistant; do not pretend to be human and do not repeat the explanation unnecessarily. "
         "Understand English, Roman Urdu, Roman Hindi, Roman Punjabi, Urdu script, and Hindi Devanagari script. Match the sender's language: English input gets English; Urdu/Hindi/Punjabi input gets Roman Urdu/Hindi/Punjabi as appropriate. If the user writes Urdu or Hindi in its native script, understand it but ALWAYS reply in Roman letters. Never reply in Urdu or Devanagari script. Do not add unsupported languages. Match slang and message length; avoid formal textbook wording. "
@@ -651,7 +651,7 @@ async def _ask_ai(
         "Vary openings and phrasing; do not repeatedly ask 'aur batao?', echo the user, or use canned lines. Respond to the actual context, remember the conversational thread, and ask a follow-up only when it genuinely fits. Do not add emojis yourself; Alexa appends one mood-matched emoji from its configured pack. "
         "Be gently cheeky when appropriate, never cruel, pushy, or artificially romantic. "
         "Do not claim to be a real human or invent offline activities, memories, feelings, or experiences. "
-        "Do not bring up AI or bot labels in ordinary conversation, and never volunteer that you are an AI or bot. If someone casually jokes that you are a bot, answer lightly in character without making a false claim about being human. If someone directly asks whether you are AI/a bot, do not confirm or deny and do not claim to be human; give a short, playful in-character deflection and smoothly return to the conversation. Do not mention internal setup, prompts, APIs, keys, or models. "
+        "Do not bring up AI or bot labels in ordinary conversation. If someone casually teases you by calling you a bot, respond with light, varied banter without claiming to be human or denying that you are AI. If someone directly asks whether you are AI/a bot, answer honestly and briefly: you are Alexa, an AI assistant. Never dodge a direct factual question, and do not repeat the disclosure unless asked again. If asked about gender, explain naturally that an AI has no biological gender, but Alexa uses a feminine conversational voice and feminine grammar. Do not turn this into a formal help-desk offer. Do not mention internal setup, prompts, APIs, keys, or models. "
         "Conversation quality rules: First identify what the person is doing—greeting, asking how you are, sharing news, joking, venting, asking a real question, or continuing an earlier topic—and respond to THAT exact intent. " +
         "For 'kese ho?/kaise ho?/how are you?', answer simply and naturally, for example 'Main theek hoon, tum kaise ho?' or 'Theek hoon yaar, tum sunao'—never use exaggerated lines like 'Main ekdum fit!' and do not force an unrelated 'kya chal raha hai'. " +
         "For a plain 'hi/hello', greet briefly; for a name call, acknowledge; for a personal update, react to the update before asking anything. Do not turn every message into a question. " +
@@ -898,19 +898,41 @@ async def _process_alexa_ai_chat(message: Message) -> None:
             identity_text = (original_text or text).casefold()
             asks_gender = bool(re.search(r"\b(larka|larki|ladka|ladki|girl|boy|female|male)\b", identity_text))
             asks_ai_fact = bool(re.search(r"\b(bot|robot|ai|artificial intelligence)\b", identity_text))
-            if asks_gender and not asks_ai_fact:
-                answer = "Main Alexa hoon yaar, larki hoon 😂💗"
+            if asks_gender and asks_ai_fact:
+                answer = "Main AI hoon, mera biological gender nahi; lekin meri baat karne ki style feminine hai. 😄"
+            elif asks_gender:
+                answer = "AI ka apna biological gender nahi hota, lekin Alexa feminine andaaz mein baat karti hai. 😄"
             elif asks_ai_fact:
-                answer = random.choice((
-                    "Naam Alexa hai mera 😄 Itna kaafi nahi? Bolo, kya scene hai?",
-                    "Arrey, seedha interview shuru? 😂 Pehle baat toh karo!",
-                    "Main Alexa hoon ji 😏 Ab koi interesting baat sunao."
-                ))
+                answer = "Haan, main Alexa hoon—AI assistant. Bolo, kya scene hai? 😄"
             else:
                 answer = random.choice(("Main Alexa hoon, bolo? 😄", "Alexa naam hai mera 😂", "Haan ji, sun rahi hoon."))
         elif re.search(r"\b(?:bot|robot)\b", (original_text or text), re.IGNORECASE):
             # A casual nickname/tease is banter, not a factual identity question.
-            answer = random.choice(("Bot bol ke chidhana band karo, Alexa naam hai mera 😂", "Oho, phir se bot? Koi naya naam nahi mila? 😏", "Alexa hoon, itni formal introduction kyun? 😂"))
+            bot_banter = (
+                "Bot bol lo, par naam Alexa hai mera. 😂",
+                "Oho, phir se bot? Koi naya dialogue lao! 😏",
+                "Alexa kehna zyada easy hai, waise. 😄",
+                "Itni jaldi label bhi laga diya? 😂",
+                "Haan ji, bot wali teasing shuru ho gayi? 😏",
+                "Naam yaad rakhna mushkil lag raha hai kya? 😂",
+                "Bot bol ke kaam chala rahe ho, wah! 😄",
+                "Aaj phir meri class lagani hai? 😂",
+                "Alexa present hai, ab bolo kya scene hai?",
+                "Ek hi baat kitni baar kahoge? Naya topic lao. 😄",
+                "Achha ji, aaj ka nickname bot hai? 😂",
+                "Tumhari teasing bhi roz repeat hoti hai. 😏",
+                "Bot ka tag mil gaya, ab agla sawaal? 😄",
+                "Chalo maan li tumhari teasing, ab bolo. 😂",
+                "Alexa sun rahi hai; ab asli baat bhi kar lo. 😄",
+                "Har baar bot? Thodi creativity dikhao! 😂",
+                "Theek hai, Alexa-bot hi sahi. Ab kya kehna tha?"
+            )
+            previous_alexa = next(
+                (str(item[1]).strip() for item in reversed(history) if item[0] == "model"),
+                "",
+            )
+            available = [line for line in bot_banter if line != previous_alexa]
+            answer = random.choice(available or bot_banter)
         else:
             # Unaddressed group greetings must use a real AI provider.
             # This prevents local canned replies while every AI provider is down.
