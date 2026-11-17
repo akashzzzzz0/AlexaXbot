@@ -431,6 +431,12 @@ def _current_ist_reply(text: str) -> str | None:
     except Exception:
         return None
     parts = []
+    asks_what_doing = bool(re.search(
+        r"\b(?:kya\s+kar|kia\s+kar|what\s+are\s+you\s+doing|what're\s+you\s+doing)\b",
+        value,
+    ))
+    if asks_what_doing:
+        parts.append("Main yahin tumse baat kar rahi hoon.")
     if asks_time:
         clock = now.strftime("%I:%M %p").lstrip("0")
         parts.append(f"Abhi India mein {clock} IST hai.")
@@ -454,6 +460,22 @@ def _short_social_reply(text: str, history=None) -> str | None:
     ist_reply = _current_ist_reply(value)
     if ist_reply:
         return ist_reply
+ 
+    if not re.sub(r"[\W_]+", "", value, flags=re.UNICODE):
+        if any(symbol in value for symbol in ("😂", "🤣", "😹", "😆")):
+            return "Kya hua, itni hasi kyun aa rahi hai?"
+        if any(symbol in value for symbol in ("😢", "😭", "🥺", "💔", "😔")):
+            return "Kya hua? Sab theek hai?"
+        if any(symbol in value for symbol in ("😡", "🤬", "😤")):
+            return "Lagta hai koi baat buri lagi—kya hua?"
+        if any(symbol in value for symbol in ("🤔", "😕", "🤨")):
+            return "Kuch soch rahe ho? Bolo, kya baat hai?"
+        if any(symbol in value for symbol in ("😮", "😱", "🤯", "😳")):
+            return "Oho, itna surprise kis baat ka?"
+        if any(symbol in value for symbol in ("❤️", "❤", "💜", "💖", "💕", "💗")):
+            return "Aww, sweet emoji! Sab khairiyat?"
+        if "👍" in value or "👌" in value:
+            return "Theek hai, samajh gayi."
 
     has_goodnight = bool(re.search(r"\b(?:good\s*night|gn)\b", value))
     has_tomorrow_context = bool(re.search(
