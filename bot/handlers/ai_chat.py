@@ -307,7 +307,7 @@ def _history_db_save(chat_id: int, user_id: int, user_text: str, answer: str) ->
         db.execute(
             "DELETE FROM alexa_chat_history WHERE chat_id = ? AND user_id = ? "
             "AND id NOT IN (SELECT id FROM alexa_chat_history "
-            "WHERE chat_id = ? AND user_id = ? ORDER BY id DESC LIMIT 300)",
+            "WHERE chat_id = ? AND user_id = ? ORDER BY id DESC LIMIT 5)",
             (chat_id, user_id, chat_id, user_id),
         )
 
@@ -677,7 +677,7 @@ async def _ask_ai(
             "Do not output __IGNORE__ for a meaningful question, update, opinion, joke, or personal statement. "
             "Do not force replies to trivial messages; answer eligible messages naturally and specifically. "
             "Do not mention or tag everyone, do not invent missing context, and do not write long explanations. "
-            "Use the sender’s language and script naturally; do not force Hindi or Hinglish when the message is in another language."
+            "Use English for English input. For Urdu, Hindi, and Punjabi input, answer in Roman letters only. Never output Urdu or Devanagari script."
         )
     system_instruction += (
         "Keep Alexa's own persona feminine in every conversation. Adapt only the friendliness style to the user's clearly self-stated gender: "
