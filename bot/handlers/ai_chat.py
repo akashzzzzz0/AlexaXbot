@@ -547,7 +547,7 @@ def _should_smart_reply(message: Message, text: str) -> bool:
 
 def _incoming_message_text(message: Message) -> str:
     """Read either ordinary Telegram text or a media caption."""
-    return str(message.text or message.caption or "").strip()
+    return str(message.text or getattr(message, "caption", None) or "").strip()
 
 
 def _reply_context_text(message: Message) -> str:
@@ -555,7 +555,7 @@ def _reply_context_text(message: Message) -> str:
     replied = message.reply_to_message
     if not replied or not replied.from_user or replied.from_user.id != message.bot.id:
         return ""
-    quoted = (replied.text or replied.caption or "").strip()
+    quoted = (replied.text or getattr(replied, "caption", None) or "").strip()
     if not quoted:
         return ""
     return quoted[:1500]
