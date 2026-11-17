@@ -301,8 +301,6 @@ async def _xai_chat(messages, *, system="", temperature=0.7, max_tokens=500, jso
         raise ValueError("empty_prompt")
     model = (getattr(settings, "GROK_MODEL", "") or os.getenv("GROK_MODEL", "") or "grok-3-mini").strip()
     payload = {"model": model, "messages": chat_messages, "temperature": temperature, "max_tokens": max_tokens}
-    if conversation_id:
-        payload["conversation_id"] = str(conversation_id)
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
     timeout = httpx.Timeout(10.5, connect=5.0)
