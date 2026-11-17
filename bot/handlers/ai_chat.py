@@ -560,7 +560,7 @@ def _is_daily_ranking_question(text: str) -> bool:
         value,
     )
     asks_who = re.search(
-        r"\b(?:kaun|kon|koun|who|whose|kis|naam|name|batao|btao|hai|hain|is|today|aaj)\b",
+        r"\b(?:kaun|kon|koun|who|whose|kis|naam|name|batao|btao)\b",
         value,
     )
     return bool(ranking_subject and asks_who)
