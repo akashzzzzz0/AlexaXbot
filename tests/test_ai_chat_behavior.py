@@ -244,6 +244,23 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
         self.assertIn("UNDERSTANDING FIRST", system)
         self.assertIn("Be tolerant of typos", system)
         self.assertIn("Track negation", system)
+        self.assertIn("Interpret emojis", system)
+        self.assertIn("topic changes", system)
+
+    def test_emoji_messages_receive_context_matched_selective_reactions(self):
+        self.assertIn(ai_chat._reaction_for_text("😂"), ("😂", "🤣", "😹", "😆"))
+        self.assertIn(ai_chat._reaction_for_text("😭"), ("🥺", "🫂", "❤️", "😔"))
+        self.assertIn(ai_chat._reaction_for_text("🎉"), ("🎉", "🥳", "🏆", "👏"))
+        self.assertIsNone(ai_chat._reaction_for_text("ordinary update with no emotional cue"))
+
+    def test_ai_prompt_explicitly_interprets_emoji_and_conversational_intent(self):
+        provider = AsyncMock(return_value="Samajh gayi.")
+        with patch.object(ai_chat, "ai_chat_completion", provider):
+            asyncio.run(ai_chat._ask_ai("😂😭", [], smart_mode=False))
+        system = provider.await_args.kwargs["system"]
+        self.assertIn("emoji-only messages", system)
+        self.assertIn("sarcastic", system)
+        self.assertIn("agreement, disagreement, refusal", system)
 
     def test_bot_banter_has_at_least_fifteen_unique_lines(self):
         self.assertGreaterEqual(len(ai_chat._BOT_BANTER_REPLIES), 15)
