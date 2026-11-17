@@ -921,13 +921,16 @@ async def _process_alexa_ai_chat(message: Message) -> None:
                 )
     except (httpx.HTTPError, ValueError, TypeError, RuntimeError) as exc:
         logger.warning(
-            "Alexa AI reply failed for chat_id=%s: %s (%s)",
+            "Alexa AI reply failed for chat_id=%s: %s (%s); using local reply fallback",
             message.chat.id, type(exc).__name__, str(exc)[:1200],
         )
-        return
+        answer = ""
     except Exception as exc:
-        logger.exception("Unexpected Alexa AI chat failure for chat_id=%s", message.chat.id)
-        return
+        logger.exception(
+            "Unexpected Alexa AI chat failure for chat_id=%s; using local reply fallback",
+            message.chat.id,
+        )
+        answer = ""
 
     # A direct call should never disappear just because the small offline engine
     # could not classify the wording. Use a contextual clarification, not silence.
