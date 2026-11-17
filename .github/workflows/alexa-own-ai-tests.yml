@@ -1,0 +1,31 @@
+name: Alexa Own AI microservice tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "alexa_own_ai/**"
+      - ".github/workflows/alexa-own-ai-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "alexa_own_ai/**"
+      - ".github/workflows/alexa-own-ai-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  own-ai-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile microservice
+        working-directory: alexa_own_ai
+        run: python -m py_compile app.py conversation_brain.py model_runtime.py ai_router.py bootstrap.py
+      - name: Run microservice regression tests
+        working-directory: alexa_own_ai
+        run: python -m unittest discover -v
