@@ -172,6 +172,11 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
         self.assertIn("ALWAYS reply in Roman letters", system)
         self.assertIn("Avoid chatbot clichés", system)
         self.assertNotIn("Sirf casual Roman Hindi/Hinglish", system)
+        self.assertIn("FEMALE AI chat assistant", system)
+        self.assertIn("CRITICAL SELF-GENDER RULE", system)
+        self.assertIn("NEVER use masculine self-forms", system)
+        self.assertIn("de deta hoon", system)
+        self.assertIn("answer honestly and briefly", system)
 
     def test_smart_group_prompt_does_not_force_hindi_for_other_languages(self):
         provider = AsyncMock(return_value="I'm good, thanks.")
