@@ -356,6 +356,23 @@ def _group_conversation_is_active(chat_id: int) -> bool:
     return len({user_id for _, user_id in activity}) >= 2
 
 
+_RELIGIOUS_GREETING_RE = re.compile(
+    r"\b(?:assalamu?(?:\s*o)?\s*ala(?:i|y)kum|as[- ]sala?mu?\s*ala(?:i|y)kum|salaam|salam|aoa)\b",
+    re.IGNORECASE,
+)
+_PUNCTUATION_ONLY_RE = re.compile(r"^[\s.!?,…;:~_\-–—]+$")
+
+
+def _is_ignored_low_signal_message(text: str) -> bool:
+    """Ignore religious greetings and punctuation-only noise without invoking AI."""
+    value = (text or "").strip()
+    return (
+        not value
+        or bool(_RELIGIOUS_GREETING_RE.search(value))
+        or bool(_PUNCTUATION_ONLY_RE.fullmatch(value))
+    )
+
+
 _GREETING_RE = re.compile(
     r"^\s*(?:oy+|oye+|hi+|hello+|helo+|hey+|good\s+(?:morning|afternoon|evening|night)|good\s+day|gm|gn|morning|afternoon|evening)[.!?,\s]*$",
     re.IGNORECASE,
@@ -533,6 +550,9 @@ async def is_alexa_trigger(message: Message) -> bool:
     global _bot_username
     text = (message.text or "").strip()
     if not text or not message.from_user or message.from_user.is_bot:
+        return False
+    # Never start a conversation for religious greetings or punctuation-only noise.
+    if _is_ignored_low_signal_message(text):
         return False
 
     # Keep slash commands available to their existing feature handlers in every chat.
@@ -867,6 +887,8 @@ def _no_answer_clarification(user_text: str) -> str:
 
 async def _process_alexa_ai_chat(message: Message) -> None:
     text = (message.text or "").strip()
+    if _is_ignored_low_signal_message(text):
+        return
     if message.chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}:
         logger.info(
             "Alexa group chat handler received message",
@@ -980,6 +1002,11 @@ async def _process_alexa_ai_chat(message: Message) -> None:
         )
         return
     if answer.strip().casefold() == "__ignore__":
+        return
+    # Enforce the greeting ban at the output boundary too: prompts alone are not
+    # reliable enough to prevent a provider from emitting a prohibited greeting.
+    if _RELIGIOUS_GREETING_RE.search(answer):
+        logger.warning("Alexa response suppressed because it contained a prohibited religious greeting")
         return
     # Never send a fallback/fictional AI response when Ollama is unavailable.
     # Smart group replies stay silent unless a real provider returned an answer.
