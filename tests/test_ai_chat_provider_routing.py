@@ -190,5 +190,51 @@ class AlexaChatProviderRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(groq.await_count, 3)
         grok.assert_awaited_once()
 
+
+    async def test_openrouter_failure_falls_through_to_alexa_own_ai(self):
+        request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+        limited = httpx.Response(429, request=request, text='{"error":{"message":"rate limit"}}')
+        openrouter = AsyncMock(side_effect=httpx.HTTPStatusError(
+            "rate limited", request=request, response=limited
+        ))
+        own_ai = AsyncMock(return_value="Own AI reply")
+        with (
+            patch.object(ai_chat_provider, "_gemini_api_key", return_value=""),
+            patch.object(ai_chat_provider, "_groq_api_keys", return_value=[]),
+            patch.object(ai_chat_provider, "_openrouter_api_key", return_value="router-key"),
+            patch.object(ai_chat_provider, "_openrouter_chat", openrouter),
+            patch.object(ai_chat_provider, "_xai_api_key", return_value=""),
+            patch.object(ai_chat_provider, "_openai_api_key", return_value=""),
+            patch.object(ai_chat_provider, "_own_ai_url", return_value="https://own-ai.example/v1/chat/completions"),
+            patch.object(ai_chat_provider, "_own_ai_chat", own_ai),
+            patch.object(ai_chat_provider, "get_ollama_api_key", return_value=""),
+        ):
+            result = await ai_chat_provider.ai_chat_completion(
+                [{"role": "user", "content": "Hi"}]
+            )
+        self.assertEqual(result, "Own AI reply")
+        openrouter.assert_awaited_once()
+        own_ai.assert_awaited_once()
+        self.assertEqual(ai_chat_provider.drain_provider_events(), ["openrouter"])
+
+    async def test_own_ai_is_skipped_when_url_is_not_configured(self):
+        own_ai = AsyncMock()
+        with (
+            patch.object(ai_chat_provider, "_gemini_api_key", return_value=""),
+            patch.object(ai_chat_provider, "_groq_api_keys", return_value=[]),
+            patch.object(ai_chat_provider, "_openrouter_api_key", return_value=""),
+            patch.object(ai_chat_provider, "_xai_api_key", return_value=""),
+            patch.object(ai_chat_provider, "_openai_api_key", return_value=""),
+            patch.object(ai_chat_provider, "_own_ai_url", return_value=""),
+            patch.object(ai_chat_provider, "_own_ai_chat", own_ai),
+            patch.object(ai_chat_provider, "get_ollama_api_key", return_value=""),
+        ):
+            result = await ai_chat_provider.ai_chat_completion(
+                [{"role": "user", "content": "Hi"}]
+            )
+        self.assertEqual(result, "")
+        own_ai.assert_not_awaited()
+
+
 if __name__ == "__main__":
     unittest.main()
