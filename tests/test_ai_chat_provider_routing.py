@@ -31,6 +31,25 @@ class AlexaOwnAIOnlyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(own.await_args.kwargs["conversation_id"], "-100123:456")
         external.assert_not_awaited()
 
+    async def test_nonempty_own_ai_reply_is_accepted_even_if_finish_reason_is_fallback(self):
+        response = type("Response", (), {
+            "status_code": 200,
+            "json": lambda self: {"choices": [{
+                "finish_reason": "fallback",
+                "message": {"role": "assistant", "content": "Haan bolo, sun rahi hoon."},
+            }]},
+        })()
+        client = AsyncMock()
+        client.__aenter__.return_value.post = AsyncMock(return_value=response)
+        with (
+            patch.object(ai_chat_provider, "_own_ai_url", return_value="https://own-ai.example/v1/chat/completions"),
+            patch("bot.services.ai_chat_provider.httpx.AsyncClient", return_value=client),
+        ):
+            answer = await ai_chat_provider._own_ai_chat(
+                [{"role": "user", "content": "Bool lyy"}]
+            )
+        self.assertEqual(answer, "Haan bolo, sun rahi hoon.")
+
     async def test_does_not_call_any_external_provider_when_own_ai_is_missing(self):
         own = AsyncMock()
         external = AsyncMock()
