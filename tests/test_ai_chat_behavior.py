@@ -176,7 +176,7 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
         with patch.object(ai_chat, "ai_chat_completion", provider):
             asyncio.run(ai_chat._ask_ai("How are you?", [], smart_mode=True))
         system = provider.await_args.kwargs["system"]
-        self.assertIn("sender’s language and script naturally", system)
+        self.assertIn("Never output Urdu or Devanagari script", system)
         self.assertNotIn("Use natural Indian Roman Hindi/Hinglish", system)
 
 
