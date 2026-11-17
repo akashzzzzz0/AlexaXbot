@@ -1,5 +1,7 @@
 import asyncio
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
 
@@ -191,6 +193,30 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
         message.reply.assert_awaited_once()
         self.assertIn("sun rahi hoon", message.reply.await_args.args[0].casefold())
         ai_chat._history_loaded.discard(key)
+
+class AlexaChatHistoryWindowTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.previous_db = ai_chat._HISTORY_DB
+        self.previous_initialized = ai_chat._history_initialized
+        ai_chat._HISTORY_DB = Path(self.temp_dir.name) / "history.sqlite3"
+        ai_chat._history_initialized = False
+
+    def tearDown(self):
+        ai_chat._HISTORY_DB = self.previous_db
+        ai_chat._history_initialized = self.previous_initialized
+        self.temp_dir.cleanup()
+
+    def test_own_ai_receives_and_persists_twenty_recent_messages(self):
+        self.assertEqual(ai_chat._HISTORY_LIMIT, 20)
+        self.assertEqual(ai_chat._conversations[(987654, 123456)].maxlen, 20)
+        for index in range(12):
+            ai_chat._history_db_save(987654, 123456, f"user-{index}", f"assistant-{index}")
+        history = ai_chat._history_db_load(987654, 123456)
+        self.assertEqual(len(history), 20)
+        self.assertEqual(history[0], ("user", "user-2"))
+        self.assertEqual(history[-1], ("model", "assistant-11"))
+
 
 if __name__ == "__main__":
     unittest.main()
