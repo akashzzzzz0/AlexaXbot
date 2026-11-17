@@ -101,6 +101,42 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
     def test_slash_commands_do_not_trigger_casual_chat(self):
         self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(_group_message("/ban 123"))))
 
+    def test_religious_greetings_are_ignored_in_all_common_spellings(self):
+        for index, text in enumerate((
+            "Assalam o alaikum", "Assalamu alaikum", "As-salamu alaykum",
+            "Salam", "Salaam", "AOA", "salam, kya haal hai?",
+        )):
+            with self.subTest(text=text):
+                self.assertTrue(ai_chat._is_ignored_low_signal_message(text))
+                self.assertFalse(asyncio.run(
+                    ai_chat.is_alexa_trigger(_group_message(text, chat_id=-101000-index))
+                ))
+
+    def test_punctuation_only_messages_are_ignored(self):
+        for index, text in enumerate((".", "..", "...", "?!", "—")):
+            with self.subTest(text=text):
+                self.assertTrue(ai_chat._is_ignored_low_signal_message(text))
+                self.assertFalse(asyncio.run(
+                    ai_chat.is_alexa_trigger(_group_message(text, chat_id=-101100-index))
+                ))
+
+    def test_real_text_is_not_treated_as_punctuation_noise(self):
+        for text in ("hello", "kya haal hai?", "Alexa"):
+            with self.subTest(text=text):
+                self.assertFalse(ai_chat._is_ignored_low_signal_message(text))
+
+    def test_provider_religious_greeting_response_is_suppressed(self):
+        message = _group_message("Alexa hello")
+        message.reply = AsyncMock()
+        message.bot.send_chat_action = AsyncMock()
+        key = (message.chat.id, message.from_user.id)
+        ai_chat._history_loaded.add(key)
+        with patch.object(ai_chat, "_ask_ai_with_typing", AsyncMock(return_value="Assalam o alaikum! Kya haal hain?")):
+            asyncio.run(ai_chat._process_alexa_ai_chat(message))
+        message.reply.assert_not_awaited()
+        ai_chat._history_loaded.discard(key)
+
+
     def test_oy_oye_are_group_greeting_triggers(self):
         for index, text in enumerate(("oy", "oyyy", "oye", "oyeee")):
             with self.subTest(text=text):
