@@ -787,7 +787,7 @@ def _is_identity_question(text: str) -> bool:
     value = (text or "").casefold().strip()
     patterns = (
         r"\b(?:tum|tu|aap)\s+(?:bot|robot|ai)\s+(?:ho|hai|hain)\b",
-        r"^(?:ai|a\.i\.|bot|robot)$",
+        r"^(?:ai|a\.i\.)$",
         r"\b(?:are|r)\s+you\s+(?:an?\s+)?ai\b",
         r"\b(?:kya\s+)?(?:tum|tu|aap)\s+(?:bot|robot|ai)\s+(?:ho|hai|hain)\b",
         r"\b(?:are\s+you|r\s+you)\s+(?:a\s+)?(?:bot|robot|ai)\b",
