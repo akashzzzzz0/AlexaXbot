@@ -1065,7 +1065,14 @@ async def _process_alexa_ai_chat(message: Message) -> None:
         else:
             # Unaddressed group greetings must use a real AI provider.
             # This prevents local canned replies while every AI provider is down.
-            short_reply = None if smart_mode else _short_social_reply(text, history)
+            short_reply = None
+            # Keep the established AI-generated response path for an explicit
+            # "Alexa, hello" call; deterministic intent handling is for the
+            # substantive request that follows the name call.
+            if not smart_mode and not (
+                prefix_match and text.casefold() in {"hi", "hello", "hey", "helo"}
+            ):
+                short_reply = _short_social_reply(text, history)
             if short_reply is not None:
                 answer = short_reply
             else:
