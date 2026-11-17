@@ -198,6 +198,8 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
         for text in ("Are you an AI?", "Tum bot ho?", "Kya tum AI ho?", "Are you a robot?"):
             with self.subTest(text=text):
                 self.assertTrue(ai_chat._is_identity_question(text))
+        # A standalone "bot" is a casual nickname/tease, not a factual question.
+        self.assertFalse(ai_chat._is_identity_question("bot"))
 
 
     def test_smart_group_prompt_does_not_force_hindi_for_other_languages(self):
