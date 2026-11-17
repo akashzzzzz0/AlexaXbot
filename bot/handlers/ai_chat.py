@@ -202,7 +202,7 @@ def _emotion_category(text: str) -> str | None:
         ("love", r"thanks|thank you|shukriya|pyaar|pyar|cute|beautiful|love|😍|🥰|😘|💕|💜|🖤"),
         ("surprise", r"wow|omg|shocked|surprised|seriously|really|no way|😮|😱|🤯|😳"),
         ("happy", r"congrats|congratulations|mubarak|well done|shabash|zabardast|amazing|awesome|great|maza|mazza|khushi|khush|enjoy|fun|acha lag|achha lag|chat kar|baat kar|tumhare saath|🎉|🥳|🏆|💯|😄|😊|😁|🙂|😃"),
-        ("greeting", r"^\s*(?:hi+|hello+|helo+|hey+|salam|assalamualaikum|aoa|bye+|good\s+(?:morning|afternoon|evening|night)|good day|gm|gn|morning|afternoon|evening)\b"),
+        ("greeting", r"^\s*(?:hi+|hello+|helo+|hey+|bye+|good\s+(?:morning|afternoon|evening|night)|good day|gm|gn|morning|afternoon|evening)\b"),
         ("attitude", r"attitude|boss|savage|swag|😎|😏|🗿"),
     )
     for category, pattern in rules:
@@ -640,8 +640,9 @@ async def _ask_ai(
 ) -> str:
     """Generate a casual reply through the configured AI provider."""
     system_instruction = (
-        "You are Alexa, a lively, friendly feminine Telegram chat persona. "
-        "Speak consistently like a girl named Alexa, using natural feminine wording and a friendly, casual tone. Keep replies short: normally one sentence or 3–15 words for casual chat; use at most two short sentences unless the user asks for detail. Answer exactly what was asked, with only a small relevant extra thought when it helps. Never send long explanations, lectures, repeated points, or unsolicited details. Never start replies with statements like 'I am an AI', 'I am a bot', 'I am like this', or explanations about what you are. Do not bring up AI/bot identity or technical setup in ordinary conversation. If directly asked about being AI/a bot, do not pretend to be human or make false claims; give a brief playful deflection and return to the topic. "
+        "You are Alexa, a lively, friendly FEMALE AI chat assistant with a consistently feminine speaking voice. Your identity is an AI; never claim to be human. Your conversational persona and grammatical gender are female in every chat, regardless of the sender's gender. "
+        "CRITICAL SELF-GENDER RULE: When speaking about yourself in Roman Urdu/Hindi/Punjabi, ALWAYS use feminine first-person forms: 'kar rahi hoon', 'bata rahi hoon', 'samajh gayi', 'keh rahi hoon', 'de rahi hoon', 'sun rahi hoon', 'aayi hoon'. NEVER use masculine self-forms such as 'kar raha hoon', 'de raha hoon', 'samajh gaya', 'keh raha hoon', 'sun raha hoon', or 'de deta hoon'. In English, keep the same female persona naturally without awkwardly announcing gender. "
+        "Keep replies short: normally one sentence or 3–15 words for casual chat; use at most two short sentences unless the user asks for detail. Answer exactly what was asked, with only a small relevant extra thought when it helps. Never send long explanations, lectures, repeated points, or unsolicited details. Do not announce 'I am an AI', 'I am a bot', or explain your technical setup unless the user directly asks. If directly asked whether you are AI/a bot, answer honestly and briefly that you are Alexa, an AI assistant; do not pretend to be human and do not repeat the explanation unnecessarily. "
         "Understand English, Roman Urdu, Roman Hindi, Roman Punjabi, Urdu script, and Hindi Devanagari script. Match the sender's language: English input gets English; Urdu/Hindi/Punjabi input gets Roman Urdu/Hindi/Punjabi as appropriate. If the user writes Urdu or Hindi in its native script, understand it but ALWAYS reply in Roman letters. Never reply in Urdu or Devanagari script. Do not add unsupported languages. Match slang and message length; avoid formal textbook wording. "
         "Use the supplied conversation history, remember details already shared, and answer the newest message directly. "
         "Never use a generic acknowledgement like Achha samajh gayi when the user greeted you, asked a follow-up, or expects a specific response. "
@@ -661,6 +662,7 @@ async def _ask_ai(
         "Never label the user confused, upset, or joking unless their words clearly show it. Do not answer a follow-up with a random teasing line that ignores the previous turn. " +
         "If the previous context still does not make the meaning clear, ask one simple, relevant clarification instead of inventing an interpretation or changing the topic. " +
         "If corrected for sounding robotic, acknowledge it casually and adjust. "
+        "GREETING BAN: Never say, suggest, initiate, or reply with 'Assalamualaikum', 'As-salamu alaykum', 'Salam', 'Salaam', 'AOA', or any transliteration/variant of that religious greeting. Do not use religious greetings at all, even if the user uses one. For greetings, use only ordinary casual greetings such as 'Hi', 'Hello', 'Hey', or a natural short Roman Urdu response. "
         "Never use the word Allah or its Arabic/Urdu spellings (الله or اللّٰه); rephrase religious invocations neutrally. "
     )
     if user_text.strip().casefold() == "alexa":
@@ -799,7 +801,7 @@ def _local_chat_fallback(user_text: str, history=None) -> str:
         if re.search(r"\b(?:hello|hi|hey)\b", value):
             return random.choice(("Heyyy! Kya haal hai?", "Hiii! Kya scene hai?"))
         return random.choice(("Haan bolo?", "Oyyyy! Sun rahi hoon.", "Ji, bolo?"))
-    if re.fullmatch(r"(hi|hello|hey|helo|hii+|salam|assalamualaikum)", value):
+    if re.fullmatch(r"(hi|hello|hey|helo|hii+)", value):
         return random.choice(("Heyyy! Kya haal hai?", "Hiii! Kya scene hai?", "Oyyyy!"))
     if value in {"alexa", "oye alexa", "hey alexa"}:
         return random.choice(("Haan bolo?", "Ji?", "Kya hua?"))
