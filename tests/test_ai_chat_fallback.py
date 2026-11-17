@@ -4,6 +4,11 @@ from bot.handlers.ai_chat import _local_chat_fallback
 
 
 class AlexaLocalChatFallbackTests(unittest.TestCase):
+    def test_common_alexa_calls_get_local_replies(self):
+        self.assertTrue(_local_chat_fallback("Hello Alexa baby", []))
+        self.assertTrue(_local_chat_fallback("Oyy Alexa baby", []))
+        self.assertIn("bolo", _local_chat_fallback("Bool lyy", []).casefold())
+
     def test_unknown_message_does_not_get_generic_filler(self):
         self.assertEqual(_local_chat_fallback("Abe kya?", []), "")
         self.assertEqual(_local_chat_fallback("bas aise hi", []), "")
