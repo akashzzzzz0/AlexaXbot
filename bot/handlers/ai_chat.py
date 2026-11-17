@@ -26,9 +26,9 @@ from bot.services.ai_chat_provider import ai_chat_completion, drain_provider_eve
 router = Router(name="alexa_ai_chat")
 logger = logging.getLogger(__name__)
 _missing_key_logged = False
-_conversations = defaultdict(lambda: deque(maxlen=5))
+_conversations = defaultdict(lambda: deque(maxlen=20))
 _HISTORY_DB = Path("alexa_chat_history.db")
-_HISTORY_LIMIT = 5
+_HISTORY_LIMIT = 20
 _history_loaded = set()
 def _detect_user_gender_style(history, current_text: str) -> str:
     """Use only clear first-person self-identification; never guess from a name or ID."""
@@ -307,7 +307,7 @@ def _history_db_save(chat_id: int, user_id: int, user_text: str, answer: str) ->
         db.execute(
             "DELETE FROM alexa_chat_history WHERE chat_id = ? AND user_id = ? "
             "AND id NOT IN (SELECT id FROM alexa_chat_history "
-            "WHERE chat_id = ? AND user_id = ? ORDER BY id DESC LIMIT 5)",
+            "WHERE chat_id = ? AND user_id = ? ORDER BY id DESC LIMIT 20)",
             (chat_id, user_id, chat_id, user_id),
         )
 
