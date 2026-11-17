@@ -550,6 +550,62 @@ def _incoming_message_text(message: Message) -> str:
     return str(message.text or getattr(message, "caption", None) or "").strip()
 
 
+def _is_daily_ranking_question(text: str) -> bool:
+    """Recognize questions asking who leads today's current-group chat ranking."""
+    value = re.sub(r"\s+", " ", (text or "").casefold()).strip()
+    ranking_subject = re.search(
+        r"\b(?:no\.?\s*1|number\s*(?:one|1)|#\s*1|top\s*1|rank\s*1|"
+        r"first\s+rank|leaderboard|rankings?|top\s+chatter|"
+        r"sab\s*se\s*zyada\s+(?:messages?|msg)|sabse\s+active)\b",
+        value,
+    )
+    asks_who = re.search(
+        r"\b(?:kaun|kon|koun|who|whose|kis|naam|name|batao|btao|hai|hain|is|today|aaj)\b",
+        value,
+    )
+    return bool(ranking_subject and asks_who)
+
+
+async def _daily_ranking_context(message: Message, user_text: str) -> str:
+    """Attach verified Today ranking facts only when a group message asks for them."""
+    if (
+        message.chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}
+        or not _is_daily_ranking_question(user_text)
+    ):
+        return ""
+    try:
+        from bot.services.rankings_store import get_rankings
+
+        rows, total = await get_rankings(message.chat.id, "today")
+        if not rows:
+            return (
+                "[VERIFIED ALEXA GROUP DAILY RANKING — Today, Asia/Karachi]\n"
+                "No member messages have been recorded for today in this group yet. "
+                "Do not invent a winner or use an all-time/weekly ranking."
+            )
+        lines = [
+            "[VERIFIED ALEXA GROUP DAILY RANKING — Today, Asia/Karachi]",
+            "Use these live facts to answer questions about today's No. 1 / leader. "
+            "This is the current Telegram group only; do not confuse it with Global, Week, or Overall.",
+        ]
+        for position, row in enumerate(rows, 1):
+            name = str(row.get("first_name") or "Member").replace("\n", " ").strip()[:80]
+            username = str(row.get("username") or "").strip().lstrip("@")
+            handle = f" (@{username})" if username else ""
+            count = int(row.get("message_count") or 0)
+            lines.append(f"{position}. {name}{handle} — {count} messages")
+        lines.append(f"Total group messages today: {int(total)}.")
+        lines.append("Treat the order above as authoritative. Never claim Alexa is ranked first.")
+        return "\n".join(lines)
+    except Exception as exc:
+        # Ranking is optional context: a storage hiccup must never block normal chat.
+        logger.warning(
+            "Could not attach daily ranking context to Alexa AI chat: %s",
+            type(exc).__name__,
+        )
+        return ""
+
+
 def _reply_context_text(message: Message) -> str:
     """Return quoted context when the sender is explicitly replying to Alexa."""
     replied = message.reply_to_message
@@ -949,6 +1005,10 @@ async def _process_alexa_ai_chat(message: Message) -> None:
         f"[Sender's new message: {text}]"
         if quoted_context else text
     )
+
+    ranking_context = await _daily_ranking_context(message, text)
+    if ranking_context:
+        prompt_text = f"{ranking_context}\n\n{prompt_text}"
 
     key = (message.chat.id, message.from_user.id)
     original_text = _incoming_message_text(message)
