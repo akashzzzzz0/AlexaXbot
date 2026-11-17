@@ -435,6 +435,7 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
     deadline = loop.time() + 90.0
     attempted = False
     groq_429_count = 0
+    groq_429_occurred = False
     for name, provider, configured, timeout_seconds, groq_index in providers:
         if not configured:
             print("Alexa chat provider skipped:", name + ":missing_runtime_configuration")
@@ -473,6 +474,7 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
             status = getattr(getattr(exc, "response", None), "status_code", None)
             if status == 429:
                 if groq_index is not None:
+                    groq_429_occurred = True
                     if _is_groq_daily_token_quota_error(exc):
                         cooldown = _groq_daily_quota_cooldown(exc)
                         # TPD is organization/model-wide: rotating keys cannot bypass it.
@@ -501,7 +503,7 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
                 print("Alexa Groq rate limit cooldown:", name, str(round(cooldown, 1)) + "s")
             print("Alexa chat provider failed:", _safe_provider_error(name, exc))
 
-    if groq_keys and groq_429_count >= len(groq_keys) and "groq" not in _provider_events:
+    if groq_keys and groq_429_occurred and groq_429_count >= len(groq_keys) and "groq" not in _provider_events:
         _provider_events.append("groq")
     if attempted:
         print("Alexa chat providers exhausted: no usable reply from configured providers")
