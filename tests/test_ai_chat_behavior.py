@@ -35,6 +35,57 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
         ai_chat._active_conversations.clear()
         ai_chat._group_recent_activity.clear()
 
+    def test_daily_ranking_question_variants_are_recognized(self):
+        for text in (
+            "No 1 kon hai?", "No.1 kaun hai aaj?", "Who is number one?",
+            "Aaj leaderboard mein top 1 kaun hai?", "Aaj ka ranking leader batao",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(ai_chat._is_daily_ranking_question(text))
+        for text in ("hello", "Kya haal hai?", "No 1 song kaunsa hai?"):
+            with self.subTest(text=text):
+                self.assertFalse(ai_chat._is_daily_ranking_question(text))
+
+    def test_daily_ranking_context_uses_current_group_today_data(self):
+        async def scenario():
+            rows = [
+                {"user_id": 10, "first_name": "Ayaan", "username": "ayaan", "message_count": 37},
+                {"user_id": 20, "first_name": "Sara", "username": None, "message_count": 24},
+            ]
+            with patch(
+                "bot.services.rankings_store.get_rankings",
+                new_callable=AsyncMock,
+                return_value=(rows, 61),
+            ) as get_rankings:
+                context = await ai_chat._daily_ranking_context(
+                    _group_message("No 1 kon hai?"), "No 1 kon hai?"
+                )
+            get_rankings.assert_awaited_once_with(-100123, "today")
+            self.assertIn("Today, Asia/Karachi", context)
+            self.assertIn("1. Ayaan (@ayaan) — 37 messages", context)
+            self.assertIn("2. Sara — 24 messages", context)
+            self.assertIn("Total group messages today: 61", context)
+        asyncio.run(scenario())
+
+    def test_daily_ranking_context_is_not_added_to_unrelated_or_private_chat(self):
+        async def scenario():
+            with patch(
+                "bot.services.rankings_store.get_rankings",
+                new_callable=AsyncMock,
+            ) as get_rankings:
+                unrelated = await ai_chat._daily_ranking_context(
+                    _group_message("Kya haal hai?"), "Kya haal hai?"
+                )
+                private_message = _group_message("No 1 kon hai?")
+                private_message.chat.type = ChatType.PRIVATE
+                private = await ai_chat._daily_ranking_context(
+                    private_message, "No 1 kon hai?"
+                )
+            self.assertEqual(unrelated, "")
+            self.assertEqual(private, "")
+            get_rankings.assert_not_awaited()
+        asyncio.run(scenario())
+
     def test_untagged_group_messages_from_any_member_trigger_chat(self):
         for index, text in enumerate((
             "hi", "hello", "good morning", "good afternoon",
