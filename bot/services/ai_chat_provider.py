@@ -467,7 +467,7 @@ def _own_ai_url() -> str:
     return value if value.endswith("/v1/chat/completions") else value + "/v1/chat/completions"
 
 
-async def _own_ai_chat(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False) -> str:
+async def _own_ai_chat(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False, conversation_id="") -> str:
     url = _own_ai_url()
     if not url:
         raise RuntimeError("alexa_own_ai_not_configured")
@@ -491,6 +491,8 @@ async def _own_ai_chat(messages, *, system="", temperature=0.7, max_tokens=500, 
         or "auto"
     ).strip()
     payload = {"model": model, "messages": chat_messages, "temperature": temperature, "max_tokens": max_tokens}
+    if conversation_id:
+        payload["conversation_id"] = str(conversation_id)
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
     headers = {"Content-Type": "application/json"}
@@ -540,108 +542,24 @@ def _safe_provider_error(name: str, exc: Exception) -> str:
     return f"{name}:{type(exc).__name__}:{detail}"
 
 
-async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False):
-    """Try every configured AI provider in priority order with bounded fallbacks.
-
-    Alexa Own AI local intents are preferred, then Gemini, then all configured Groq keys.
-    An unsupported local intent is not an outage: it immediately falls through without cooldown.
-    """
-    groq_keys = _groq_api_keys()
-    # User-selected priority: local Alexa engine first, then Gemini, then every Groq key.
-    providers = [
-        ("alexa_own_ai", _own_ai_chat, bool(_own_ai_url()), 15.0, None),
-        ("gemini", _gemini_chat, bool(_gemini_api_key()), 12.0, None),
-    ]
-    providers.extend(
-        (
-            f"groq_key_{index}",
-            lambda *args, _key=key, **kwargs: _groq_chat(*args, api_key=_key, **kwargs),
-            True,
-            12.0,
-            index,
+async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False, conversation_id=""):
+    """Use Alexa Own AI only. No Gemini, Groq, or third-party provider fallback."""
+    if not _own_ai_url():
+        print("Alexa Own AI unavailable: ALEXA_OWN_AI_URL is not configured")
+        return ""
+    try:
+        answer = await asyncio.wait_for(
+            _own_ai_chat(
+                messages,
+                system=system,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                json_mode=json_mode,
+                conversation_id=conversation_id,
+            ),
+            timeout=18.0,
         )
-        for index, key in enumerate(groq_keys, start=1)
-    )
-
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + 90.0
-    attempted = False
-    groq_429_count = 0
-    groq_429_occurred = False
-    for name, provider, configured, timeout_seconds, groq_index in providers:
-        if not configured:
-            print("Alexa chat provider skipped:", name + ":missing_runtime_configuration")
-            continue
-        now = time.monotonic()
-        retry_at = _provider_retry_after.get(name, 0.0)
-        if now < retry_at:
-            print("Alexa chat provider skipped:", name + ":temporary_cooldown")
-            if groq_index is not None and _provider_rate_limited_until.get(name, 0.0) > now:
-                groq_429_count += 1
-            continue
-        _provider_retry_after.pop(name, None)
-        _provider_rate_limited_until.pop(name, None)
-        remaining = deadline - loop.time()
-        if remaining <= 0:
-            print("Alexa chat providers exhausted: total fallback time budget reached")
-            break
-        attempted = True
-        try:
-            answer = await asyncio.wait_for(
-                provider(
-                    messages,
-                    system=system,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    json_mode=json_mode,
-                ),
-                timeout=min(timeout_seconds, remaining),
-            )
-            if isinstance(answer, str) and answer.strip():
-                _provider_retry_after.pop(name, None)
-                _provider_rate_limited_until.pop(name, None)
-                return answer.strip()
-            raise RuntimeError(name + "_empty_response")
-        except ProviderNoAnswer:
-            print("Alexa chat provider has no local answer; falling through:", name)
-            continue
-        except Exception as exc:
-            status = getattr(getattr(exc, "response", None), "status_code", None)
-            if status == 429:
-                if groq_index is not None:
-                    groq_429_occurred = True
-                    if _is_groq_daily_token_quota_error(exc):
-                        cooldown = _groq_daily_quota_cooldown(exc)
-                        # TPD is organization/model-wide: rotating keys cannot bypass it.
-                        _mark_groq_keys_rate_limited(len(groq_keys), cooldown)
-                        groq_429_count = len(groq_keys)
-                        print(
-                            "Alexa Groq organization daily token quota exhausted; "
-                            "all configured keys cooling down:",
-                            str(round(cooldown, 1)) + "s",
-                        )
-                    else:
-                        cooldown = _groq_rate_limit_cooldown(exc)
-                        groq_429_count += 1
-                        _provider_rate_limited_until[name] = time.monotonic() + cooldown
-                else:
-                    cooldown = _PROVIDER_429_COOLDOWN
-                    _provider_events.append(name)
-            elif status == 402:
-                cooldown = _PROVIDER_402_COOLDOWN
-                _provider_rate_limited_until.pop(name, None)
-            else:
-                cooldown = _PROVIDER_ERROR_COOLDOWN
-                _provider_rate_limited_until.pop(name, None)
-            _provider_retry_after[name] = time.monotonic() + cooldown
-            if status == 429 and groq_index is not None:
-                print("Alexa Groq rate limit cooldown:", name, str(round(cooldown, 1)) + "s")
-            print("Alexa chat provider failed:", _safe_provider_error(name, exc))
-
-    if groq_keys and groq_429_occurred and groq_429_count >= len(groq_keys) and "groq" not in _provider_events:
-        _provider_events.append("groq")
-    if attempted:
-        print("Alexa chat providers exhausted: no usable reply from configured providers")
-    else:
-        print("Alexa chat providers unavailable: all configured providers are in cooldown or missing")
-    return ""
+        return answer.strip() if isinstance(answer, str) else ""
+    except Exception as exc:
+        print("Alexa Own AI request failed:", _safe_provider_error("alexa_own_ai", exc))
+        return ""
