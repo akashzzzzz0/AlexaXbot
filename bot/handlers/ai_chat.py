@@ -415,14 +415,14 @@ def _bot_banter_reply(history=None) -> str:
 
 def _current_ist_reply(text: str) -> str | None:
     """Answer explicit current-time/date questions from the India timezone clock."""
-    value = re.sub(r"[.!?,\\s]+", " ", (text or "").casefold()).strip()
+    value = re.sub(r"[.!?,\s]+", " ", (text or "").casefold()).strip()
     asks_time = bool(
-        re.search(r"\\b(?:time|waqt|samay)\\b", value)
-        and re.search(r"\\b(?:kya|what|what's|whats|kitna|kitne|batao|btao|tell|abhi|current|ho raha|is it)\\b", value)
+        re.search(r"\b(?:time|waqt|samay)\b", value)
+        and re.search(r"\b(?:kya|what|what's|whats|kitna|kitne|batao|btao|tell|abhi|current|ho raha|is it)\b", value)
     )
     asks_date = bool(
-        re.search(r"\\b(?:date|tarikh|tareekh|today|aaj)\\b", value)
-        and re.search(r"\\b(?:kya|what|today|aaj|batao|btao|tell|current|ka|ki|hai)\\b", value)
+        re.search(r"\b(?:date|tarikh|tareekh|today|aaj)\b", value)
+        and re.search(r"\b(?:kya|what|today|aaj|batao|btao|tell|current|ka|ki|hai)\b", value)
     )
     if not asks_time and not asks_date:
         return None
@@ -455,14 +455,14 @@ def _short_social_reply(text: str, history=None) -> str | None:
     if ist_reply:
         return ist_reply
 
-    has_goodnight = bool(re.search(r"\\b(?:good\\s*night|gn)\\b", value))
+    has_goodnight = bool(re.search(r"\b(?:good\s*night|gn)\b", value))
     has_tomorrow_context = bool(re.search(
-        r"\\b(?:tomorrow|kal|meet|milte|milenge|see you|we['’]?ll|we will|talk|baat|then)\\b",
+        r"\b(?:tomorrow|kal|meet|milte|milenge|see you|we['’]?ll|we will|talk|baat|then)\b",
         value,
     ))
     if has_goodnight and (has_tomorrow_context or value in {"good night", "gn"}):
         return "Achha ji, good night! Kal milte hain. Apna khayal rakhna."
-    if re.search(r"\\b(?:bye|goodbye|see you)\\b", value):
+    if re.search(r"\b(?:bye|goodbye|see you)\b", value):
         if has_tomorrow_context:
             return "Theek hai, kal baat karte hain. Apna khayal rakhna."
         return "Achha, phir milte hain. Apna khayal rakhna."
