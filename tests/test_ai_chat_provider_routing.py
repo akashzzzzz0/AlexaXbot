@@ -112,5 +112,23 @@ class AlexaChatProviderRoutingTests(unittest.IsolatedAsyncioTestCase):
             provider.assert_not_awaited()
 
 
+    async def test_groq_cooldown_skips_do_not_reemit_owner_429_event(self):
+        retry_at = ai_chat_provider.time.monotonic() + 300
+        ai_chat_provider._provider_retry_after["groq_key_1"] = retry_at
+        ai_chat_provider._provider_rate_limited_until["groq_key_1"] = retry_at
+        with (
+            patch.object(ai_chat_provider, "_gemini_api_key", return_value=""),
+            patch.object(ai_chat_provider, "_groq_api_keys", return_value=["groq-key"]),
+            patch.object(ai_chat_provider, "_xai_api_key", return_value=""),
+            patch.object(ai_chat_provider, "_openai_api_key", return_value=""),
+            patch.object(ai_chat_provider, "get_ollama_api_key", return_value=""),
+        ):
+            result = await ai_chat_provider.ai_chat_completion(
+                [{"role": "user", "content": "Hi"}]
+            )
+        self.assertEqual(result, "")
+        self.assertEqual(ai_chat_provider.drain_provider_events(), [])
+
+
 if __name__ == "__main__":
     unittest.main()
