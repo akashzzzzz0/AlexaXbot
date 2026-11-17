@@ -20,7 +20,7 @@ from bot.services.user_service import add_xp
 from bot.middlewares.i18n import get_text
 from bot.utils.helpers import safe_username, mention_user
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import structlog
 
 logger = structlog.get_logger()
@@ -87,12 +87,22 @@ async def _send_temporary_notice(bot, chat_id: int, text: str):
 
 
 
-async def _channelguard_profile_links(bot, user_id: int):
-    """Return actual URLs in the user's bio or linked personal-channel description.
+_channelguard_profile_cache = {}
 
-    A connected channel by itself is not a violation. Telegram may hide these
-    profile fields, so callers must treat an unavailable profile as unverifiable.
+
+async def _channelguard_profile_links(bot, user_id: int, *, force_refresh: bool = False):
+    """Return actual URLs in exposed profile fields, caching successful reads briefly.
+
+    Telegram may hide profile fields or temporarily reject getChat. Successful
+    reads are cached for 30 seconds to avoid one API request per group message;
+    unavailable/error responses are never cached so the next update can retry.
     """
+    now = asyncio.get_running_loop().time()
+    cache_key = (getattr(bot, "id", None), user_id)
+    cached = _channelguard_profile_cache.get(cache_key)
+    if not force_refresh and cached and now - cached[0] < 30:
+        return cached[1], cached[2]
+
     profile = await bot.get_chat(user_id)
     bio = getattr(profile, "bio", None)
     available = bio is not None
@@ -120,6 +130,12 @@ async def _channelguard_profile_links(bot, user_id: int):
         )
         if description and contains_non_alexa_link(str(description)):
             evidence.append(("connected_channel_description", str(description)))
+    if available:
+        _channelguard_profile_cache[cache_key] = (now, evidence, available)
+        if len(_channelguard_profile_cache) > 5000:
+            for old_key, old_value in list(_channelguard_profile_cache.items()):
+                if now - old_value[0] > 60:
+                    _channelguard_profile_cache.pop(old_key, None)
     return evidence, available
 
 
@@ -166,6 +182,19 @@ async def _channelguard_warn_and_mute(bot, db_session: AsyncSession, group_id: i
             Warning.reason.like("ChannelGuard:%"),
         )
     ) or 0
+    recent_cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+    recent_warning_count = await db_session.scalar(
+        select(func.count()).select_from(Warning).where(
+            Warning.group_id == group_id,
+            Warning.user_id == user_id,
+            Warning.reason.like("ChannelGuard:%"),
+            Warning.created_at >= recent_cutoff,
+        )
+    ) or 0
+    if recent_warning_count:
+        # One persistent bio URL must not create a new warning on every message.
+        return "duplicate", int(channelguard_count)
+
     count = int(channelguard_count) + 1
     db_session.add(
         Warning(
@@ -204,6 +233,8 @@ async def _channelguard_warn_and_mute(bot, db_session: AsyncSession, group_id: i
 
 def _channelguard_notice(user_id: int, display_name: str, state: str, count: int):
     user_link = mention_user(user_id, display_name or f"User {user_id}")
+    if state == "duplicate":
+        return None, None
     if state == "warned":
         warning_emoji = '<tg-emoji emoji-id="6267144651153609853">⚠️</tg-emoji>'
         return (
@@ -625,7 +656,7 @@ async def bio_unmute_after_profile_fix(callback: CallbackQuery, db_session: Asyn
 
     if not member.is_whitelisted:
         try:
-            evidence, profile_available = await _channelguard_profile_links(callback.bot, user_id)
+            evidence, profile_available = await _channelguard_profile_links(callback.bot, user_id, force_refresh=True)
             if not profile_available:
                 await callback.answer("Telegram did not expose your bio/connected-channel details for verification. Try again later.", show_alert=True)
                 return
