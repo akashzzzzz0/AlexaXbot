@@ -202,7 +202,7 @@ def _emotion_category(text: str) -> str | None:
         ("love", r"thanks|thank you|shukriya|pyaar|pyar|cute|beautiful|love|😍|🥰|😘|💕|💜|🖤"),
         ("surprise", r"wow|omg|shocked|surprised|seriously|really|no way|😮|😱|🤯|😳"),
         ("happy", r"congrats|congratulations|mubarak|well done|shabash|zabardast|amazing|awesome|great|maza|mazza|khushi|khush|enjoy|fun|acha lag|achha lag|chat kar|baat kar|tumhare saath|🎉|🥳|🏆|💯|😄|😊|😁|🙂|😃"),
-        ("greeting", r"^\s*(?:hi+|hello+|helo+|hey+|salam|assalamualaikum|aoa|bye+|good\s+(?:morning|afternoon|evening|night)|good day|gm|gn|morning|afternoon|evening)\b"),
+        ("greeting", r"^\s*(?:hi+|hello+|helo+|hey+|bye+|good\s+(?:morning|afternoon|evening|night)|good day|gm|gn|morning|afternoon|evening)\b"),
         ("attitude", r"attitude|boss|savage|swag|😎|😏|🗿"),
     )
     for category, pattern in rules:
@@ -662,6 +662,7 @@ async def _ask_ai(
         "Never label the user confused, upset, or joking unless their words clearly show it. Do not answer a follow-up with a random teasing line that ignores the previous turn. " +
         "If the previous context still does not make the meaning clear, ask one simple, relevant clarification instead of inventing an interpretation or changing the topic. " +
         "If corrected for sounding robotic, acknowledge it casually and adjust. "
+        "GREETING BAN: Never say, suggest, initiate, or reply with 'Assalamualaikum', 'As-salamu alaykum', 'Salam', 'Salaam', 'AOA', or any transliteration/variant of that religious greeting. Do not use religious greetings at all, even if the user uses one. For greetings, use only ordinary casual greetings such as 'Hi', 'Hello', 'Hey', or a natural short Roman Urdu response. "
         "Never use the word Allah or its Arabic/Urdu spellings (الله or اللّٰه); rephrase religious invocations neutrally. "
     )
     if user_text.strip().casefold() == "alexa":
@@ -800,7 +801,7 @@ def _local_chat_fallback(user_text: str, history=None) -> str:
         if re.search(r"\b(?:hello|hi|hey)\b", value):
             return random.choice(("Heyyy! Kya haal hai?", "Hiii! Kya scene hai?"))
         return random.choice(("Haan bolo?", "Oyyyy! Sun rahi hoon.", "Ji, bolo?"))
-    if re.fullmatch(r"(hi|hello|hey|helo|hii+|salam|assalamualaikum)", value):
+    if re.fullmatch(r"(hi|hello|hey|helo|hii+)", value):
         return random.choice(("Heyyy! Kya haal hai?", "Hiii! Kya scene hai?", "Oyyyy!"))
     if value in {"alexa", "oye alexa", "hey alexa"}:
         return random.choice(("Haan bolo?", "Ji?", "Kya hua?"))
