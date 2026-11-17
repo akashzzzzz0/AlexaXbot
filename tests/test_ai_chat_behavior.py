@@ -172,13 +172,35 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
         self.assertIn("ALWAYS reply in Roman letters", system)
         self.assertIn("Avoid chatbot clichés", system)
         self.assertNotIn("Sirf casual Roman Hindi/Hinglish", system)
-        self.assertIn("FEMALE AI chat assistant", system)
+        self.assertIn("do not have a biological gender", system)
+        self.assertIn("consistently feminine", system)
         self.assertIn("CRITICAL SELF-GENDER RULE", system)
         self.assertIn("NEVER use masculine self-forms", system)
         self.assertIn("de deta hoon", system)
         self.assertIn("answer honestly and briefly", system)
+        self.assertIn("Never dodge a direct factual question", system)
+        self.assertNotIn("do not confirm or deny", system)
         self.assertIn("GREETING BAN", system)
         self.assertIn("Never say, suggest, initiate", system)
+
+    def test_bot_banter_has_at_least_fifteen_unique_lines(self):
+        self.assertGreaterEqual(len(ai_chat._BOT_BANTER_REPLIES), 15)
+        self.assertEqual(len(set(ai_chat._BOT_BANTER_REPLIES)), len(ai_chat._BOT_BANTER_REPLIES))
+
+    def test_bot_banter_does_not_repeat_the_previous_reply(self):
+        previous = ai_chat._BOT_BANTER_REPLIES[0]
+        for _ in range(30):
+            reply = ai_chat._bot_banter_reply([("user", "bot"), ("model", previous)])
+            self.assertNotEqual(reply, previous)
+            previous = reply
+
+    def test_identity_questions_are_recognized_without_playful_evasion(self):
+        for text in ("Are you an AI?", "Tum bot ho?", "Kya tum AI ho?", "Are you a robot?"):
+            with self.subTest(text=text):
+                self.assertTrue(ai_chat._is_identity_question(text))
+        # A standalone "bot" is a casual nickname/tease, not a factual question.
+        self.assertFalse(ai_chat._is_identity_question("bot"))
+
 
     def test_smart_group_prompt_does_not_force_hindi_for_other_languages(self):
         provider = AsyncMock(return_value="I'm good, thanks.")
