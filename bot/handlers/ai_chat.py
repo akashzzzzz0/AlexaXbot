@@ -945,7 +945,7 @@ async def _process_alexa_ai_chat(message: Message) -> None:
         text = "Say hello and start a friendly conversation."
     quoted_context = _reply_context_text(message)
     prompt_text = (
-        f"[The sender is replying to this earlier Alexa message: {quoted_context}]\\n"
+        f"[The sender is replying to this earlier Alexa message: {quoted_context}]\n"
         f"[Sender's new message: {text}]"
         if quoted_context else text
     )
