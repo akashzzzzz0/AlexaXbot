@@ -24,6 +24,15 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4.1-mini"
 
+    # Optional OpenRouter fallback; credentials remain runtime-only.
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_MODEL: str = "openrouter/auto"
+
+    # Optional separately deployed Alexa OpenAI-compatible chat microservice.
+    ALEXA_OWN_AI_URL: str = ""
+    ALEXA_OWN_AI_API_KEY: str = ""
+    ALEXA_OWN_AI_MODEL: str = "auto"
+
     # Gemini key is loaded from private runtime config; never commit a real key.
     GEMINI_API_KEY: str = ""
     API_KEY: str = ""

@@ -585,6 +585,8 @@ async def _ask_ai_with_typing(
             "groq": "Groq",
             "grok": "Grok",
             "openai": "OpenAI",
+            "openrouter": "OpenRouter",
+            "alexa_own_ai": "Alexa Own AI",
             "ollama": "Ollama",
         }
         for provider_name in drain_provider_events():
