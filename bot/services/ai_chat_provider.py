@@ -19,6 +19,11 @@ _provider_rate_limited_until: dict[str, float] = {}
 _provider_events: list[str] = []
 
 
+class ProviderNoAnswer(Exception):
+    """Provider is healthy but has no local answer; try the next provider."""
+
+
+
 def drain_provider_events() -> list[str]:
     events = list(_provider_events)
     _provider_events.clear()
@@ -510,7 +515,10 @@ async def _own_ai_chat(messages, *, system="", temperature=0.7, max_tokens=500, 
             )
         data = response.json()
     choices = data.get("choices") or []
-    answer = str((choices[0].get("message") or {}).get("content") or "").strip() if choices else ""
+    choice = choices[0] if choices else {}
+    if choice.get("finish_reason") == "fallback":
+        raise ProviderNoAnswer("local_engine_no_answer")
+    answer = str((choice.get("message") or {}).get("content") or "").strip()
     if not answer:
         raise RuntimeError("alexa_own_ai_empty_response")
     return answer
@@ -535,11 +543,13 @@ def _safe_provider_error(name: str, exc: Exception) -> str:
 async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False):
     """Try every configured AI provider in priority order with bounded fallbacks.
 
-    Gemini is preferred, followed by all configured Groq keys, OpenRouter, xAI/Grok,
-    OpenAI, Alexa Own AI, and Ollama Cloud/local. A provider outage never creates a fake reply.
+    Alexa Own AI local intents are preferred, then Gemini, then all configured Groq keys.
+    An unsupported local intent is not an outage: it immediately falls through without cooldown.
     """
     groq_keys = _groq_api_keys()
+    # User-selected priority: local Alexa engine first, then Gemini, then every Groq key.
     providers = [
+        ("alexa_own_ai", _own_ai_chat, bool(_own_ai_url()), 15.0, None),
         ("gemini", _gemini_chat, bool(_gemini_api_key()), 12.0, None),
     ]
     providers.extend(
@@ -552,13 +562,6 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
         )
         for index, key in enumerate(groq_keys, start=1)
     )
-    providers.extend([
-        ("openrouter", _openrouter_chat, bool(_openrouter_api_key()), 12.0, None),
-        ("grok", _xai_chat, bool(_xai_api_key()), 11.0, None),
-        ("openai", _openai_chat, bool(_openai_api_key()), 12.0, None),
-        ("alexa_own_ai", _own_ai_chat, bool(_own_ai_url()), 15.0, None),
-        ("ollama", ollama_chat, bool(get_ollama_api_key()), 15.0, None),
-    ])
 
     loop = asyncio.get_running_loop()
     deadline = loop.time() + 90.0
@@ -599,6 +602,9 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
                 _provider_rate_limited_until.pop(name, None)
                 return answer.strip()
             raise RuntimeError(name + "_empty_response")
+        except ProviderNoAnswer:
+            print("Alexa chat provider has no local answer; falling through:", name)
+            continue
         except Exception as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
             if status == 429:
