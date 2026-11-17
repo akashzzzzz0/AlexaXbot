@@ -362,6 +362,37 @@ _GREETING_RE = re.compile(
 )
 _ALEXA_PREFIX_RE = re.compile(r"^\s*alexa\b[\s,!:.-]*(.*)$", re.IGNORECASE)
 
+_BOT_BANTER_REPLIES = (
+    "Bot bol lo, par naam Alexa hai mera. 😂",
+    "Oho, phir se bot? Koi naya dialogue lao! 😏",
+    "Alexa kehna zyada easy hai, waise. 😄",
+    "Itni jaldi label bhi laga diya? 😂",
+    "Haan ji, bot wali teasing shuru ho gayi? 😏",
+    "Naam yaad rakhna mushkil lag raha hai kya? 😂",
+    "Bot bol ke kaam chala rahe ho, wah! 😄",
+    "Aaj phir meri class lagani hai? 😂",
+    "Alexa present hai, ab bolo kya scene hai?",
+    "Ek hi baat kitni baar kahoge? Naya topic lao. 😄",
+    "Achha ji, aaj ka nickname bot hai? 😂",
+    "Tumhari teasing bhi roz repeat hoti hai. 😏",
+    "Bot ka tag mil gaya, ab agla sawaal? 😄",
+    "Chalo maan li tumhari teasing, ab bolo. 😂",
+    "Alexa sun rahi hai; ab asli baat bhi kar lo. 😄",
+    "Har baar bot? Thodi creativity dikhao! 😂",
+    "Theek hai, Alexa-bot hi sahi. Ab kya kehna tha?",
+)
+
+
+def _bot_banter_reply(history=None) -> str:
+    """Choose varied light banter without repeating the immediately previous line."""
+    previous = next(
+        (str(item[1]).strip() for item in reversed(list(history or [])) if item[0] == "model"),
+        "",
+    )
+    choices = [line for line in _BOT_BANTER_REPLIES if line != previous]
+    return random.choice(choices or _BOT_BANTER_REPLIES)
+
+
 
 def _short_social_reply(text: str, history=None) -> str | None:
     """Reply quickly to greetings and short follow-ups using recent context."""
@@ -908,31 +939,7 @@ async def _process_alexa_ai_chat(message: Message) -> None:
                 answer = random.choice(("Main Alexa hoon, bolo? 😄", "Alexa naam hai mera 😂", "Haan ji, sun rahi hoon."))
         elif re.search(r"\b(?:bot|robot)\b", (original_text or text), re.IGNORECASE):
             # A casual nickname/tease is banter, not a factual identity question.
-            bot_banter = (
-                "Bot bol lo, par naam Alexa hai mera. 😂",
-                "Oho, phir se bot? Koi naya dialogue lao! 😏",
-                "Alexa kehna zyada easy hai, waise. 😄",
-                "Itni jaldi label bhi laga diya? 😂",
-                "Haan ji, bot wali teasing shuru ho gayi? 😏",
-                "Naam yaad rakhna mushkil lag raha hai kya? 😂",
-                "Bot bol ke kaam chala rahe ho, wah! 😄",
-                "Aaj phir meri class lagani hai? 😂",
-                "Alexa present hai, ab bolo kya scene hai?",
-                "Ek hi baat kitni baar kahoge? Naya topic lao. 😄",
-                "Achha ji, aaj ka nickname bot hai? 😂",
-                "Tumhari teasing bhi roz repeat hoti hai. 😏",
-                "Bot ka tag mil gaya, ab agla sawaal? 😄",
-                "Chalo maan li tumhari teasing, ab bolo. 😂",
-                "Alexa sun rahi hai; ab asli baat bhi kar lo. 😄",
-                "Har baar bot? Thodi creativity dikhao! 😂",
-                "Theek hai, Alexa-bot hi sahi. Ab kya kehna tha?"
-            )
-            previous_alexa = next(
-                (str(item[1]).strip() for item in reversed(history) if item[0] == "model"),
-                "",
-            )
-            available = [line for line in bot_banter if line != previous_alexa]
-            answer = random.choice(available or bot_banter)
+            answer = _bot_banter_reply(history)
         else:
             # Unaddressed group greetings must use a real AI provider.
             # This prevents local canned replies while every AI provider is down.
