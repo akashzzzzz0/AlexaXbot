@@ -8,6 +8,8 @@ on:
       - "bot/handlers/ai_chat.py"
       - "bot/config.py"
       - "tests/test_ai_chat_provider_routing.py"
+      - "tests/test_ai_chat_behavior.py"
+      - "tests/test_ai_chat_fallback.py"
       - "tests/test_groq_rate_limit_recovery.py"
       - ".github/workflows/groq-rate-limit-recovery.yml"
 
@@ -24,6 +26,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install "httpx>=0.27.0" "aiogram==3.13.1" "SQLAlchemy>=2.0.0,<2.1" "aiosqlite>=0.20.0" "structlog>=24.0.0" "pydantic>=2.4.1,<2.10" "pydantic-settings>=2.4.0,<2.10" "python-dotenv>=1.0.0" "greenlet>=3.0.0" "redis>=5.0.0" "aiohttp>=3.9.0,<3.11" "Pillow>=10.0.0"
       - name: Compile AI provider modules and tests
-        run: python -m py_compile bot/services/ai_chat_provider.py bot/handlers/ai_chat.py bot/config.py tests/test_ai_chat_provider_routing.py tests/test_groq_rate_limit_recovery.py
+        run: python -m py_compile bot/services/ai_chat_provider.py bot/handlers/ai_chat.py bot/config.py tests/test_ai_chat_provider_routing.py tests/test_ai_chat_behavior.py tests/test_ai_chat_fallback.py tests/test_groq_rate_limit_recovery.py
       - name: Run AI routing and Groq recovery tests
-        run: python -m unittest tests.test_ai_chat_provider_routing tests.test_groq_rate_limit_recovery -v
+        run: python -m unittest tests.test_ai_chat_provider_routing tests.test_ai_chat_behavior tests.test_ai_chat_fallback tests.test_groq_rate_limit_recovery -v
