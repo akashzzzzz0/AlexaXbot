@@ -390,6 +390,133 @@ async def _openai_chat(
     return answer
 
 
+
+def _openrouter_api_key() -> str:
+    return (
+        getattr(settings, "OPENROUTER_API_KEY", "")
+        or os.getenv("OPENROUTER_API_KEY", "")
+    ).strip()
+
+
+async def _openrouter_chat(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False) -> str:
+    api_key = _openrouter_api_key()
+    if not api_key:
+        raise RuntimeError("openrouter_not_configured")
+    chat_messages = []
+    if system.strip():
+        chat_messages.append({"role": "system", "content": system.strip()})
+    for item in messages:
+        role = str(item.get("role", "user"))
+        if role == "model":
+            role = "assistant"
+        if role not in {"system", "user", "assistant"}:
+            continue
+        content = str(item.get("content", item.get("text", ""))).strip()
+        if content:
+            chat_messages.append({"role": role, "content": content})
+    if not chat_messages:
+        raise ValueError("empty_prompt")
+    model = (
+        getattr(settings, "OPENROUTER_MODEL", "")
+        or os.getenv("OPENROUTER_MODEL", "")
+        or "openrouter/auto"
+    ).strip()
+    payload = {"model": model, "messages": chat_messages, "temperature": temperature, "max_tokens": max_tokens}
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    site_url = (os.getenv("OPENROUTER_SITE_URL", "") or "").strip()
+    app_name = (os.getenv("OPENROUTER_APP_NAME", "") or "Alexa Telegram Bot").strip()
+    if site_url:
+        headers["HTTP-Referer"] = site_url
+    if app_name:
+        headers["X-Title"] = app_name
+    timeout = httpx.Timeout(12.0, connect=5.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers)
+        if response.status_code >= 400:
+            try:
+                detail = response.json().get("error", {}).get("message", response.text[:300])
+            except (ValueError, AttributeError):
+                detail = response.text[:300]
+            raise httpx.HTTPStatusError(
+                f"OpenRouter HTTP {response.status_code}: {detail}",
+                request=response.request,
+                response=response,
+            )
+        data = response.json()
+    choices = data.get("choices") or []
+    answer = str((choices[0].get("message") or {}).get("content") or "").strip() if choices else ""
+    if not answer:
+        raise RuntimeError("openrouter_empty_response")
+    return answer
+
+
+def _own_ai_url() -> str:
+    value = (
+        getattr(settings, "ALEXA_OWN_AI_URL", "")
+        or os.getenv("ALEXA_OWN_AI_URL", "")
+    ).strip().rstrip("/")
+    if not value:
+        return ""
+    return value if value.endswith("/v1/chat/completions") else value + "/v1/chat/completions"
+
+
+async def _own_ai_chat(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False) -> str:
+    url = _own_ai_url()
+    if not url:
+        raise RuntimeError("alexa_own_ai_not_configured")
+    chat_messages = []
+    if system.strip():
+        chat_messages.append({"role": "system", "content": system.strip()})
+    for item in messages:
+        role = str(item.get("role", "user"))
+        if role == "model":
+            role = "assistant"
+        if role not in {"system", "user", "assistant"}:
+            continue
+        content = str(item.get("content", item.get("text", ""))).strip()
+        if content:
+            chat_messages.append({"role": role, "content": content})
+    if not chat_messages:
+        raise ValueError("empty_prompt")
+    model = (
+        getattr(settings, "ALEXA_OWN_AI_MODEL", "")
+        or os.getenv("ALEXA_OWN_AI_MODEL", "")
+        or "auto"
+    ).strip()
+    payload = {"model": model, "messages": chat_messages, "temperature": temperature, "max_tokens": max_tokens}
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
+    headers = {"Content-Type": "application/json"}
+    api_key = (
+        getattr(settings, "ALEXA_OWN_AI_API_KEY", "")
+        or os.getenv("ALEXA_OWN_AI_API_KEY", "")
+    ).strip()
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    timeout = httpx.Timeout(15.0, connect=5.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(url, json=payload, headers=headers)
+        if response.status_code >= 400:
+            try:
+                detail = response.json().get("error", {}).get("message", response.text[:300])
+            except (ValueError, AttributeError):
+                detail = response.text[:300]
+            raise httpx.HTTPStatusError(
+                f"Alexa Own AI HTTP {response.status_code}: {detail}",
+                request=response.request,
+                response=response,
+            )
+        data = response.json()
+    choices = data.get("choices") or []
+    answer = str((choices[0].get("message") or {}).get("content") or "").strip() if choices else ""
+    if not answer:
+        raise RuntimeError("alexa_own_ai_empty_response")
+    return answer
+
+
+
 def _safe_provider_error(name: str, exc: Exception) -> str:
     """Keep HTTP diagnostics useful without logging credentials or request URLs."""
     response = getattr(exc, "response", None)
@@ -408,8 +535,8 @@ def _safe_provider_error(name: str, exc: Exception) -> str:
 async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens=500, json_mode=False):
     """Try every configured AI provider in priority order with bounded fallbacks.
 
-    Gemini is preferred, followed by all configured Groq keys, xAI/Grok,
-    OpenAI, and Ollama Cloud/local. A provider outage never creates a fake reply.
+    Gemini is preferred, followed by all configured Groq keys, OpenRouter, xAI/Grok,
+    OpenAI, Alexa Own AI, and Ollama Cloud/local. A provider outage never creates a fake reply.
     """
     groq_keys = _groq_api_keys()
     providers = [
@@ -426,8 +553,10 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
         for index, key in enumerate(groq_keys, start=1)
     )
     providers.extend([
+        ("openrouter", _openrouter_chat, bool(_openrouter_api_key()), 12.0, None),
         ("grok", _xai_chat, bool(_xai_api_key()), 11.0, None),
         ("openai", _openai_chat, bool(_openai_api_key()), 12.0, None),
+        ("alexa_own_ai", _own_ai_chat, bool(_own_ai_url()), 15.0, None),
         ("ollama", ollama_chat, bool(get_ollama_api_key()), 15.0, None),
     ])
 
