@@ -177,6 +177,8 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
         self.assertIn("NEVER use masculine self-forms", system)
         self.assertIn("de deta hoon", system)
         self.assertIn("answer honestly and briefly", system)
+        self.assertIn("GREETING BAN", system)
+        self.assertIn("Never say, suggest, initiate", system)
 
     def test_smart_group_prompt_does_not_force_hindi_for_other_languages(self):
         provider = AsyncMock(return_value="I'm good, thanks.")
