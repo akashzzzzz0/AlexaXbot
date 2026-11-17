@@ -792,6 +792,13 @@ def _local_chat_fallback(user_text: str, history=None) -> str:
             return "Jo mann ho woh bata dena, warna kisi aur baat pe aa jate hain."
         return "Jo share karna ho bata do; warna koi aur topic kar lete hain."
 
+    # Common Roman Urdu speech requests and casual calls often arrive with typos.
+    if re.fullmatch(r"(?:bool|bol|bo+l+)\s*(?:ly+|le|na|do)?", value) or value in {"bolo", "bolo na", "bol na", "bolly", "bollyy", "suno", "sun na", "sunn"}:
+        return "Haan bolo, sun rahi hoon."
+    if re.search(r"\balexa\b", value) and re.search(r"\b(?:oy+|oye|hi|hello|hey|baby)\b", value):
+        if re.search(r"\b(?:hello|hi|hey)\b", value):
+            return random.choice(("Heyyy! Kya haal hai?", "Hiii! Kya scene hai?"))
+        return random.choice(("Haan bolo?", "Oyyyy! Sun rahi hoon.", "Ji, bolo?"))
     if re.fullmatch(r"(hi|hello|hey|helo|hii+|salam|assalamualaikum)", value):
         return random.choice(("Heyyy! Kya haal hai?", "Hiii! Kya scene hai?", "Oyyyy!"))
     if value in {"alexa", "oye alexa", "hey alexa"}:
@@ -813,6 +820,17 @@ def _local_chat_fallback(user_text: str, history=None) -> str:
         return "Achha, samajh gayi. Tumhari marzi—topic badal sakte hain."
     # If no safe contextual response is available, silence is better than filler.
     return ""
+
+
+def _no_answer_clarification(user_text: str) -> str:
+    """Keep direct conversations responsive when the lightweight engine cannot parse a turn."""
+    value = (user_text or "").casefold()
+    if re.search(r"\b(hello|hi|hey|what|why|how|can|please|thanks|tell)\b", value):
+        return "I'm listening. Could you rephrase that so I can answer properly?"
+    if re.search(r"\b(tussi|tainu|menu|veere|kiwen|changa|vadhiya|kithe|naal)\b", value):
+        return "Haanji, main sun rahi aan. Gall thodi hor samjha deo?"
+    return "Haan ji, sun rahi hoon. Zara doosre alfaaz mein samjha do?"
+
 
 async def _process_alexa_ai_chat(message: Message) -> None:
     text = (message.text or "").strip()
@@ -911,8 +929,16 @@ async def _process_alexa_ai_chat(message: Message) -> None:
         logger.exception("Unexpected Alexa AI chat failure for chat_id=%s", message.chat.id)
         return
 
-    # Do not fabricate a conversational answer when both AI providers fail.
-    # For private chats and explicit Alexa mentions, tell the sender clearly.
+    # A direct call should never disappear just because the small offline engine
+    # could not classify the wording. Use a contextual clarification, not silence.
+    if not answer:
+        answer = _local_chat_fallback(original_text or text, history)
+    if not answer and (message.chat.type == ChatType.PRIVATE or directly_addressed):
+        answer = _no_answer_clarification(original_text or text)
+    if not answer and smart_mode:
+        answer = _smart_group_reply_fallback(original_text or text)
+
+    # Keep genuinely unhandled unsolicited group messages quiet to avoid spam.
     if not answer:
         logger.warning(
             "Alexa AI providers returned no usable reply",
