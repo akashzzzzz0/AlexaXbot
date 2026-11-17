@@ -545,10 +545,26 @@ def _should_smart_reply(message: Message, text: str) -> bool:
     _smart_reply_user_last_check[user_key] = now
     return True
 
+def _incoming_message_text(message: Message) -> str:
+    """Read either ordinary Telegram text or a media caption."""
+    return str(message.text or getattr(message, "caption", None) or "").strip()
+
+
+def _reply_context_text(message: Message) -> str:
+    """Return quoted context when the sender is explicitly replying to Alexa."""
+    replied = message.reply_to_message
+    if not replied or not replied.from_user or replied.from_user.id != message.bot.id:
+        return ""
+    quoted = (replied.text or getattr(replied, "caption", None) or "").strip()
+    if not quoted:
+        return ""
+    return quoted[:1500]
+
+
 async def is_alexa_trigger(message: Message) -> bool:
-    """Trigger only on Alexa calls, active sessions, or simple greetings."""
+    """Trigger only on Alexa calls, active sessions, greetings, and captioned calls."""
     global _bot_username
-    text = (message.text or "").strip()
+    text = _incoming_message_text(message)
     if not text or not message.from_user or message.from_user.is_bot:
         return False
     # Never start a conversation for religious greetings or punctuation-only noise.
@@ -744,6 +760,18 @@ async def _ask_ai(
         system_instruction += "The sender has clearly identified himself as a boy. Use a normal friendly, casual tone. "
     else:
         system_instruction += "The sender's gender is not clearly known. Keep the tone neutral and friendly; do not guess. "
+    system_instruction += (
+        "UNDERSTANDING FIRST: Before answering, silently work out the exact intent of the newest message. "
+        "Read the whole message, not just its first few words. Handle multiple questions or instructions in one message and answer each relevant part. "
+        "Be tolerant of typos, missing vowels, phonetic spellings, repeated letters, abbreviations, slang, code-switching, and informal Roman Urdu/Hindi/Punjabi; for example, 'kya kr rhy', 'kia kar rahe', 'smj', 'btana', and similar variants may express the same meaning. "
+        "Do not demand correct spelling or translate word-for-word. Infer the likely meaning from the full sentence and recent conversation, but never invent facts or treat a guess as certain. "
+        "Track negation, who did what, names, dates, times, quantities, comparisons, and the difference between a question, joke, request, correction, and personal update. "
+        "When a message is a short continuation, resolve 'ye', 'wo', 'uska', 'kyun', 'phir', 'haan', 'nahi', and similar references from the latest relevant turns. "
+        "If the user corrects you, accept the correction and use the corrected meaning from then on. Do not repeat a question they have already answered. "
+        "If the message contains quoted or replied-to text, distinguish that quoted context from the sender's new words; answer what the sender is asking about the quoted text. "
+        "If a phrase has two genuinely plausible meanings and context cannot resolve them, ask one brief, specific clarification. "
+        "A short answer is preferred only when it fully answers the message; never omit important parts merely to stay brief. "
+    )
     messages = [
         {"role": role, "content": old_text}
         for role, old_text in history
@@ -753,8 +781,8 @@ async def _ask_ai(
         answer = await ai_chat_completion(
             messages,
             system=system_instruction,
-            temperature=0.72,
-            max_tokens=100,
+            temperature=0.58,
+            max_tokens=350,
             conversation_id=conversation_id,
         )
     except RuntimeError as exc:
@@ -772,7 +800,7 @@ async def _ask_ai(
 
 @router.message(
     F.chat.type.in_({ChatType.PRIVATE, ChatType.GROUP, ChatType.SUPERGROUP}),
-    F.text,
+    F.text | F.caption,
     is_alexa_trigger,
 )
 async def alexa_ai_chat(message: Message) -> None:
@@ -886,7 +914,7 @@ def _no_answer_clarification(user_text: str) -> str:
 
 
 async def _process_alexa_ai_chat(message: Message) -> None:
-    text = (message.text or "").strip()
+    text = _incoming_message_text(message)
     if _is_ignored_low_signal_message(text):
         return
     if message.chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}:
@@ -911,13 +939,19 @@ async def _process_alexa_ai_chat(message: Message) -> None:
         ).strip()
 
     replied = message.reply_to_message
-    if not text and replied and replied.text:
-        text = replied.text.strip()
+    if not text and replied and (replied.text or getattr(replied, "caption", None)):
+        text = (replied.text or getattr(replied, "caption", None) or "").strip()
     if not text:
         text = "Say hello and start a friendly conversation."
+    quoted_context = _reply_context_text(message)
+    prompt_text = (
+        f"[The sender is replying to this earlier Alexa message: {quoted_context}]\n"
+        f"[Sender's new message: {text}]"
+        if quoted_context else text
+    )
 
     key = (message.chat.id, message.from_user.id)
-    original_text = (message.text or "").strip()
+    original_text = _incoming_message_text(message)
     replied_to_alexa = bool(
         message.reply_to_message
         and message.reply_to_message.from_user
@@ -970,7 +1004,7 @@ async def _process_alexa_ai_chat(message: Message) -> None:
                 answer = short_reply
             else:
                 answer = await _ask_ai_with_typing(
-                    message, text, history, smart_mode=smart_mode, gender_style=gender_style
+                    message, prompt_text, history, smart_mode=smart_mode, gender_style=gender_style
                 )
     except (httpx.HTTPError, ValueError, TypeError, RuntimeError) as exc:
         logger.warning(

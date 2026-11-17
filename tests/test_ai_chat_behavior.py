@@ -48,6 +48,27 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
                     ai_chat.is_alexa_trigger(_group_message(text, chat_id=-100123-index))
                 ))
 
+    def test_private_captioned_message_can_trigger_alexa(self):
+        message = _group_message("ignored")
+        message.chat.type = ChatType.PRIVATE
+        message.text = None
+        message.caption = "Alexa, is tasveer mein kya hai?"
+        self.assertEqual(ai_chat._incoming_message_text(message), message.caption)
+        self.assertTrue(asyncio.run(ai_chat.is_alexa_trigger(message)))
+
+    def test_reply_context_is_included_only_for_alexa_replies(self):
+        message = _group_message("Iska kya matlab?")
+        message.reply_to_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=message.bot.id),
+            text="Kal wali baat yaad hai?",
+        )
+        self.assertEqual(
+            ai_chat._reply_context_text(message),
+            "Kal wali baat yaad hai?",
+        )
+        message.reply_to_message.from_user.id = 222
+        self.assertEqual(ai_chat._reply_context_text(message), "")
+
     def test_non_greeting_group_chat_does_not_trigger_unsolicited_reply(self):
         for index, text in enumerate(("kya haal hai?", "aaj group mein kya scene hai", "nice")):
             with self.subTest(text=text):
@@ -205,6 +226,8 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
         system = provider.await_args.kwargs["system"]
         self.assertIn("Roman Urdu", system)
         self.assertIn("Roman Punjabi", system)
+        self.assertEqual(provider.await_args.kwargs["max_tokens"], 350)
+        self.assertEqual(provider.await_args.kwargs["temperature"], 0.58)
         self.assertIn("ALWAYS reply in Roman letters", system)
         self.assertIn("Avoid chatbot clichés", system)
         self.assertNotIn("Sirf casual Roman Hindi/Hinglish", system)
@@ -218,6 +241,9 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
         self.assertNotIn("do not confirm or deny", system)
         self.assertIn("GREETING BAN", system)
         self.assertIn("Never say, suggest, initiate", system)
+        self.assertIn("UNDERSTANDING FIRST", system)
+        self.assertIn("Be tolerant of typos", system)
+        self.assertIn("Track negation", system)
 
     def test_bot_banter_has_at_least_fifteen_unique_lines(self):
         self.assertGreaterEqual(len(ai_chat._BOT_BANTER_REPLIES), 15)
