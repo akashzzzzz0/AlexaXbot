@@ -939,8 +939,8 @@ async def _process_alexa_ai_chat(message: Message) -> None:
         ).strip()
 
     replied = message.reply_to_message
-    if not text and replied and (replied.text or replied.caption):
-        text = (replied.text or replied.caption or "").strip()
+    if not text and replied and (replied.text or getattr(replied, "caption", None)):
+        text = (replied.text or getattr(replied, "caption", None) or "").strip()
     if not text:
         text = "Say hello and start a friendly conversation."
     quoted_context = _reply_context_text(message)
