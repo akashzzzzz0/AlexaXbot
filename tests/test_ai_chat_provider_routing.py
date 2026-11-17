@@ -1,4 +1,6 @@
 import unittest
+
+import httpx
 from unittest.mock import AsyncMock, patch
 
 from bot.services import ai_chat_provider
@@ -129,6 +131,64 @@ class AlexaChatProviderRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "")
         self.assertEqual(ai_chat_provider.drain_provider_events(), [])
 
+
+
+    async def test_checks_all_three_groq_keys_until_one_is_available(self):
+        request = httpx.Request("POST", "https://api.groq.com/test")
+        limited = httpx.Response(429, request=request, text='{"error":{"message":"rate limit"}}')
+        groq = AsyncMock(side_effect=[
+            httpx.HTTPStatusError("rate limited", request=request, response=limited),
+            httpx.HTTPStatusError("rate limited", request=request, response=limited),
+            "Third Groq key reply",
+        ])
+        with (
+            patch.object(ai_chat_provider, "_gemini_api_key", return_value=""),
+            patch.object(ai_chat_provider, "_groq_api_keys", return_value=["key-1", "key-2", "key-3"]),
+            patch.object(ai_chat_provider, "_groq_chat", groq),
+            patch.object(ai_chat_provider, "_xai_api_key", return_value="xai-key"),
+            patch.object(ai_chat_provider, "_openai_api_key", return_value=""),
+            patch.object(ai_chat_provider, "get_ollama_api_key", return_value=""),
+        ):
+            result = await ai_chat_provider.ai_chat_completion(
+                [{"role": "user", "content": "Hi"}]
+            )
+        self.assertEqual(result, "Third Groq key reply")
+        self.assertEqual(groq.await_count, 3)
+
+    async def test_moves_to_other_provider_when_all_three_groq_keys_are_limited(self):
+        request = httpx.Request("POST", "https://api.groq.com/test")
+        limited = httpx.Response(429, request=request, text='{"error":{"message":"rate limit"}}')
+        groq = AsyncMock(side_effect=[
+            httpx.HTTPStatusError("rate limited", request=request, response=limited),
+            httpx.HTTPStatusError("rate limited", request=request, response=limited),
+            httpx.HTTPStatusError("rate limited", request=request, response=limited),
+        ])
+        gemini = AsyncMock(side_effect=httpx.HTTPStatusError(
+            "rate limited",
+            request=httpx.Request("POST", "https://generativelanguage.googleapis.com/test"),
+            response=httpx.Response(
+                429,
+                request=httpx.Request("POST", "https://generativelanguage.googleapis.com/test"),
+                text='{"error":{"message":"quota"}}',
+            ),
+        ))
+        grok = AsyncMock(return_value="Grok fallback reply")
+        with (
+            patch.object(ai_chat_provider, "_gemini_api_key", return_value="gemini-key"),
+            patch.object(ai_chat_provider, "_gemini_chat", gemini),
+            patch.object(ai_chat_provider, "_groq_api_keys", return_value=["key-1", "key-2", "key-3"]),
+            patch.object(ai_chat_provider, "_groq_chat", groq),
+            patch.object(ai_chat_provider, "_xai_api_key", return_value="xai-key"),
+            patch.object(ai_chat_provider, "_xai_chat", grok),
+            patch.object(ai_chat_provider, "_openai_api_key", return_value=""),
+            patch.object(ai_chat_provider, "get_ollama_api_key", return_value=""),
+        ):
+            result = await ai_chat_provider.ai_chat_completion(
+                [{"role": "user", "content": "Hi"}]
+            )
+        self.assertEqual(result, "Grok fallback reply")
+        self.assertEqual(groq.await_count, 3)
+        grok.assert_awaited_once()
 
 if __name__ == "__main__":
     unittest.main()
