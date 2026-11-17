@@ -165,6 +165,51 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
                     ai_chat.is_alexa_trigger(_group_message(text, chat_id=-100800-index))
                 ))
 
+    def test_goodnight_farewell_with_tomorrow_is_understood_as_a_goodbye(self):
+        self.assertEqual(
+            ai_chat._short_social_reply("Good night then we'll meet tomorrow okay", []),
+            "Achha ji, good night! Kal milte hain. Apna khayal rakhna.",
+        )
+
+    def test_alexa_prefix_is_removed_before_short_intent_matching(self):
+        self.assertEqual(
+            ai_chat._short_social_reply("Good night then we'll meet tomorrow okay", []),
+            "Achha ji, good night! Kal milte hain. Apna khayal rakhna.",
+        )
+
+    def test_india_time_and_date_questions_use_ist_clock(self):
+        time_reply = ai_chat._current_ist_reply("Time kya ho raha hai?")
+        date_reply = ai_chat._current_ist_reply("Aaj ki date kya hai?")
+        self.assertIsNotNone(time_reply)
+        self.assertIn("IST", time_reply)
+        self.assertIsNotNone(date_reply)
+        self.assertIn("India", date_reply)
+        self.assertIsNone(ai_chat._current_ist_reply("I have time tomorrow"))
+
+    def test_alexa_goodnight_does_not_call_ai_or_add_generic_clarification(self):
+        message = _group_message("Alexa, Good night then we'll meet tomorrow okay")
+        message.reply = AsyncMock()
+        message.bot.send_chat_action = AsyncMock()
+        key = (message.chat.id, message.from_user.id)
+        ai_chat._conversations[key].clear()
+        ai_chat._history_loaded.add(key)
+        try:
+            with (
+                patch.object(ai_chat, "_ask_ai_with_typing", AsyncMock()) as provider,
+                patch.object(ai_chat.asyncio, "to_thread", new=AsyncMock(return_value=None)),
+            ):
+                asyncio.run(ai_chat._process_alexa_ai_chat(message))
+            provider.assert_not_awaited()
+            message.reply.assert_awaited_once()
+            reply_text = message.reply.await_args.args[0].casefold()
+            self.assertIn("good night", reply_text)
+            self.assertIn("kal milte hain", reply_text)
+            self.assertNotIn("rephrase", reply_text)
+            self.assertNotIn("doosre alfaaz", reply_text)
+        finally:
+            ai_chat._history_loaded.discard(key)
+            ai_chat._conversations[key].clear()
+
     def test_good_morning_gets_a_natural_reply_and_repeats_are_contextual(self):
         first = ai_chat._short_social_reply("Good morning", [])
         self.assertIn(first, (
