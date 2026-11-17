@@ -171,11 +171,16 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
             "Achha ji, good night! Kal milte hain. Apna khayal rakhna.",
         )
 
-    def test_alexa_prefix_is_removed_before_short_intent_matching(self):
-        self.assertEqual(
-            ai_chat._short_social_reply("Good night then we'll meet tomorrow okay", []),
-            "Achha ji, good night! Kal milte hain. Apna khayal rakhna.",
-        )
+    def test_emoji_only_messages_get_meaningful_contextual_replies(self):
+        self.assertEqual(ai_chat._short_social_reply("😂🤣"), "Kya hua, itni hasi kyun aa rahi hai?")
+        self.assertEqual(ai_chat._short_social_reply("🥺"), "Kya hua? Sab theek hai?")
+        self.assertEqual(ai_chat._short_social_reply("🤔"), "Kuch soch rahe ho? Bolo, kya baat hai?")
+        self.assertIsNone(ai_chat._short_social_reply("🙂"))
+
+    def test_combined_what_are_you_doing_and_time_question_answers_both(self):
+        answer = ai_chat._current_ist_reply("Kya kar rahi ho, time kya ho raha hai?")
+        self.assertIn("Main yahin tumse baat kar rahi hoon.", answer)
+        self.assertIn("IST", answer)
 
     def test_india_time_and_date_questions_use_ist_clock(self):
         time_reply = ai_chat._current_ist_reply("Time kya ho raha hai?")
