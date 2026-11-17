@@ -357,7 +357,7 @@ def _group_conversation_is_active(chat_id: int) -> bool:
 
 
 _RELIGIOUS_GREETING_RE = re.compile(
-    r"(?<![\\w])(?:assalam(?:\\s*o)?\\s*alaikum|as[-\\s]?sala?mu?\\s*alaikum|salaam|salam|aoa)(?![\\w])",
+    r"(?<![\\w])(?:assalam(?:\\s*o|u)?\\s*alay?kum|as[-\\s]?sala?mu?\\s*alay?kum|salaam|salam|aoa)(?![\\w])",
     re.IGNORECASE,
 )
 _PUNCTUATION_ONLY_RE = re.compile(r"^[\\s.!?,…;:~_\\-–—]+$")
