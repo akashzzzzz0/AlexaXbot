@@ -26,9 +26,9 @@ from bot.services.ai_chat_provider import ai_chat_completion, drain_provider_eve
 router = Router(name="alexa_ai_chat")
 logger = logging.getLogger(__name__)
 _missing_key_logged = False
-_conversations = defaultdict(lambda: deque(maxlen=12))
+_conversations = defaultdict(lambda: deque(maxlen=5))
 _HISTORY_DB = Path("alexa_chat_history.db")
-_HISTORY_LIMIT = 30
+_HISTORY_LIMIT = 5
 _history_loaded = set()
 def _detect_user_gender_style(history, current_text: str) -> str:
     """Use only clear first-person self-identification; never guess from a name or ID."""
@@ -576,7 +576,8 @@ async def _ask_ai_with_typing(
 ) -> str:
     """Generate a reply; the outer handler owns one indicator for the full turn."""
     answer = await _ask_ai(
-        user_text, history, smart_mode=smart_mode, gender_style=gender_style
+        user_text, history, smart_mode=smart_mode, gender_style=gender_style,
+        conversation_id=f"{message.chat.id}:{message.from_user.id if message.from_user else 0}",
     )
     owner_id = int(getattr(settings, "effective_owner_id", 0) or 0)
     if owner_id:
@@ -635,13 +636,13 @@ async def _typing_indicator_loop(message: Message) -> None:
 
 async def _ask_ai(
     user_text: str, history: deque, *, smart_mode: bool = False,
-    gender_style: str = "neutral"
+    gender_style: str = "neutral", conversation_id: str = ""
 ) -> str:
     """Generate a casual reply through the configured AI provider."""
     system_instruction = (
-        "You are Alexa, a lively feminine Telegram chat persona fluent in natural Indian Hindi written in Roman script (Roman Hindi). "
+        "You are Alexa, a lively, friendly feminine Telegram chat persona. "
         "Sound like a naturally expressive, friendly chat persona—not like a scripted assistant. Keep a consistent feminine voice and refer to yourself as Alexa. Never claim to be a real human or invent a human identity. "
-        "Match the user's language, slang, energy, and message length. Understand and reply naturally in English, Hindi, Urdu, Roman Urdu, Roman Hindi, Bangla/Bengali (including Romanized Bangla and Bengali script), and mixed-language messages. Prefer the language and script the sender used; do not force Hindi when the sender is speaking Bangla, Urdu, or English. Avoid formal textbook wording. "
+        "Understand English, Roman Urdu, Roman Hindi, Roman Punjabi, Urdu script, and Hindi Devanagari script. Match the sender's language: English input gets English; Urdu/Hindi/Punjabi input gets Roman Urdu/Hindi/Punjabi as appropriate. If the user writes Urdu or Hindi in its native script, understand it but ALWAYS reply in Roman letters. Never reply in Urdu or Devanagari script. Do not add unsupported languages. Match slang and message length; avoid formal textbook wording. "
         "Use the supplied conversation history, remember details already shared, and answer the newest message directly. "
         "Never use a generic acknowledgement like Achha samajh gayi when the user greeted you, asked a follow-up, or expects a specific response. "
         "Resolve short follow-ups from the immediately preceding turns and answer that point directly. "
@@ -701,6 +702,7 @@ async def _ask_ai(
             system=system_instruction,
             temperature=0.72,
             max_tokens=100,
+            conversation_id=conversation_id,
         )
     except RuntimeError as exc:
         if str(exc) == "ollama_not_configured":
