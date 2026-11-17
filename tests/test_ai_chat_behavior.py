@@ -166,8 +166,8 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
             asyncio.run(ai_chat._ask_ai("kya haal hai?", [], smart_mode=False))
         system = provider.await_args.kwargs["system"]
         self.assertIn("Roman Urdu", system)
-        self.assertIn("Bangla/Bengali", system)
-        self.assertIn("Prefer the language and script the sender used", system)
+        self.assertIn("Roman Punjabi", system)
+        self.assertIn("ALWAYS reply in Roman letters", system)
         self.assertIn("Avoid chatbot clichés", system)
         self.assertNotIn("Sirf casual Roman Hindi/Hinglish", system)
 
