@@ -114,7 +114,7 @@ def owner_kb(_=None) -> object:
     builder.button(text="🌐 Global Controls", callback_data="owner:global_controls")
     builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
     builder.button(text="🔨 Ban All", callback_data="owner:banall")
-    builder.button(text=_maintenance_button_text(), callback_data=_maintenance_callback_data())
+    builder.button(text=_maintenance_button_text(), callback_data="owner:maintenance")
     builder.button(text="⚙️ Owner Settings", callback_data="owner:settings")
     builder.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2)
     return builder.as_markup()
@@ -1726,7 +1726,8 @@ async def owner_users(callback: CallbackQuery, _: callable, db_session: AsyncSes
     await callback.answer()
 
 
-@router.callback_query(F.data.in_({"owner:maintenance", "owner:maintenance:on", "owner:maintenance:off"}))
+@router.callback_query(F.data == "owner:maintenance")
+@router.callback_query(F.data.startswith("owner:maintenance:"))
 async def toggle_maintenance(callback: CallbackQuery, _: callable, db_session: AsyncSession, **kwargs):
     global _maintenance_mode
     if not is_owner(callback.from_user.id):
