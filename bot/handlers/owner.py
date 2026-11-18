@@ -52,6 +52,15 @@ def _format_inbox_timestamp(value) -> str:
     return value.astimezone(_INBOX_TIMEZONE).strftime("%d %b %Y, %H:%M")
 
 _maintenance_mode = False
+_ai_chat_enabled = True
+
+
+def _ai_chat_button_text() -> str:
+    return "🔴 AI Chat ON · Tap to turn OFF" if _ai_chat_enabled else "🟢 AI Chat OFF · Tap to turn ON"
+
+
+def _ai_chat_callback_data() -> str:
+    return "owner:chat:off" if _ai_chat_enabled else "owner:chat:on"
 
 
 def _maintenance_button_text() -> str:
@@ -111,6 +120,7 @@ def owner_kb(_=None) -> object:
     builder.button(text="✉️ Message Selected Groups", callback_data="owner:group_message")
     builder.button(text="🎁 Referrals / Stars", callback_data="owner:referrals")
     builder.button(text="🧠 Global AI Control", callback_data="owner:ai")
+    builder.button(text=_ai_chat_button_text(), callback_data=_ai_chat_callback_data())
     builder.button(text="🌐 Global Controls", callback_data="owner:global_controls")
     builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
     builder.button(text="🔨 Ban All", callback_data="owner:banall")
@@ -291,6 +301,49 @@ async def owner_settings(callback: CallbackQuery, _: callable, db_session: Async
         parse_mode="HTML", reply_markup=builder.as_markup()
     )
     await callback.answer()
+
+
+@router.callback_query(F.data == "owner:chat")
+@router.callback_query(F.data.startswith("owner:chat:"))
+async def toggle_owner_ai_chat(callback: CallbackQuery, db_session: AsyncSession, **kwargs):
+    global _ai_chat_enabled
+    if not is_owner(callback.from_user.id) or not callback.message or callback.message.chat.type != "private":
+        await callback.answer("Not available.", show_alert=True)
+        return
+
+    row = await db_session.get(GlobalSetting, "owner_ai_chat_enabled")
+    current = bool(row is None or row.value != "0")
+    if callback.data == "owner:chat:on":
+        enabled = True
+    elif callback.data == "owner:chat:off":
+        enabled = False
+    else:
+        enabled = not current
+
+    if row is None:
+        row = await _owner_get_or_create(
+            db_session, GlobalSetting, GlobalSetting.key == "owner_ai_chat_enabled",
+            key="owner_ai_chat_enabled", value="1" if enabled else "0",
+        )
+    else:
+        row.value = "1" if enabled else "0"
+    await db_session.commit()
+    _ai_chat_enabled = enabled
+
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="🟢 Turn AI Chat ON" if not enabled else "🔴 Turn AI Chat OFF",
+        callback_data="owner:chat:on" if not enabled else "owner:chat:off",
+    )
+    builder.button(text="◀️ Owner Panel", callback_data="owner:menu")
+    builder.adjust(1)
+    await callback.message.edit_text(
+        "💬 <b>ALEXA AI CHAT CONTROL</b>\n\n"
+        f"Status: <b>{'🟢 ON' if enabled else '🔴 OFF'}</b>\n\n"
+        + ("Alexa AI chat replies are enabled." if enabled else "Alexa AI chat replies are paused. Moderation, admin commands, games, and all other bot features remain active."),
+        parse_mode="HTML", reply_markup=builder.as_markup(),
+    )
+    await callback.answer("AI Chat ON" if enabled else "AI Chat OFF")
 
 
 @router.callback_query(F.data == "owner:health")
@@ -2054,9 +2107,11 @@ async def start_broadcast(callback: CallbackQuery, _: callable, state: FSMContex
 
 async def load_maintenance_mode(session: AsyncSession) -> bool:
     """Restore the persistent owner maintenance switch during startup."""
-    global _maintenance_mode
+    global _maintenance_mode, _ai_chat_enabled
     row = await session.get(GlobalSetting, "owner_maintenance_mode")
     _maintenance_mode = bool(row and row.value == "1")
+    chat_row = await session.get(GlobalSetting, "owner_ai_chat_enabled")
+    _ai_chat_enabled = bool(chat_row is None or chat_row.value != "0")
     return _maintenance_mode
 
 

@@ -19,6 +19,8 @@ from aiogram import F, Router
 from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.enums import ChatType
 from aiogram.types import Message, ReactionTypeEmoji
+from sqlalchemy.ext.asyncio import AsyncSession
+from bot.database.models import GlobalSetting
 
 from bot.config import settings
 from bot.services.ai_chat_provider import ai_chat_completion, drain_provider_events
@@ -866,7 +868,17 @@ async def _ask_ai(
     F.text | F.caption,
     is_alexa_trigger,
 )
-async def alexa_ai_chat(message: Message) -> None:
+async def alexa_ai_chat(message: Message, db_session: AsyncSession = None) -> None:
+    # This persistent owner switch pauses only AI chat replies. It does not gate
+    # moderation, commands, games, reactions, or any other update handlers.
+    if db_session is not None:
+        try:
+            chat_setting = await db_session.get(GlobalSetting, "owner_ai_chat_enabled")
+            if chat_setting is not None and chat_setting.value == "0":
+                return
+        except Exception as exc:
+            logger.warning("Could not read owner AI chat switch; allowing chat", exc_info=exc)
+
     # Send the first action inline before any history/database/provider work.
     # A background task alone can lose the race to a very fast reply, so the
     # client may never display the typing indicator at all.
