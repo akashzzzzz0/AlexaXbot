@@ -15,6 +15,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.database.models import User, Group, GroupMember, GroupSettings, ActionLog, SecuritySettings, BioLinkProtectionSetting, BioLinkProtectionConfig, ScamReview, InboxMessage, GlobalSetting, GroupPromotionOptIn, Referral, AffiliateRequest
 from bot.keyboards.main_menu import back_button_kb
 from bot.config import settings
+from bot.services.ai_chat_switch import set_chat_enabled
 from bot.utils.helpers import format_number
 import structlog
 from html import escape
@@ -329,6 +330,7 @@ async def toggle_owner_ai_chat(callback: CallbackQuery, db_session: AsyncSession
         row.value = "1" if enabled else "0"
     await db_session.commit()
     _ai_chat_enabled = enabled
+    set_chat_enabled(enabled)
 
     builder = InlineKeyboardBuilder()
     builder.button(
@@ -2112,6 +2114,7 @@ async def load_maintenance_mode(session: AsyncSession) -> bool:
     _maintenance_mode = bool(row and row.value == "1")
     chat_row = await session.get(GlobalSetting, "owner_ai_chat_enabled")
     _ai_chat_enabled = bool(chat_row is None or chat_row.value != "0")
+    set_chat_enabled(_ai_chat_enabled)
     return _maintenance_mode
 
 
