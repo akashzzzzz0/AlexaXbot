@@ -145,6 +145,18 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
             ai_chat.is_alexa_trigger(_group_message("kya haal hai?", chat_id=chat_id))
         ))
 
+    def test_first_explicit_bot_username_mention_triggers_alexa(self):
+        async def scenario():
+            ai_chat._bot_username = None
+            message = _group_message("@AlexaSuper_Bot hello")
+            message.bot.get_me = AsyncMock(
+                return_value=SimpleNamespace(username="AlexaSuper_Bot")
+            )
+            self.assertTrue(await ai_chat.is_alexa_trigger(message))
+            message.bot.get_me.assert_awaited_once()
+
+        asyncio.run(scenario())
+
     def test_smart_reply_ignores_message_tagging_another_member(self):
         self.assertFalse(asyncio.run(
             ai_chat.is_alexa_trigger(_group_message("hello @someone123"))
