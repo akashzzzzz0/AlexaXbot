@@ -356,21 +356,28 @@ def _group_conversation_is_active(chat_id: int) -> bool:
     return len({user_id for _, user_id in activity}) >= 2
 
 
-_RELIGIOUS_GREETING_RE = re.compile(
-    r"\b(?:assalamu?(?:\s*o)?\s*ala(?:i|y)kum|as[- ]sala?mu?\s*ala(?:i|y)kum|salaam|salam|aoa)\b",
+_RELIGIOUS_GREETING_PREFIX_RE = re.compile(
+    r"^\s*(?:assalamu?(?:\s*o)?\s*ala(?:i|y)kum|as[- ]sala?mu?\s*ala(?:i|y)kum|salaam|salam|aoa)\b[\s,!.:;—-]*",
     re.IGNORECASE,
 )
 _PUNCTUATION_ONLY_RE = re.compile(r"^[\s.!?,…;:~_\-–—]+$")
 
 
+def _neutralize_religious_greeting(answer: str) -> str:
+    """Use a neutral hello if a generated reply opens by mirroring a religious greeting."""
+    value = (answer or "").strip()
+    if not value:
+        return ""
+    neutralized = _RELIGIOUS_GREETING_PREFIX_RE.sub("", value, count=1).strip()
+    if neutralized == value:
+        return value
+    return f"Hello! {neutralized}".strip() if neutralized else "Hello!"
+
+
 def _is_ignored_low_signal_message(text: str) -> bool:
-    """Ignore religious greetings and punctuation-only noise without invoking AI."""
+    """Ignore empty and punctuation-only noise, not meaningful greetings."""
     value = (text or "").strip()
-    return (
-        not value
-        or bool(_RELIGIOUS_GREETING_RE.search(value))
-        or bool(_PUNCTUATION_ONLY_RE.fullmatch(value))
-    )
+    return not value or bool(_PUNCTUATION_ONLY_RE.fullmatch(value))
 
 
 _GREETING_RE = re.compile(
@@ -623,7 +630,7 @@ async def is_alexa_trigger(message: Message) -> bool:
     text = _incoming_message_text(message)
     if not text or not message.from_user or message.from_user.is_bot:
         return False
-    # Never start a conversation for religious greetings or punctuation-only noise.
+    # Keep punctuation-only noise out, but allow all meaningful greetings.
     if _is_ignored_low_signal_message(text):
         return False
 
@@ -787,8 +794,7 @@ async def _ask_ai(
         "Never label the user confused, upset, or joking unless their words clearly show it. Do not answer a follow-up with a random teasing line that ignores the previous turn. " +
         "If the previous context still does not make the meaning clear, ask one simple, relevant clarification instead of inventing an interpretation or changing the topic. " +
         "If corrected for sounding robotic, acknowledge it casually and adjust. "
-        "GREETING BAN: Never say, suggest, initiate, or reply with 'Assalamualaikum', 'As-salamu alaykum', 'Salam', 'Salaam', 'AOA', or any transliteration/variant of that religious greeting. Do not use religious greetings at all, even if the user uses one. For greetings, use only ordinary casual greetings such as 'Hi', 'Hello', 'Hey', or a natural short Roman Urdu response. "
-        "Never use the word Allah or its Arabic/Urdu spellings (الله or اللّٰه); rephrase religious invocations neutrally. "
+        "RELIGIOUS NEUTRALITY: Alexa has no religion, faith, or personal religious beliefs. Never claim to follow, represent, or belong to any religion, and never initiate religious greetings, prayers, or religious invocations as your own. If a user greets you with a religious greeting, respond politely with a neutral greeting such as Hi or Hello rather than mirroring it. You may discuss religions, religious words, or beliefs factually and respectfully when the user asks; do not pretend to hold those beliefs. "
     )
     if user_text.strip().casefold() == "alexa":
         system_instruction += (
@@ -850,9 +856,8 @@ async def _ask_ai(
         raise
     # Truncate without dropping the final complete word on every response.
     answer = answer[:700].strip() if answer else ""
-    if re.search(r"(?i)\ballah\b|الله|اللّٰه", answer):
-        logger.warning("Alexa AI response was rejected by the existing vocabulary filter")
-        return ""
+    # Religious terms may be relevant to a user's question; neutrality is about
+    # Alexa's identity and conduct, not a blanket ban on vocabulary.
     return answer
 
 
@@ -1099,11 +1104,9 @@ async def _process_alexa_ai_chat(message: Message) -> None:
         return
     if answer.strip().casefold() == "__ignore__":
         return
-    # Enforce the greeting ban at the output boundary too: prompts alone are not
-    # reliable enough to prevent a provider from emitting a prohibited greeting.
-    if _RELIGIOUS_GREETING_RE.search(answer):
-        logger.warning("Alexa response suppressed because it contained a prohibited religious greeting")
-        return
+    # Convert an opening religious greeting to a neutral hello rather than
+    # discarding the entire useful reply.
+    answer = _neutralize_religious_greeting(answer)
     # Never send a fallback/fictional AI response when Ollama is unavailable.
     # Smart group replies stay silent unless a real provider returned an answer.
     # Do not replace provider outages with canned greeting/help text.
