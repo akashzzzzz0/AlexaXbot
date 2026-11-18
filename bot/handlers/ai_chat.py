@@ -659,8 +659,8 @@ async def is_alexa_trigger(message: Message) -> bool:
         return False
 
     # Telegram's hidden text_mention entity is an explicit mention even when
-    # the message text contains no visible @username.
-    for entity in (message.entities or []):
+    # the message text contains no visible @username (including photo captions).
+    for entity in (message.entities or message.caption_entities or []):
         entity_type = getattr(entity.type, "value", entity.type)
         mentioned_user = getattr(entity, "user", None)
         if entity_type == "text_mention" and mentioned_user and mentioned_user.id == message.bot.id:
