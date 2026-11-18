@@ -21,6 +21,7 @@ from aiogram.enums import ChatType
 from aiogram.types import Message, ReactionTypeEmoji
 from sqlalchemy.ext.asyncio import AsyncSession
 from bot.database.models import GlobalSetting
+from bot.services.ai_chat_switch import is_chat_enabled
 
 from bot.config import settings
 from bot.services.ai_chat_provider import ai_chat_completion, drain_provider_events
@@ -869,6 +870,10 @@ async def _ask_ai(
     is_alexa_trigger,
 )
 async def alexa_ai_chat(message: Message, db_session: AsyncSession = None) -> None:
+    # Check the shared runtime flag first so OFF takes effect immediately even
+    # when this update has no database session injected.
+    if not is_chat_enabled():
+        return
     # This persistent owner switch pauses only AI chat replies. It does not gate
     # moderation, commands, games, reactions, or any other update handlers.
     if db_session is not None:
