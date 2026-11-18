@@ -185,16 +185,26 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
     def test_slash_commands_do_not_trigger_casual_chat(self):
         self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(_group_message("/ban 123"))))
 
-    def test_religious_greetings_are_ignored_in_all_common_spellings(self):
+    def test_religious_greetings_are_meaningful_and_allowed_in_private_chat(self):
         for index, text in enumerate((
             "Assalam o alaikum", "Assalamu alaikum", "As-salamu alaykum",
             "Salam", "Salaam", "AOA", "salam, kya haal hai?",
         )):
             with self.subTest(text=text):
-                self.assertTrue(ai_chat._is_ignored_low_signal_message(text))
-                self.assertFalse(asyncio.run(
-                    ai_chat.is_alexa_trigger(_group_message(text, chat_id=-101000-index))
-                ))
+                self.assertFalse(ai_chat._is_ignored_low_signal_message(text))
+                message = _group_message(text, chat_id=-101000-index)
+                message.chat.type = ChatType.PRIVATE
+                self.assertTrue(asyncio.run(ai_chat.is_alexa_trigger(message)))
+
+    def test_opening_religious_greeting_is_neutralized_without_dropping_reply(self):
+        self.assertEqual(
+            ai_chat._neutralize_religious_greeting("Assalam o alaikum! Kya haal hain?"),
+            "Hello! Kya haal hain?",
+        )
+        self.assertEqual(
+            ai_chat._neutralize_religious_greeting("We can discuss the word salam neutrally."),
+            "We can discuss the word salam neutrally.",
+        )
 
     def test_punctuation_only_messages_are_ignored(self):
         for index, text in enumerate((".", "..", "...", "?!", "—")):
@@ -209,7 +219,7 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertFalse(ai_chat._is_ignored_low_signal_message(text))
 
-    def test_provider_religious_greeting_response_is_suppressed(self):
+    def test_provider_opening_religious_greeting_is_neutralized_not_suppressed(self):
         message = _group_message("Alexa hello")
         message.reply = AsyncMock()
         message.bot.send_chat_action = AsyncMock()
@@ -217,7 +227,9 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
         ai_chat._history_loaded.add(key)
         with patch.object(ai_chat, "_ask_ai_with_typing", AsyncMock(return_value="Assalam o alaikum! Kya haal hain?")):
             asyncio.run(ai_chat._process_alexa_ai_chat(message))
-        message.reply.assert_not_awaited()
+        message.reply.assert_awaited_once()
+        self.assertIn("Hello!", message.reply.await_args.args[0])
+        self.assertNotIn("Assalam", message.reply.await_args.args[0])
         ai_chat._history_loaded.discard(key)
 
 
@@ -302,8 +314,10 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
         self.assertIn("answer honestly and briefly", system)
         self.assertIn("Never dodge a direct factual question", system)
         self.assertNotIn("do not confirm or deny", system)
-        self.assertIn("GREETING BAN", system)
-        self.assertIn("Never say, suggest, initiate", system)
+        self.assertIn("RELIGIOUS NEUTRALITY", system)
+        self.assertIn("Alexa has no religion", system)
+        self.assertIn("never initiate religious greetings", system)
+        self.assertNotIn("Never use the word Allah", system)
         self.assertIn("UNDERSTANDING FIRST", system)
         self.assertIn("Be tolerant of typos", system)
         self.assertIn("Track negation", system)
