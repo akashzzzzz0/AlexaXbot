@@ -4,6 +4,7 @@ The bot keeps its existing handlers and UI; only the model-provider layer is sha
 Configure OLLAMA_BASE_URL, OLLAMA_MODEL, and OLLAMA_API_KEY at runtime, or use the
 ignored bot/ollama_secret.py file for a private key on hosts without environment controls.
 """
+import json
 import os
 from typing import Iterable
 
@@ -88,9 +89,29 @@ async def ollama_chat(
                 request=response.request,
                 response=response,
             )
-        data = response.json()
-    message = data.get("message") or {}
-    answer = str(message.get("content") or "").strip()
+        # Ollama Cloud may return either one JSON document or NDJSON
+        # chunks even when stream=False. Accept both response shapes.
+        try:
+            data = response.json()
+        except ValueError:
+            chunks = []
+            for line in response.text.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    chunks.append(json.loads(line))
+                except ValueError:
+                    continue
+            if not chunks:
+                raise RuntimeError("ollama_invalid_response")
+            answer = "".join(
+                str((chunk.get("message") or {}).get("content") or "")
+                for chunk in chunks
+            ).strip()
+        else:
+            message = data.get("message") or {}
+            answer = str(message.get("content") or "").strip()
     if not answer:
         raise RuntimeError("empty_response")
     return answer
