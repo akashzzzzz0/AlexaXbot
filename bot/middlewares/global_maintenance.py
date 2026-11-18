@@ -15,6 +15,33 @@ _ALLOWED_OWNER_CALLBACKS = frozenset(
     }
 )
 
+def _update_has_group_chat(update) -> bool:
+    """Return True when an incoming Telegram update belongs to a group."""
+    candidates = []
+    for field in (
+        "message",
+        "edited_message",
+        "channel_post",
+        "edited_channel_post",
+        "business_message",
+        "edited_business_message",
+        "my_chat_member",
+        "chat_member",
+        "chat_join_request",
+    ):
+        value = getattr(update, field, None)
+        if value is not None:
+            candidates.append(value)
+
+    callback = getattr(update, "callback_query", None)
+    if callback is not None and getattr(callback, "message", None) is not None:
+        candidates.append(callback.message)
+
+    return any(
+        getattr(getattr(item, "chat", None), "type", None) in {"group", "supergroup"}
+        for item in candidates
+    )
+
 
 def _update_is_owner_maintenance_control(update, owner_id: int | None) -> bool:
     """Allow only the owner controls needed to inspect or disable maintenance."""
