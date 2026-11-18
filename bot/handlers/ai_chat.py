@@ -123,7 +123,7 @@ async def alexa_group_message_reactions(message: Message) -> None:
 async def _explicitly_mentions_alexa(message: Message) -> bool:
     """Require a real @Alexa mention; ordinary group chat never triggers reactions."""
     global _bot_username
-    for entity in (message.entities or []):
+    for entity in (message.entities or message.caption_entities or []):
         entity_type = getattr(entity.type, "value", entity.type)
         if entity_type == "text_mention" and entity.user and entity.user.id == message.bot.id:
             return True
