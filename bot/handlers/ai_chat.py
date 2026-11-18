@@ -637,6 +637,15 @@ async def is_alexa_trigger(message: Message) -> bool:
 
     session_key = (message.chat.id, message.from_user.id)
 
+    # Resolve Alexa's username before comparing @mentions. Otherwise the first
+    # explicit @Alexa mention can be misclassified as a mention of another member.
+    if _bot_username is None:
+        try:
+            me = await message.bot.get_me()
+            _bot_username = (me.username or "").casefold()
+        except Exception:
+            _bot_username = ""
+
     # Mentioning another member ends this sender's Alexa conversation immediately.
     # Do not let a simultaneous Alexa name/mention override that hand-off.
     if _message_mentions_another_member(message, text):
@@ -662,13 +671,6 @@ async def is_alexa_trigger(message: Message) -> bool:
     if replied and replied.from_user and replied.from_user.id != message.bot.id:
         _active_conversations.discard(session_key)
         return False
-
-    if _bot_username is None:
-        try:
-            me = await message.bot.get_me()
-            _bot_username = (me.username or "").casefold()
-        except Exception:
-            _bot_username = ""
 
     if _bot_username and re.search(
         rf"(?<!\w)@{re.escape(_bot_username)}\b", text, re.IGNORECASE
