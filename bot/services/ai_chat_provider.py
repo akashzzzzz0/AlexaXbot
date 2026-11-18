@@ -502,7 +502,7 @@ async def _own_ai_chat(messages, *, system="", temperature=0.7, max_tokens=500, 
     ).strip()
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    timeout = httpx.Timeout(15.0, connect=5.0)
+    timeout = httpx.Timeout(float(os.getenv("ALEXA_OWN_AI_TIMEOUT", "270")), connect=10.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.post(url, json=payload, headers=headers)
         if response.status_code >= 400:
@@ -559,7 +559,7 @@ async def ai_chat_completion(messages, *, system="", temperature=0.7, max_tokens
                 json_mode=json_mode,
                 conversation_id=conversation_id,
             ),
-            timeout=18.0,
+            timeout=float(os.getenv("ALEXA_OWN_AI_TIMEOUT", "270")) + 15.0,
         )
         return answer.strip() if isinstance(answer, str) else ""
     except Exception as exc:
