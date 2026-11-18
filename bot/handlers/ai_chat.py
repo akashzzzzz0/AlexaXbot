@@ -11,6 +11,8 @@ import threading
 import time
 import os
 import random
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from collections import defaultdict, deque
 from pathlib import Path
 
@@ -421,6 +423,38 @@ def _bot_banter_reply(history=None) -> str:
 
 
 
+def _current_ist_reply(text: str) -> str | None:
+    """Answer explicit current-time/date questions from the India timezone clock."""
+    value = re.sub(r"[.!?,\s]+", " ", (text or "").casefold()).strip()
+    asks_time = bool(
+        re.search(r"\b(?:time|waqt|samay)\b", value)
+        and re.search(r"\b(?:kya|what|what's|whats|kitna|kitne|batao|btao|tell|abhi|current|ho raha|is it)\b", value)
+    )
+    asks_date = bool(
+        re.search(r"\b(?:date|tarikh|tareekh|today|aaj)\b", value)
+        and re.search(r"\b(?:kya|what|today|aaj|batao|btao|tell|current|ka|ki|hai)\b", value)
+    )
+    if not asks_time and not asks_date:
+        return None
+    try:
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    except Exception:
+        return None
+    parts = []
+    asks_what_doing = bool(re.search(
+        r"\b(?:kya\s+kar|kia\s+kar|what\s+are\s+you\s+doing|what're\s+you\s+doing)\b",
+        value,
+    ))
+    if asks_what_doing:
+        parts.append("Main yahin tumse baat kar rahi hoon.")
+    if asks_time:
+        clock = now.strftime("%I:%M %p").lstrip("0")
+        parts.append(f"Abhi India mein {clock} IST hai.")
+    if asks_date:
+        parts.append(f"Aaj India mein {now.strftime('%A, %d %B %Y')} hai.")
+    return " ".join(parts)
+
+
 def _short_social_reply(text: str, history=None) -> str | None:
     """Reply quickly to greetings and short follow-ups using recent context."""
     value = re.sub(r"[.!?,\s]+$", "", (text or "").casefold().strip())
@@ -433,6 +467,38 @@ def _short_social_reply(text: str, history=None) -> str | None:
         (str(item[1]).casefold().strip() for item in reversed(recent) if item[0] == "model"),
         "",
     )
+    ist_reply = _current_ist_reply(value)
+    if ist_reply:
+        return ist_reply
+ 
+    if not re.sub(r"[\W_]+", "", value, flags=re.UNICODE):
+        if any(symbol in value for symbol in ("😂", "🤣", "😹", "😆")):
+            return "Kya hua, itni hasi kyun aa rahi hai?"
+        if any(symbol in value for symbol in ("😢", "😭", "🥺", "💔", "😔")):
+            return "Kya hua? Sab theek hai?"
+        if any(symbol in value for symbol in ("😡", "🤬", "😤")):
+            return "Lagta hai koi baat buri lagi—kya hua?"
+        if any(symbol in value for symbol in ("🤔", "😕", "🤨")):
+            return "Kuch soch rahe ho? Bolo, kya baat hai?"
+        if any(symbol in value for symbol in ("😮", "😱", "🤯", "😳")):
+            return "Oho, itna surprise kis baat ka?"
+        if any(symbol in value for symbol in ("❤️", "❤", "💜", "💖", "💕", "💗")):
+            return "Aww, sweet emoji! Sab khairiyat?"
+        if "👍" in value or "👌" in value:
+            return "Theek hai, samajh gayi."
+
+    has_goodnight = bool(re.search(r"\b(?:good\s*night|gn)\b", value))
+    has_tomorrow_context = bool(re.search(
+        r"\b(?:tomorrow|kal|meet|milte|milenge|see you|we['’]?ll|we will|talk|baat|then)\b",
+        value,
+    ))
+    if has_goodnight and (has_tomorrow_context or value in {"good night", "gn"}):
+        return "Achha ji, good night! Kal milte hain. Apna khayal rakhna."
+    if re.search(r"\b(?:bye|goodbye|see you)\b", value):
+        if has_tomorrow_context:
+            return "Theek hai, kal baat karte hain. Apna khayal rakhna."
+        return "Achha, phir milte hain. Apna khayal rakhna."
+
     if value in {"good morning", "gm", "morning"} and previous_user in {"good morning", "gm", "morning"}:
         return random.choice(("Arrey, dobara good morning? 😂 Kya baat hai?", "Haan haan, good morning phir se! 😄", "Itni baar good morning? Aaj mood achha lag raha hai 😂"))
     if value == "good afternoon" and previous_user == value:
@@ -1083,7 +1149,14 @@ async def _process_alexa_ai_chat(message: Message) -> None:
         else:
             # Unaddressed group greetings must use a real AI provider.
             # This prevents local canned replies while every AI provider is down.
-            short_reply = None if smart_mode else _short_social_reply(original_text or text, history)
+            short_reply = None
+            # Keep the established AI-generated response path for an explicit
+            # "Alexa, hello" call; deterministic intent handling is for the
+            # substantive request that follows the name call.
+            if not smart_mode and not (
+                prefix_match and text.casefold() in {"hi", "hello", "hey", "helo"}
+            ):
+                short_reply = _short_social_reply(text, history)
             if short_reply is not None:
                 answer = short_reply
             else:
