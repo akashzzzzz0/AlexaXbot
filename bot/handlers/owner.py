@@ -52,6 +52,31 @@ def _format_inbox_timestamp(value) -> str:
     return value.astimezone(_INBOX_TIMEZONE).strftime("%d %b %Y, %H:%M")
 
 _maintenance_mode = False
+
+
+def _maintenance_button_text() -> str:
+    return (
+        "🔴 Maintenance ON · Tap to turn OFF"
+        if _maintenance_mode
+        else "🟢 Maintenance OFF · Tap to turn ON"
+    )
+
+
+def _maintenance_callback_data() -> str:
+    return "owner:maintenance:off" if _maintenance_mode else "owner:maintenance:on"
+
+
+def _maintenance_control_kb(enabled: bool):
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="🟢 Turn Maintenance OFF" if enabled else "🔴 Turn Maintenance ON",
+        callback_data="owner:maintenance:off" if enabled else "owner:maintenance:on",
+    )
+    builder.button(text="◀️ Owner Panel", callback_data="owner:menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 _PROCESS_STARTED = time.monotonic()
 
 
@@ -89,7 +114,7 @@ def owner_kb(_=None) -> object:
     builder.button(text="🌐 Global Controls", callback_data="owner:global_controls")
     builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
     builder.button(text="🔨 Ban All", callback_data="owner:banall")
-    builder.button(text="🔧 Maintenance Mode", callback_data="owner:maintenance")
+    builder.button(text=_maintenance_button_text(), callback_data=_maintenance_callback_data())
     builder.button(text="⚙️ Owner Settings", callback_data="owner:settings")
     builder.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2)
     return builder.as_markup()
@@ -250,7 +275,7 @@ async def owner_settings(callback: CallbackQuery, _: callable, db_session: Async
         select(func.count()).select_from(Group).where(Group.is_active.is_(True))
     )
     builder = InlineKeyboardBuilder()
-    builder.button(text=f"{'🟢 Turn maintenance OFF' if _maintenance_mode else '🔧 Turn maintenance ON'}", callback_data="owner:maintenance")
+    builder.button(text=_maintenance_button_text(), callback_data=_maintenance_callback_data())
     builder.button(text="🚨 Emergency Controls", callback_data="owner:emergency")
     builder.button(text="👑 GLOBAL PROMOTION — ALL GROUPS", callback_data="owner:promotion")
     builder.button(text="🚀 Free Group Promotion Requests", callback_data="owner:promo_requests")
@@ -1701,7 +1726,7 @@ async def owner_users(callback: CallbackQuery, _: callable, db_session: AsyncSes
     await callback.answer()
 
 
-@router.callback_query(F.data == "owner:maintenance")
+@router.callback_query(F.data.in_({"owner:maintenance", "owner:maintenance:on", "owner:maintenance:off"}))
 async def toggle_maintenance(callback: CallbackQuery, _: callable, db_session: AsyncSession, **kwargs):
     global _maintenance_mode
     if not is_owner(callback.from_user.id):
@@ -1709,18 +1734,39 @@ async def toggle_maintenance(callback: CallbackQuery, _: callable, db_session: A
         return
     row = await db_session.get(GlobalSetting, "owner_maintenance_mode")
     current = bool(row and row.value == "1")
-    _maintenance_mode = not current
+    if callback.data == "owner:maintenance:on":
+        enabled = True
+    elif callback.data == "owner:maintenance:off":
+        enabled = False
+    else:
+        # Backward compatibility for any already-sent panel buttons.
+        enabled = not current
+    changed = enabled != current
+
     if row is None:
         row = await _owner_get_or_create(
             db_session, GlobalSetting, GlobalSetting.key == "owner_maintenance_mode",
-            key="owner_maintenance_mode", value="1" if _maintenance_mode else "0",
+            key="owner_maintenance_mode", value="1" if enabled else "0",
         )
     else:
-        row.value = "1" if _maintenance_mode else "0"
+        row.value = "1" if enabled else "0"
     await db_session.commit()
-    await callback.message.edit_reply_markup(reply_markup=owner_kb())
+    _maintenance_mode = enabled
 
-    if _maintenance_mode:
+    await callback.message.edit_text(
+        "🔧 <b>GLOBAL MAINTENANCE CONTROL</b>\\n\\n"
+        f"Status: <b>{'🔴 ON' if enabled else '🟢 OFF'}</b>\\n\\n"
+        + (
+            "All user-facing bot interactions are paused. AI chat and group moderation "
+            "are stopped. Only this private owner control remains available."
+            if enabled
+            else "Alexa is active again. AI chat and group moderation can run normally."
+        ),
+        parse_mode="HTML",
+        reply_markup=_maintenance_control_kb(enabled),
+    )
+
+    if enabled and changed:
         # Send exactly one notice to each active group on the OFF -> ON transition.
         await callback.answer("Maintenance ON. Sending one notice to active groups.")
         groups = await _active_groups(db_session)
@@ -1756,8 +1802,10 @@ async def toggle_maintenance(callback: CallbackQuery, _: callable, db_session: A
             )
         except Exception:
             pass
-    else:
+    elif not enabled:
         await callback.answer("Maintenance OFF. Alexa is active again.", show_alert=True)
+    else:
+        await callback.answer("Maintenance is already ON.", show_alert=True)
 
 
 @router.callback_query(F.data == "owner:emergency")
