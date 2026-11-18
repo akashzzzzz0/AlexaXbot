@@ -618,50 +618,47 @@ def _reply_context_text(message: Message) -> str:
 
 
 async def is_alexa_trigger(message: Message) -> bool:
-    """Trigger only on Alexa calls, active sessions, greetings, and captioned calls."""
+    """In groups, answer only when this message explicitly addresses Alexa.
+
+    A direct @username/entity mention or a reply to Alexa counts as an address.
+    Private chats remain normal one-to-one conversations. No greeting,
+    previous session, or unaddressed group message can start a reply.
+    """
     global _bot_username
     text = _incoming_message_text(message)
     if not text or not message.from_user or message.from_user.is_bot:
         return False
-    # Never start a conversation for religious greetings or punctuation-only noise.
     if _is_ignored_low_signal_message(text):
         return False
-
-    # Keep slash commands available to their existing feature handlers in every chat.
+    # Keep slash commands available to their existing feature handlers.
     if text.startswith("/"):
         return False
-
-    # Private chat remains a direct one-to-one conversation.
     if message.chat.type == ChatType.PRIVATE:
         return True
+    if message.chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}:
+        return False
 
     session_key = (message.chat.id, message.from_user.id)
-
-    # Mentioning another member ends this sender's Alexa conversation immediately.
-    # Do not let a simultaneous Alexa name/mention override that hand-off.
     if _message_mentions_another_member(message, text):
         _active_conversations.discard(session_key)
         return False
 
-    # Repeated messages from the same sender bypass the short per-user guard,
-    # so each message in an active burst can receive its own distinct reply.
-    spam_burst = _is_repeated_sender_burst(message)
-    if (
-        not spam_burst
-        and time.monotonic() - _last_alexa_reply_at.get(session_key, 0.0)
-        < _ALEXA_REPLY_COOLDOWN_SECONDS
-    ):
-        return False
-
+    # Replying directly to Alexa is an explicit conversational address.
     replied = message.reply_to_message
     if replied and replied.from_user and replied.from_user.id == message.bot.id:
-        _active_conversations.add(session_key)
         return True
-
-    # Replies to another member are not Alexa triggers or session continuations.
+    # A reply to another member is never an Alexa trigger.
     if replied and replied.from_user and replied.from_user.id != message.bot.id:
         _active_conversations.discard(session_key)
         return False
+
+    # Telegram's hidden text_mention entity is an explicit mention even when
+    # the message text contains no visible @username.
+    for entity in (message.entities or []):
+        entity_type = getattr(entity.type, "value", entity.type)
+        mentioned_user = getattr(entity, "user", None)
+        if entity_type == "text_mention" and mentioned_user and mentioned_user.id == message.bot.id:
+            return True
 
     if _bot_username is None:
         try:
@@ -669,28 +666,20 @@ async def is_alexa_trigger(message: Message) -> bool:
             _bot_username = (me.username or "").casefold()
         except Exception:
             _bot_username = ""
-
     if _bot_username and re.search(
-        rf"(?<!\w)@{re.escape(_bot_username)}\b", text, re.IGNORECASE
+        rf"(?<![\w@])@{re.escape(_bot_username)}(?![A-Za-z0-9_])",
+        text,
+        re.IGNORECASE,
     ):
         return True
 
-    # An earlier mention must not turn every later unmentioned message into
-    # an automatic reply. Only a fresh Alexa call/reply bypasses group pacing.
-
-    # Recognize Alexa's name anywhere in a group message, not only at the start.
-    # This makes natural phrases like "yaar Alexa zara help" trigger reliably.
+    # Calling Alexa by name is also an explicit address, wherever it appears.
     if re.search(r"(?i)(?<!\w)alexa(?!\w)", text):
         return True
 
-    if _ALEXA_PREFIX_RE.match(text):
-        return True
-
-    # Unaddressed messages are limited to simple greetings only.
-    if not _should_smart_reply(message, text):
-        return False
-
-    return True
+    # No unsolicited greetings, smart replies, or sticky sessions in groups.
+    _active_conversations.discard(session_key)
+    return False
 
 
 async def _ask_ai_with_typing(
