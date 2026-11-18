@@ -479,7 +479,7 @@ def _smart_group_reply_fallback(user_text: str) -> str:
 
 def _message_mentions_another_member(message: Message, text: str) -> bool:
     """Detect visible and hidden Telegram mentions of anyone except Alexa."""
-    for entity in (message.entities or []):
+    for entity in (message.entities or message.caption_entities or []):
         entity_type = getattr(entity.type, "value", entity.type)
         if entity_type == "text_mention" and entity.user:
             if entity.user.id != message.bot.id:
@@ -639,6 +639,12 @@ async def is_alexa_trigger(message: Message) -> bool:
         return False
 
     session_key = (message.chat.id, message.from_user.id)
+    if _bot_username is None:
+        try:
+            me = await message.bot.get_me()
+            _bot_username = (me.username or "").casefold()
+        except Exception:
+            _bot_username = ""
     if _message_mentions_another_member(message, text):
         _active_conversations.discard(session_key)
         return False
@@ -660,12 +666,6 @@ async def is_alexa_trigger(message: Message) -> bool:
         if entity_type == "text_mention" and mentioned_user and mentioned_user.id == message.bot.id:
             return True
 
-    if _bot_username is None:
-        try:
-            me = await message.bot.get_me()
-            _bot_username = (me.username or "").casefold()
-        except Exception:
-            _bot_username = ""
     if _bot_username and re.search(
         rf"(?<![\w@])@{re.escape(_bot_username)}(?![A-Za-z0-9_])",
         text,
