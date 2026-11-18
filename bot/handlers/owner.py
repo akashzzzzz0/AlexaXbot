@@ -338,8 +338,8 @@ async def toggle_owner_ai_chat(callback: CallbackQuery, db_session: AsyncSession
     builder.button(text="◀️ Owner Panel", callback_data="owner:menu")
     builder.adjust(1)
     await callback.message.edit_text(
-        "💬 <b>ALEXA AI CHAT CONTROL</b>\\n\\n"
-        f"Status: <b>{'🟢 ON' if enabled else '🔴 OFF'}</b>\\n\\n"
+        "💬 <b>ALEXA AI CHAT CONTROL</b>\n\n"
+        f"Status: <b>{'🟢 ON' if enabled else '🔴 OFF'}</b>\n\n"
         + ("Alexa AI chat replies are enabled." if enabled else "Alexa AI chat replies are paused. Moderation, admin commands, games, and all other bot features remain active."),
         parse_mode="HTML", reply_markup=builder.as_markup(),
     )
