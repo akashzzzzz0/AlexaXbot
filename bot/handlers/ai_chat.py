@@ -56,7 +56,7 @@ def _detect_user_gender_style(history, current_text: str) -> str:
 
 def _reaction_for_text(text: str) -> str | None:
     """Understand meaningful words and emojis before choosing a selective reaction."""
-    value = re.sub(r"\s+", " ", text.casefold()).strip()
+    value = re.sub(r"\s+", " ", (text or "").casefold()).strip()
     if not value:
         return None
 
@@ -522,36 +522,58 @@ def _is_repeated_sender_burst(message: Message, now: float | None = None) -> boo
 
 
 def _should_smart_reply(message: Message, text: str) -> bool:
-    """Reply to relevant messages; repeated sender bursts bypass pacing."""
-    is_greeting = _looks_like_smart_reply_candidate(text)
+    """Occasionally join a quiet group's conversation without interrupting people."""
+    if not message.from_user or _message_mentions_another_member(message, text):
+        return False
 
-    # A message addressed to another member is never an Alexa invitation.
-    if _message_mentions_another_member(message, text):
+    # A reply to another member is a private conversation, not an invitation.
+    replied = message.reply_to_message
+    if replied and replied.from_user and replied.from_user.id != message.bot.id:
         return False
 
     now = time.monotonic()
     chat_id = message.chat.id
-    user_id = message.from_user.id if message.from_user else 0
-    user_key = (chat_id, user_id)
-    spam_burst = _is_repeated_sender_burst(message, now)
+    user_key = (chat_id, message.from_user.id)
+    is_greeting = _looks_like_smart_reply_candidate(text)
+    value = re.sub(r"\s+", " ", (text or "").casefold()).strip()
+    words = re.findall(r"[\w']+", value)
 
-    # Keep the existing sixth-message cadence for ordinary messages.
-    # Once a member sends a burst, each message in that burst can be answered.
+    # If multiple people are actively talking, Alexa waits for a direct call.
+    if _group_conversation_is_active(chat_id):
+        return False
+
+    # Ignore tiny acknowledgements, repeated punctuation, and low-context noise.
     if not is_greeting:
-        _smart_reply_message_count[chat_id] += 1
-        if not spam_burst and _smart_reply_message_count[chat_id] % 6 != 0:
+        if len(words) < 4:
+            return False
+        meaningful_signal = bool(
+            "?" in value
+            or re.search(
+                r"\b(kya|kaise|kaisa|kyun|kab|kahan|kon|kaun|what|why|when|where|who|how|"
+                r"help|madad|suggest|opinion|congrats|mubarak|shabash|well done|"
+                r"funny|mazaak|mazak|haha|lol|sad|dukhi|pareshan|mood off|"
+                r"amazing|zabardast|kamal|wow|seriously|really)\b",
+                value,
+            )
+        )
+        # Only clear questions, requests, or expressive updates are candidates.
+        if not meaningful_signal:
             return False
 
-    # Normal conversation keeps its independent per-group and per-user pacing.
-    # Repeated messages from the same sender intentionally bypass both gates.
-    if not spam_burst:
-        last_group_reply = _smart_reply_last_check.get(chat_id)
-        if last_group_reply is not None and now - last_group_reply < _SMART_REPLY_GROUP_COOLDOWN_SECONDS:
-            return False
+    # Never let a rapid message burst bypass the anti-annoyance limits.
+    last_group = _smart_reply_last_check.get(chat_id, 0.0)
+    if now - last_group < 120.0:
+        return False
+    last_user = _smart_reply_user_last_check.get(user_key, 0.0)
+    if now - last_user < 300.0:
+        return False
 
-        last_user_check = _smart_reply_user_last_check.get(user_key)
-        if last_user_check is not None and now - last_user_check < _SMART_REPLY_USER_COOLDOWN_SECONDS:
-            return False
+    # Greetings can occasionally start a friendly moment; meaningful messages
+    # get a lower chance so Alexa feels present without dominating the group.
+    chance = 0.28 if is_greeting else (0.24 if "?" in value else 0.12)
+    if random.random() >= chance:
+        return False
+
     _smart_reply_user_last_check[user_key] = now
     return True
 
@@ -1189,5 +1211,4 @@ async def _process_alexa_ai_chat(message: Message) -> None:
         # Any Alexa reply starts the one-minute group cooldown. A direct
         # mention/name call can still bypass it without affecting other groups.
         _smart_reply_last_check[message.chat.id] = replied_at
-    asyncio.create_task(_maybe_send_sticker(message, text))
 
