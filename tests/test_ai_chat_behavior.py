@@ -86,18 +86,41 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
             get_rankings.assert_not_awaited()
         asyncio.run(scenario())
 
-    def test_untagged_group_messages_from_any_member_trigger_chat(self):
+    def test_untagged_group_greetings_and_normal_messages_stay_silent(self):
         for index, text in enumerate((
             "hi", "hello", "good morning", "good afternoon",
             "good evening", "good night", "morning", "afternoon",
-            "evening", "gm", "gn",
+            "evening", "gm", "gn", "kya haal hai?", "nice",
         )):
             with self.subTest(text=text):
-                # Each sample represents a fresh group so the intentional
-                # per-group anti-spam cooldown does not suppress later samples.
-                self.assertTrue(asyncio.run(
+                self.assertFalse(asyncio.run(
                     ai_chat.is_alexa_trigger(_group_message(text, chat_id=-100123-index))
                 ))
+
+    def test_explicit_alexa_name_and_username_mentions_trigger_group_chat(self):
+        ai_chat._bot_username = "alexasuper_bot"
+        for text in ("Alexa kya haal hai?", "oye Alexa suno", "Hi @AlexaSuper_Bot"):
+            with self.subTest(text=text):
+                self.assertTrue(asyncio.run(
+                    ai_chat.is_alexa_trigger(_group_message(text))
+                ))
+
+    def test_hidden_text_mention_of_alexa_triggers_group_chat(self):
+        message = _group_message("kya haal hai")
+        message.entities = [SimpleNamespace(
+            type="text_mention",
+            user=SimpleNamespace(id=message.bot.id, is_bot=True),
+        )]
+        self.assertTrue(asyncio.run(ai_chat.is_alexa_trigger(message)))
+
+    def test_reply_to_alexa_triggers_but_sticky_session_does_not(self):
+        message = _group_message("haan, batao")
+        ai_chat._active_conversations.add((message.chat.id, message.from_user.id))
+        self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(message)))
+        message.reply_to_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=message.bot.id, is_bot=True)
+        )
+        self.assertTrue(asyncio.run(ai_chat.is_alexa_trigger(message)))
 
     def test_private_captioned_message_can_trigger_alexa(self):
         message = _group_message("ignored")
@@ -128,15 +151,14 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
                     ai_chat.is_alexa_trigger(_group_message(text, chat_id=-100900-index))
                 ))
 
-    def test_group_smart_reply_cooldowns_prevent_spam(self):
-        message = _group_message("hello")
-        self.assertTrue(asyncio.run(ai_chat.is_alexa_trigger(message)))
-        # A different sender is subject to the group cooldown, not same-sender burst bypass.
+    def test_unmentioned_messages_remain_silent_without_group_cooldowns(self):
+        first = _group_message("hello")
         second = _group_message("kya scene hai?")
         second.from_user = SimpleNamespace(id=67890, is_bot=False)
+        self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(first)))
         self.assertFalse(asyncio.run(ai_chat.is_alexa_trigger(second)))
 
-    def test_smart_reply_ignores_active_member_to_member_conversation(self):
+    def test_active_member_conversation_does_not_enable_unmentioned_alexa(self):
         chat_id = -100555
         ai_chat._group_recent_activity[chat_id].clear()
         ai_chat._group_recent_activity[chat_id].append((__import__("time").monotonic(), 111))
@@ -209,12 +231,15 @@ class AlexaGroupChatBehaviorTests(unittest.TestCase):
         ai_chat._history_loaded.discard(key)
 
 
-    def test_oy_oye_are_group_greeting_triggers(self):
+    def test_oy_oye_without_alexa_are_not_group_triggers(self):
         for index, text in enumerate(("oy", "oyyy", "oye", "oyeee")):
             with self.subTest(text=text):
-                self.assertTrue(asyncio.run(
+                self.assertFalse(asyncio.run(
                     ai_chat.is_alexa_trigger(_group_message(text, chat_id=-100800-index))
                 ))
+        self.assertTrue(asyncio.run(
+            ai_chat.is_alexa_trigger(_group_message("Oye Alexa", chat_id=-100899))
+        ))
 
     def test_good_morning_gets_a_natural_reply_and_repeats_are_contextual(self):
         first = ai_chat._short_social_reply("Good morning", [])
