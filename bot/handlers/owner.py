@@ -1754,8 +1754,8 @@ async def toggle_maintenance(callback: CallbackQuery, _: callable, db_session: A
     _maintenance_mode = enabled
 
     await callback.message.edit_text(
-        "🔧 <b>GLOBAL MAINTENANCE CONTROL</b>\\n\\n"
-        f"Status: <b>{'🔴 ON' if enabled else '🟢 OFF'}</b>\\n\\n"
+        "🔧 <b>GLOBAL MAINTENANCE CONTROL</b>\n\n"
+        f"Status: <b>{'🔴 ON' if enabled else '🟢 OFF'}</b>\n\n"
         + (
             "All user-facing bot interactions are paused. AI chat and group moderation "
             "are stopped. Only this private owner control remains available."
