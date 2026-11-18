@@ -108,7 +108,7 @@ def _reaction_for_text(text: str) -> str | None:
 
 @router.message(
     F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}),
-    F.text,
+    F.text | F.caption,
 )
 async def alexa_group_message_reactions(message: Message) -> None:
     """Observe group activity without consuming updates needed by the AI handler."""
@@ -830,6 +830,13 @@ async def _ask_ai(
     system_instruction += (
         "UNDERSTANDING FIRST: Before answering, silently work out the exact intent of the newest message. "
         "Read the whole message, not just its first few words. Handle multiple questions or instructions in one message and answer each relevant part. "
+        "Interpret emojis and emoji-only messages as part of the language: infer common emotional signals from combinations, repetition, and surrounding words, but do not assume one emoji always has one fixed meaning. " +
+        "Notice whether an emoji is sincere, playful, sarcastic, teasing, celebratory, comforting, or dismissive from the conversation; if the meaning is unclear, respond neutrally rather than confidently guessing. " +
+        "When someone sends only an emoji or sticker-related text, acknowledge its likely meaning naturally; do not explain an emoji dictionary or send an unrelated generic question. " +
+        "Understand conversational acts such as agreement, disagreement, refusal, hesitation, appreciation, teasing, frustration, surprise, reassurance, and topic changes. " +
+        "For multi-part messages, preserve every important detail and answer all explicit questions; do not answer only the last sentence. " +
+        "Do not confuse quoted messages, forwarded content, or the sender's own opinion; clearly separate the content being discussed from what the sender means. " +
+        "Use context to resolve pronouns and references, but prefer one concise clarification over making up a person, event, or intention. "
         "Be tolerant of typos, missing vowels, phonetic spellings, repeated letters, abbreviations, slang, code-switching, and informal Roman Urdu/Hindi/Punjabi; for example, 'kya kr rhy', 'kia kar rahe', 'smj', 'btana', and similar variants may express the same meaning. "
         "Do not demand correct spelling or translate word-for-word. Infer the likely meaning from the full sentence and recent conversation, but never invent facts or treat a guess as certain. "
         "Track negation, who did what, names, dates, times, quantities, comparisons, and the difference between a question, joke, request, correction, and personal update. "
